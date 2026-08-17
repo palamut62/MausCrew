@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import { KeyRound, Monitor, User, Volume2, X } from "lucide-react";
 import { useStore, type AppSettingsSection } from "@/state/store";
-import { ApiKeyRow } from "./ApiKeys";
+import { ApiKeyRow, DeepSeekOptions } from "./ApiKeys";
 import { useUpdaterState } from "@/lib/updater";
 import { LocalComputerSection } from "./LocalComputerSection";
 import { Card } from "./SettingsPrimitives";
@@ -209,6 +209,12 @@ export function SettingsModal() {
                   <ApiKeyRow section="composio" />
                   <ApiKeyRow section="box" />
                   <ApiKeyRow section="opencodeGo" />
+                  <div>
+                    <ApiKeyRow section="deepseekHarness" />
+                    {/* endpoint and telemetry belong to this key, so they sit
+                        inside its row rather than as free-floating settings */}
+                    <DeepSeekOptions />
+                  </div>
                 </div>
               </Card>
             )}

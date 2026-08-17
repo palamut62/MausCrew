@@ -1,0 +1,15 @@
+# Python dependencies for server/bridges/deepseek/bridge.py.
+#
+# Pinned exactly, not floated. The bridge protocol version this build speaks
+# is validated against one SDK release; a newer SDK can change the runtime's
+# notification shapes, which is precisely what the handshake exists to catch.
+# Bump this together with PROTOCOL_VERSION only after re-running the driver's
+# live-SDK tests.
+#
+# Install for the interpreter configured in Settings → Engines → DeepSeek
+# Harness (on Windows, inside the WSL distribution):
+#
+#     python3 -m pip install --pre -r requirements-deepseek.txt
+#
+# The SDK is still pre-release, so --pre is required.
+deepseek-harness-sdk==0.1.0rc6

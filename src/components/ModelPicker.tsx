@@ -2,7 +2,7 @@
 // Routing is by exact instanceId only — an entry is never inferred from a
 // driver kind, and unavailable instances render disabled with the reason.
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown, TriangleAlert } from "lucide-react";
 import { useStore, type Bot, type InstanceInfo } from "@/state/store";
 import { ProviderMark } from "./ProviderIcons";
 import { EngineSetup, needsSignIn } from "./EngineSetup";
@@ -126,6 +126,19 @@ export function ModelPicker({ bot, className }: { bot: Bot; className?: string }
                       ? (railInstance.snapshot.version ?? "ready")
                       : (railInstance.snapshot.reason ?? "sign-in required")}
                   </div>
+                  {/* A working engine can still have something the user needs
+                      to know — a bot pointed at a third-party endpoint is
+                      "available" and is also sending that host an API key.
+                      Reporting it only on failure would hide exactly the case
+                      where nothing looks wrong. */}
+                  {railInstance.snapshot.state === "available" &&
+                    railInstance.snapshot.authenticated !== false &&
+                    railInstance.snapshot.reason && (
+                      <div className="mt-1 flex gap-1.5 rounded-lg border border-warning/25 bg-warning/10 px-2 py-1.5 text-[10.5px] leading-[1.4] text-warning">
+                        <TriangleAlert size={12} className="mt-px shrink-0" aria-hidden="true" />
+                        <span>{railInstance.snapshot.reason}</span>
+                      </div>
+                    )}
                 </div>
                 {/* An unavailable engine used to be a dead end here: dimmed
                     rows and the reason hidden in a tooltip, at exactly the

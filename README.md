@@ -202,6 +202,33 @@ Requirements: **macOS, Windows, or Ubuntu 24.04 x64**, **Node 24+**, **pnpm**, a
 [`codex`](https://github.com/openai/codex), or [`grok`](https://x.ai/cli) — installed and logged in. They appear
 in the model picker automatically.
 
+### DeepSeek Harness (optional engine)
+
+DeepSeek Harness is the one engine that is not a CLI. It runs through a Python
+bridge (`server/bridges/deepseek/bridge.py`) that OpenMausBot starts and keeps
+alive per bot, so it needs Python 3.10+ and the SDK rather than a binary on
+PATH:
+
+```sh
+python3 -m pip install --pre -r server/bridges/deepseek/requirements-deepseek.txt
+```
+
+Then add a DeepSeek API key in Settings → Engines → DeepSeek Harness. The
+engine is **disabled by default** and appears in the model picker once a key
+is set.
+
+| Platform | Support |
+| --- | --- |
+| Linux x64 / ARM64 | native |
+| macOS ARM64 | native |
+| macOS x64 | not supported — no runtime wheel |
+| Windows | **WSL2 only** — install the SDK inside your distribution and set the runtime mode to WSL |
+
+Current limits, reported honestly rather than faked: no tool-approval prompts
+(so the agent is confined to a scoped workspace and refuses to run anywhere
+wider), no mid-turn cancellation, and no in-session model switching. See
+[`server/bridges/deepseek/README.md`](server/bridges/deepseek/README.md).
+
 Package the desktop application:
 
 ```sh
