@@ -5,7 +5,7 @@
 // the shadow-instance behavior end to end while it's at it.
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer, request, type Server } from "node:http";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -243,7 +243,7 @@ describe("harness HTTP API", () => {
     const empty = await api("GET", `/api/bots/${bot.id}/skills`);
     expect(empty.status).toBe(200);
     expect(empty.body.skills).toEqual([]);
-    expect(empty.body.rootPath).toBe(join(workspacePath, ".agents", "skills"));
+    expect(empty.body.rootPath).toBe(realpathSync(join(workspacePath, ".agents", "skills")));
 
     const invalid = await api("POST", `/api/bots/${bot.id}/skills`, {
       name: "../escape",
