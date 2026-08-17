@@ -1,6 +1,7 @@
 import type { WebhookCredential } from "./webhooks.js";
 
-const KEY = "omb-webhook-credentials";
+const KEY = "mauscrew-webhook-credentials";
+const LEGACY_KEY = "omb-webhook-credentials";
 
 type Store = Pick<Storage, "getItem" | "setItem"> | undefined;
 
@@ -17,7 +18,7 @@ function isCredential(value: unknown): value is WebhookCredential {
  * relaunching the desktop app does not force a surprise secret rotation. */
 export function loadWebhookCredentials(store: Store): Record<string, WebhookCredential> {
   try {
-    const raw = store?.getItem(KEY);
+    const raw = store?.getItem(KEY) ?? store?.getItem(LEGACY_KEY);
     const parsed = raw ? JSON.parse(raw) : null;
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
     return Object.fromEntries(

@@ -153,7 +153,7 @@ describe("ACP turns (fake CLI)", () => {
   beforeEach(() => {
     ensureDirs();
     chmodSync(FAKE_CLI, 0o755);
-    scratch = mkdtempSync(join(tmpdir(), "omb-acp-test-"));
+    scratch = mkdtempSync(join(tmpdir(), "mauscrew-acp-test-"));
   });
 
   afterEach(async () => {
@@ -503,7 +503,7 @@ describe("ACP snapshot", () => {
   });
 
   it("kimi checks KIMI_CODE_HOME before the child HOME", async () => {
-    const scratch = mkdtempSync(join(tmpdir(), "omb-kimi-auth-"));
+    const scratch = mkdtempSync(join(tmpdir(), "mauscrew-kimi-auth-"));
     const kimiHome = join(scratch, "custom-kimi-home");
     const childHome = join(scratch, "child-home");
     mkdirSync(join(childHome, ".kimi-code", "credentials"), { recursive: true });
@@ -528,7 +528,7 @@ describe("ACP snapshot", () => {
   });
 
   it("droid resolves the signed-in CLI before falling back to FACTORY_API_KEY", async () => {
-    const scratch = mkdtempSync(join(tmpdir(), "omb-droid-auth-"));
+    const scratch = mkdtempSync(join(tmpdir(), "mauscrew-droid-auth-"));
     // FACTORY_HOME_OVERRIDE replaces the CLI's HOME, not its data root: droid
     // writes <home>/.factory/auth.v2.file either way (verified against 0.196.0).
     const overrideHome = join(scratch, "custom-home");
@@ -591,7 +591,7 @@ describe("ACP snapshot", () => {
   });
 
   it("droid reads custom models, favourites order, and the configured default", async () => {
-    const scratch = mkdtempSync(join(tmpdir(), "omb-droid-models-"));
+    const scratch = mkdtempSync(join(tmpdir(), "mauscrew-droid-models-"));
     mkdirSync(join(scratch, ".factory"), { recursive: true });
     writeFileSync(
       join(scratch, ".factory", "settings.json"),
@@ -627,7 +627,7 @@ describe("ACP snapshot", () => {
   });
 
   it("droid falls back to the built-in catalog when settings.json is unreadable", async () => {
-    const scratch = mkdtempSync(join(tmpdir(), "omb-droid-nosettings-"));
+    const scratch = mkdtempSync(join(tmpdir(), "mauscrew-droid-nosettings-"));
     mkdirSync(join(scratch, ".factory"), { recursive: true });
     writeFileSync(join(scratch, ".factory", "settings.json"), "{ not json");
 
@@ -648,7 +648,7 @@ describe("ACP snapshot", () => {
   });
 
   it("kimi resolves default credentials from the child HOME", async () => {
-    const scratch = mkdtempSync(join(tmpdir(), "omb-kimi-home-"));
+    const scratch = mkdtempSync(join(tmpdir(), "mauscrew-kimi-home-"));
     const credentialDir = join(scratch, ".kimi-code", "credentials");
     mkdirSync(credentialDir, { recursive: true });
     writeFileSync(join(credentialDir, "kimi-code.json"), "{}");

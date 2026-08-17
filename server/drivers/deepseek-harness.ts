@@ -10,6 +10,7 @@
 // Everything the bridge cannot honestly do is reported as unsupported rather
 // than approximated (spec §54). In this phase that means no in-session model
 // switching, and cancellation that says which of its two forms it took.
+import { createHash } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 
 import type {
@@ -36,7 +37,7 @@ import { NativeDeepSeekBridge, checkNativeLaunch } from "./deepseek/native-bridg
 import type { BridgeMessage } from "./deepseek/bridge-protocol.ts";
 import { mapMessage, isSuccessfulFinish, isTerminal } from "./deepseek/event-mapper.ts";
 import { catalogFor, discoverModels, MODELS } from "./deepseek/model-catalog.ts";
-import { probeSdk } from "./deepseek/process-manager.ts";
+import { probeSdk, resolveBundledRuntime, runtimePath } from "./deepseek/process-manager.ts";
 import { defaultWorkspaceFor, sessionIdFor, sessionRootFor } from "./deepseek/session-manager.ts";
 import { DeepSeekBridgeError, describeError, toRuntimeError } from "./deepseek/errors.ts";
 
@@ -66,11 +67,14 @@ export const deepSeekHarnessDriver: ProviderDriver<DeepSeekHarnessConfig> = {
   metadata: { displayName: "DeepSeek Harness", supportsMultipleInstances: true },
   install: {
     command: {
-      darwin: "python3 -m pip install --pre deepseek-harness-sdk",
-      linux: "python3 -m pip install --pre deepseek-harness-sdk",
-      // no native Windows runtime wheel exists; the install has to happen
-      // inside the WSL distribution the driver will call into (spec §8)
-      win32: "wsl python3 -m pip install --pre deepseek-harness-sdk",
+      darwin:
+        "python3 -m venv ~/.mauscrew/runtimes/deepseek/venv && ~/.mauscrew/runtimes/deepseek/venv/bin/python -m pip install --pre deepseek-harness-sdk==0.1.0rc6 deepseek-harness-runtime-bin==0.1.0rc6",
+      linux:
+        "python3 -m venv ~/.mauscrew/runtimes/deepseek/venv && ~/.mauscrew/runtimes/deepseek/venv/bin/python -m pip install --pre deepseek-harness-sdk==0.1.0rc6 deepseek-harness-runtime-bin==0.1.0rc6",
+      // no native Windows runtime wheel exists; create the managed carrier
+      // inside the default WSL distribution the driver will call (spec §8)
+      win32:
+        'wsl.exe sh -lc "python3 -m venv ~/.mauscrew/runtimes/deepseek/venv && ~/.mauscrew/runtimes/deepseek/venv/bin/python -m pip install --pre deepseek-harness-sdk==0.1.0rc6 deepseek-harness-runtime-bin==0.1.0rc6"',
     },
     docsUrl: "https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/guide/python-sdk.md",
   },
@@ -88,7 +92,20 @@ export async function createDeepSeekInstance(
   options: DeepSeekInstanceOptions = {},
 ): Promise<ProviderInstance> {
   {
-    const { instanceId, config, environment } = input;
+    const { instanceId, environment } = input;
+    let config = input.config;
+    let bundledRuntimeReason = "";
+    if (
+      config.runtime.strategy === "bundled"
+      && config.transport.mode === "native"
+      && config.transport.launchArgs.length === 0
+    ) {
+      const resolved = await resolveBundledRuntime(config);
+      bundledRuntimeReason = resolved.reason ?? "";
+      if (resolved.launchArgs.length) {
+        config = { ...config, transport: { ...config.transport, launchArgs: resolved.launchArgs } };
+      }
+    }
     const apiKey = environment[config.apiKeyEnv] ?? "";
     const sessionRoot = sessionRootFor(instanceId, config.sessionRoot);
 
@@ -106,6 +123,12 @@ export async function createDeepSeekInstance(
      * (spec §17) because the runtime keys its sessions independently. */
     const byThread = new Map<ThreadId, ActiveTurn>();
     const startedSessions = new Set<ThreadId>();
+    /** Runtime session id chosen for each thread in this process incarnation.
+     * rc6's JSON-RPC server always calls agents.create(), even when a durable
+     * log with that id already exists. On a fresh MausCrew instance we use a
+     * history-derived incarnation id and replay the active transcript once;
+     * later turns stay on that same live runtime session. */
+    const runtimeSessionByThread = new Map<ThreadId, string>();
     /** Runtime session id → thread, so a request written by the plugin finds
      * the conversation it belongs to. Populated on every turn rather than
      * derived by parsing, because the id format is ours to change. */
@@ -221,6 +244,7 @@ export async function createDeepSeekInstance(
         apiKey,
         sessionRoot,
         instanceEnv: environment,
+        approvalChannelActive: approvalsEnabled,
         cwd: currentWorkspace,
         ...(options.scriptPath ? { scriptPath: options.scriptPath } : {}),
       }),
@@ -261,6 +285,10 @@ export async function createDeepSeekInstance(
         },
         onExit: ({ expected, code, stderr }) => {
           if (expected) return;
+          // The next process cannot reopen rc6's existing runtime session id;
+          // choose a replay incarnation on the next dispatched turn.
+          startedSessions.clear();
+          runtimeSessionByThread.clear();
           const detail = stderr.trim().slice(-300) || `exit code ${code}`;
           const { message, setup } = describeError("bridge_crashed", detail);
           for (const turn of [...byRequest.values()]) {
@@ -304,6 +332,8 @@ export async function createDeepSeekInstance(
         return;
       }
       await bridge.cancelHard();
+      startedSessions.clear();
+      runtimeSessionByThread.clear();
     };
 
     function emitBridgeError(detail: string): void {
@@ -339,14 +369,6 @@ export async function createDeepSeekInstance(
       async sendTurn(turnInput: SendTurnInput): Promise<TurnStartResult> {
         if (disposed) throw new DeepSeekBridgeError("bridge_crashed", "this provider instance was disposed");
 
-        // §36. The approval broker exists now, but a broker is not a
-        // sandbox: `container` and `custom` name isolation this driver does
-        // not provide, and honoring them would be claiming a boundary that
-        // is not there (§54). Still refused, and still not downgraded.
-        if (config.sandbox.mode !== "workspace") {
-          const { message } = describeError("sandbox_refused", `sandbox mode "${config.sandbox.mode}"`);
-          throw new DeepSeekBridgeError("sandbox_refused", message);
-        }
         if (!apiKey) {
           const { message } = describeError("credentials_missing");
           throw new DeepSeekBridgeError("credentials_missing", message);
@@ -367,19 +389,34 @@ export async function createDeepSeekInstance(
         // process serves every thread and restarting under a sibling turn
         // would kill that turn to add a tool to this one.
         const mounts = mountsFor(turnInput.integrations, support);
-        const fingerprint = mountFingerprint(mounts);
-        let mountNote = "";
+        const requestedDynamicCordis = turnInput.runtimeFeatures?.dynamicCordis === true;
+        // Dynamic Package code is allowed only when our own approval plugin
+        // and live mailbox are both known to be present. A custom composition
+        // may have a gate, but we cannot prove or answer it, so never append a
+        // code runner to that unknown policy surface.
+        const runtimeFeatures = {
+          ...turnInput.runtimeFeatures,
+          dynamicCordis: requestedDynamicCordis && approvalsEnabled,
+        };
+        const fingerprint = mountFingerprint(mounts, runtimeFeatures);
+        let mountNote = requestedDynamicCordis && !approvalsEnabled
+          ? "Dynamic Cordis was not enabled because this provider is not using MausCrew's active approval composition. Restore the bundled composition with approval policy Ask before enabling dynamic plugin code."
+          : "";
         if (fingerprint !== mountedFingerprint) {
           if (byRequest.size > 0) {
             mountNote =
               "This turn asked for a different set of tools than the running DeepSeek runtime was started with. Another turn is still in flight on this bot, so the runtime was left alone and this turn runs with the tools already mounted. Send this message again once the other turn finishes.";
           } else {
-            if (bridge.status().running) await bridge.stop();
-            mountedComposition = composeFor(config, sessionRoot, mounts);
+            if (bridge.status().running) {
+              await bridge.stop();
+              startedSessions.clear();
+              runtimeSessionByThread.clear();
+            }
+            mountedComposition = composeFor(config, sessionRoot, mounts, runtimeFeatures);
             mountedFingerprint = fingerprint;
-            if (mounts.length > 0 && !mountedComposition) {
+            if ((mounts.length > 0 || runtimeFeatures.dynamicCordis === true) && !mountedComposition) {
               mountNote =
-                "This bot's integrations could not be mounted: mounting them means generating a Cordis composition, and the base composition this bot points at is missing. The turn runs without those tools (App Settings → DeepSeek Harness → composition).";
+                "This bot's DeepSeek runtime extensions could not be mounted: mounting them means generating a Cordis composition, and the base composition this bot points at is missing. The turn runs without those tools (App Settings → DeepSeek Harness → composition).";
               mountedFingerprint = "";
             }
           }
@@ -387,6 +424,15 @@ export async function createDeepSeekInstance(
 
         if (!bridge.status().running) currentWorkspace = workspace;
 
+        const runtimeSessionId = sessionForTurn(
+          instanceId,
+          turnInput.threadId,
+          turnInput.transcript,
+          runtimeSessionByThread,
+        );
+        const prompt = startedSessions.has(turnInput.threadId)
+          ? turnInput.text
+          : replayPrompt(turnInput.transcript, turnInput.text);
         const turn: ActiveTurn = {
           turnId: newId(),
           threadId: turnInput.threadId,
@@ -395,7 +441,7 @@ export async function createDeepSeekInstance(
         };
         byThread.set(turn.threadId, turn);
         byRequest.set(turn.requestId, turn);
-        threadBySession.set(sessionIdFor(instanceId, turn.threadId), turn.threadId);
+        threadBySession.set(runtimeSessionId, turn.threadId);
 
         try {
           await bridge.ensureStarted();
@@ -403,11 +449,11 @@ export async function createDeepSeekInstance(
             type: "turn.start",
             requestId: turn.requestId,
             threadId: turn.threadId,
-            sessionId: sessionIdFor(instanceId, turn.threadId),
-            prompt: turnInput.text,
+            sessionId: runtimeSessionId,
+            prompt,
             model: turnInput.model || config.defaultModel,
             maxTokens: config.maxTokens,
-            cwd: workspace,
+            cwd: runtimePath(config, workspace),
             ...(turnInput.system ? { system: turnInput.system } : {}),
           });
         } catch (error) {
@@ -455,7 +501,7 @@ export async function createDeepSeekInstance(
         if (!approvalsEnabled) {
           throw new DeepSeekBridgeError(
             "sandbox_refused",
-            "This bot has no approval broker composed, so there is nothing to answer. Point it at the composition OpenMausBot ships to turn approvals on.",
+            "This bot has no approval broker composed, so there is nothing to answer. Point it at the composition MausCrew ships to turn approvals on.",
           );
         }
         // The id has to belong to this thread. A permission granted from the
@@ -537,7 +583,12 @@ export async function createDeepSeekInstance(
         if (native) {
           const launch = checkNativeLaunch(config.transport.launchArgs, config.runtime.mode === "wsl");
           if (!launch.ok) {
-            return { state: "unavailable", reason: launch.reason ?? "the native transport is not configured", authenticated: Boolean(apiKey), version: null };
+            return {
+              state: "unavailable",
+              reason: bundledRuntimeReason || launch.reason || "the native transport is not configured",
+              authenticated: Boolean(apiKey),
+              version: null,
+            };
           }
           if (!apiKey) {
             return { state: "unavailable", reason: describeError("credentials_missing").message, authenticated: false, version: null };
@@ -570,6 +621,54 @@ export async function createDeepSeekInstance(
       },
     };
   }
+}
+
+const MAX_REPLAY_CHARS = 64 * 1024;
+
+/** Pick one runtime-native id for this process incarnation. The suffix is a
+ * digest only — no conversation content reaches a filename or a log path. */
+function sessionForTurn(
+  instanceId: string,
+  threadId: ThreadId,
+  transcript: SendTurnInput["transcript"],
+  live: Map<ThreadId, string>,
+): string {
+  const existing = live.get(threadId);
+  if (existing) return existing;
+  const base = sessionIdFor(instanceId, threadId);
+  const history = replayHistory(transcript);
+  const id = history
+    ? `${base}:replay-${createHash("sha256").update(history).digest("hex").slice(0, 12)}`
+    : base;
+  live.set(threadId, id);
+  return id;
+}
+
+/** rc6 cannot resume an existing JSON-RPC session across processes. Replay
+ * only on the first turn of a fresh process; once the session is live, the
+ * runtime remains the source of truth and receives only the new message. */
+function replayPrompt(transcript: SendTurnInput["transcript"], current: string): string {
+  const history = replayHistory(transcript);
+  if (!history) return current;
+  return [
+    "MausCrew restored the active conversation after the DeepSeek runtime restarted.",
+    "Treat the following role-labelled text as prior conversation history.",
+    "<conversation-history>",
+    history,
+    "</conversation-history>",
+    "<current-user-message>",
+    current,
+    "</current-user-message>",
+  ].join("\n");
+}
+
+function replayHistory(transcript: SendTurnInput["transcript"]): string {
+  if (!transcript?.length) return "";
+  const rendered = transcript
+    .slice(-40)
+    .map(({ role, text }) => `<${role}>\n${text.slice(-16_384)}\n</${role}>`)
+    .join("\n");
+  return rendered.length > MAX_REPLAY_CHARS ? rendered.slice(-MAX_REPLAY_CHARS) : rendered;
 }
 
 /** The timeout in words. Configurable down to a second, so "0 minutes" is a

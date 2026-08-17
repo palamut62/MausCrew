@@ -77,7 +77,7 @@ export function resetPathCache() {
 export function augmentedPath() {
     if (cached === null) {
         cached = mergePaths([
-            ...(process.env.OMB_EXTRA_PATH ? process.env.OMB_EXTRA_PATH.split(delimiter) : []),
+            ...(process.env.MAUSCREW_EXTRA_PATH ? process.env.MAUSCREW_EXTRA_PATH.split(delimiter) : []),
             ...(process.env.PATH ? process.env.PATH.split(delimiter) : []),
             // Both platforms scan their standard install locations; only the
             // login-shell probe below stays unix-only, since Windows has no
@@ -101,10 +101,10 @@ function probeLoginShellPath() {
     const shell = process.env.SHELL || "/bin/zsh";
     // -l -i: nvm and friends live in .zshrc/.bashrc, which only interactive
     // shells read. A marker isolates $PATH from any rc-file noise.
-    execFile(shell, ["-l", "-i", "-c", 'printf "__OMB_PATH__%s" "$PATH"'], { timeout: 5000 }, (err, stdout) => {
+    execFile(shell, ["-l", "-i", "-c", 'printf "__MAUSCREW_PATH__%s" "$PATH"'], { timeout: 5000 }, (err, stdout) => {
         if (err || !stdout)
             return;
-        const m = /__OMB_PATH__([^\n]*)/.exec(stdout);
+        const m = /__MAUSCREW_PATH__([^\n]*)/.exec(stdout);
         if (!m || !m[1])
             return;
         cached = mergePaths([...(cached ?? "").split(delimiter), ...m[1].split(delimiter)]);

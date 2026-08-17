@@ -91,7 +91,7 @@ describe("transport parity: python bridge vs native JSON-RPC", () => {
   };
 
   beforeEach(() => {
-    scratch = mkdtempSync(join(tmpdir(), "omb-dsh-parity-"));
+    scratch = mkdtempSync(join(tmpdir(), "mauscrew-dsh-parity-"));
     live = [];
     recorders = [];
   });
@@ -227,6 +227,13 @@ describe("transport parity: python bridge vs native JSON-RPC", () => {
     // one handshake, two prompts: the same process served both turns
     expect(commands.filter((c: Record<string, unknown>) => c.method === "initialize")).toHaveLength(1);
     expect(commands.filter((c: Record<string, unknown>) => c.method === "session/prompt")).toHaveLength(2);
+  });
+
+  it("settles when the runtime publishes the inbox receipt before the prompt response", async () => {
+    const { instance, recorder } = await open("native", { FAKE_DSH_MODE: "receipt-before-response" });
+    await instance.adapter.sendTurn({ threadId: "receipt-race", text: "hi", cwd: scratch });
+    const done = (await recorder.until((e) => e.type === "turn.completed")) as { ok: boolean };
+    expect(done.ok).toBe(true);
   });
 
   it("refuses a runtime that is not the DeepSeek harness", async () => {

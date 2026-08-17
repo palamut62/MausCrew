@@ -1,14 +1,15 @@
-// OpenMausBot server — the harness host. Clients hold no transports
+// MausCrew server — the harness host. Clients hold no transports
 // (upstream rule): the React app dispatches typed commands over HTTP and
 // folds one SSE event stream; every provider process runs here.
 import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { isIP } from "node:net";
-import { dirname, extname, join } from "node:path";
+import { homedir } from "node:os";
+import { dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { approvalKey, autoDecision } from "./auto-approve.ts";
+import { approvalKey, autoDecision, requiresOneTimeApproval } from "./auto-approve.ts";
 import * as box from "./box.ts";
 import * as composio from "./composio.ts";
 import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts";
@@ -23,10 +24,11 @@ import {
 import { ensureDirs, instanceConfigs, loadConfig, saveConfig, EVENTS_DIR, NATIVE_DIR, type AppConfig } from "./config.ts";
 import { resetPathCache } from "./env-path.ts";
 import { buildNotification, type Notification } from "./notify.ts";
-import { isEffortLevel, type RuntimeEvent } from "./contracts.ts";
+import { isEffortLevel, type RuntimeEvent, type SubagentActivity } from "./contracts.ts";
 
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { describeBaseUrl } from "./drivers/deepseek/config.ts";
+import { defaultWorkspaceFor } from "./drivers/deepseek/session-manager.ts";
 import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type CommsBus } from "./comms-visibility.ts";
 import { discardDelegations, drainDelegations, queueDelegation, type QueueResult } from "./delegations.ts";
 import { EventBus } from "./harness/bus.ts";
@@ -46,13 +48,20 @@ import { readCuaConnection } from "./local-computer.ts";
 import { LocalVmIdleTimer } from "./local-vm-idle.ts";
 import { LocalVmLease } from "./local-vm-lease.ts";
 import { RoutineManager, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts";
+import {
+  createWorkspaceSkill,
+  deleteWorkspaceSkill,
+  listWorkspaceSkills,
+  SkillStoreError,
+  updateWorkspaceSkill,
+} from "./skills.ts";
 import { createTeamManifest, parseTeamManifest } from "./team-manifest.ts";
 import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./webhook-ingress.ts";
 import { WebhookManager } from "./webhooks.ts";
 
-const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
-const WEBHOOK_PORT = Number(process.env.OMB_WEBHOOK_PORT || PORT + 1);
-const STATIC_DIR = process.env.OMB_STATIC_DIR || null;
+const PORT = Number(process.env.MAUSCREW_PORT || 8799);
+const WEBHOOK_PORT = Number(process.env.MAUSCREW_WEBHOOK_PORT || PORT + 1);
+const STATIC_DIR = process.env.MAUSCREW_STATIC_DIR || null;
 const MIME: Record<string, string> = {
   ".html": "text/html",
   ".js": "text/javascript",
@@ -94,11 +103,11 @@ function agentsIntegration(botId: string, threadId: string, depth: number) {
     args: [agentsProxyPath],
     env: {
       ...AGENTS_NODE_FLAG,
-      OMB_HARNESS_URL: `http://127.0.0.1:${PORT}`,
-      OMB_BOT_ID: botId,
-      OMB_THREAD_ID: threadId,
-      OMB_COMMS_TOKEN: COMMS_TOKEN,
-      OMB_TURN_DEPTH: String(depth),
+      MAUSCREW_HARNESS_URL: `http://127.0.0.1:${PORT}`,
+      MAUSCREW_BOT_ID: botId,
+      MAUSCREW_THREAD_ID: threadId,
+      MAUSCREW_COMMS_TOKEN: COMMS_TOKEN,
+      MAUSCREW_TURN_DEPTH: String(depth),
     },
   };
 }
@@ -408,9 +417,18 @@ bus.subscribe((event: RuntimeEvent) => {
           // the whole tool object is replaced, so carry `spoken` across —
           // dropping it here would silently un-narrate every completed tool
           const existing = store.messagesFor(event.threadId).find((m) => m.id === messageId)?.tool;
+          const existingMessage = store.messagesFor(event.threadId).find((m) => m.id === messageId);
           toolName = existing?.name ?? "tool";
+          const mergedSubagent = event.subagent || existingMessage?.subagent
+            ? { ...existingMessage?.subagent, ...event.subagent }
+            : undefined;
+          const subagent =
+            mergedSubagent?.childSessionId && mergedSubagent.status
+              ? (mergedSubagent as SubagentActivity)
+              : undefined;
           const patched = store.patchMessage(event.threadId, messageId, {
             tool: { name: toolName, ok: event.ok, spoken: existing?.spoken },
+            ...(subagent ? { subagent } : {}),
           });
           if (patched) broadcast({ kind: "message.patch", threadId: event.threadId, message: patched });
           toolMessageByItem.delete(itemKey);
@@ -437,6 +455,7 @@ bus.subscribe((event: RuntimeEvent) => {
           role: "bot",
           kind: "activity",
           tool: { name, spoken: narrateTool(name) ?? undefined },
+          ...(event.subagent ? { subagent: event.subagent } : {}),
         });
         if (event.itemId) toolMessageByItem.set(`${event.threadId}:${event.itemId}`, message.id);
       }
@@ -484,7 +503,7 @@ bus.subscribe((event: RuntimeEvent) => {
                 options: ["Allow", "Deny"],
                 requestId,
                 tool,
-                allowKey: approvalKey(tool, summary),
+                allowKey: requiresOneTimeApproval(tool) ? undefined : approvalKey(tool, summary),
                 held: "Auto mode couldn't answer this one.",
               },
             });
@@ -504,9 +523,13 @@ bus.subscribe((event: RuntimeEvent) => {
           tool: permission ? event.tool : undefined,
           // the exact grant "always allow" would remember, decided here so
           // client and server can never derive it differently
-          allowKey: permission ? approvalKey(event.tool, event.summary) : undefined,
+          allowKey: permission && !requiresOneTimeApproval(event.tool) ? approvalKey(event.tool, event.summary) : undefined,
           // in auto mode a card can only mean the guard stopped it — say so
-          held: permission && asker?.autoApprove ? "This looked destructive, so auto mode stopped to ask." : undefined,
+          held: permission && requiresOneTimeApproval(event.tool)
+            ? "Dynamic plugin code always requires one-time approval."
+            : permission && asker?.autoApprove
+              ? "This looked destructive, so auto mode stopped to ask."
+              : undefined,
         },
       });
       if (event.requestId) askMessageByRequest.set(`${event.threadId}:${event.requestId}`, message.id);
@@ -828,7 +851,7 @@ async function startTurn(
       : text;
 
   const persona = [
-    `You are ${bot.name}, a personal bot in OpenMausBot.`,
+    `You are ${bot.name}, a personal bot in MausCrew.`,
     bot.title && `Role: ${bot.title}.`,
     bot.description && `About: ${bot.description}`,
   ]
@@ -889,7 +912,7 @@ async function startTurn(
           throw new Error("this model engine cannot control this computer — choose Claude or an ACP engine, or select another destination");
         }
         const cua = readCuaConnection();
-        if (!cua) throw new Error("CUA Driver is not ready for this computer — check permissions and restart OpenMausBot");
+        if (!cua) throw new Error("CUA Driver is not ready for this computer — check permissions and restart MausCrew");
         integrations.localComputer = cua;
         computerKind = "local";
       }
@@ -979,6 +1002,8 @@ async function startTurn(
         // resume the wrong conversation and defeat the context bubble
         resumeCursor: rewound ? undefined : task.resumeCursors[instanceId],
         transcript,
+        cwd: bot.workspacePath || undefined,
+        runtimeFeatures: { dynamicCordis: bot.dynamicCordis === true },
         system:
           persona +
           (computerKind === "vm"
@@ -1074,10 +1099,10 @@ let webhookIngress: WebhookIngress | null = null;
 let webhookIngressError: string | null = null;
 try {
   webhookIngress = await listenWebhookIngress(webhooks, { port: WEBHOOK_PORT });
-  console.log(`openmausbot webhook receiver on ${webhookIngress.baseUrl}`);
+  console.log(`mauscrew webhook receiver on ${webhookIngress.baseUrl}`);
 } catch (error) {
   webhookIngressError = error instanceof Error ? error.message : String(error);
-  console.error(`openmausbot webhook receiver unavailable: ${webhookIngressError}`);
+  console.error(`mauscrew webhook receiver unavailable: ${webhookIngressError}`);
 }
 
 const webhookIngressStatus = () => ({
@@ -1164,7 +1189,7 @@ async function runGroupMemberTurn(
     .map((b) => `@${b.name}${b.title ? ` (${b.title})` : ""}`)
     .join(", ");
   const system = [
-    `You are ${bot.name}, a bot in the room "${group.name}" in OpenMausBot.`,
+    `You are ${bot.name}, a bot in the room "${group.name}" in MausCrew.`,
     bot.title && `Role: ${bot.title}.`,
     bot.description && `About: ${bot.description}`,
     `Room members: ${roster}, and ${userName} (the human).`,
@@ -1270,6 +1295,8 @@ function configStatus() {
       configured: Boolean(cfg.deepseekHarness?.apiKey),
       baseUrl: cfg.deepseekHarness?.baseUrl ?? "",
       telemetry: cfg.deepseekHarness?.telemetry ?? "off",
+      sandboxMode: cfg.deepseekHarness?.sandboxMode ?? "workspace-write",
+      runtimeStrategy: cfg.deepseekHarness?.runtimeStrategy ?? "bundled",
     },
     // the chosen voice is a setting, not a secret; the key is reported the
     // same configured-or-not way as every other credential
@@ -1488,7 +1515,7 @@ const server = createServer(async (req, res) => {
         }
         const channel = getOrCreateChannel(store, currentFrom, currentTarget);
         mirrorExchange(commsBus, currentFrom, currentTarget, message, channel, fromThreadId);
-        const prefixed = `[Message from @${currentFrom.name}, another bot in this OpenMausBot workspace. Reply to them.]\n\n${message}`;
+        const prefixed = `[Message from @${currentFrom.name}, another bot in this MausCrew workspace. Reply to them.]\n\n${message}`;
         const reply = await askBotAndWait(toBotId, prefixed, depth, fromBotId);
         mirrorReply(commsBus, currentTarget, reply, channel);
         return json(res, 200, { botName: currentTarget.name, text: reply });
@@ -1579,7 +1606,7 @@ const server = createServer(async (req, res) => {
     // ── independent webhook triggers ────────────────────────────────────
     // Management stays on the app-only server. Actual deliveries land on a
     // second, webhook-only loopback listener so Funnel or a future hosted
-    // relay never has to expose the rest of OpenMausBot's control surface.
+    // relay never has to expose the rest of MausCrew's control surface.
     if (path === "/api/webhooks" && method === "GET") {
       return json(res, 200, { webhooks: webhooks.list(), attempts: webhooks.listAttempts(), ingress: webhookIngressStatus() });
     }
@@ -1906,6 +1933,41 @@ const server = createServer(async (req, res) => {
         },
       });
     }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/skills(?:\/([a-z0-9-]+))?$/);
+    if (m && ["GET", "POST", "PUT", "DELETE"].includes(method)) {
+      const bot = store.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      const instance = registry.get(bot.modelSelection.instanceId);
+      const workspacePath = bot.workspacePath
+        || (instance?.driverKind === "deepseek-harness"
+          ? defaultWorkspaceFor(instance.instanceId, bot.threadId)
+          : "");
+      if (!workspacePath) {
+        return json(res, 409, { error: "choose a workspace for this bot before managing skills" });
+      }
+      try {
+        if (method === "GET" && !m[2]) {
+          const result = listWorkspaceSkills(workspacePath);
+          return json(res, 200, { workspacePath, ...result });
+        }
+        if (method === "POST" && !m[2]) {
+          const skill = createWorkspaceSkill(workspacePath, await readBody(req));
+          return json(res, 201, { skill });
+        }
+        if (method === "PUT" && m[2]) {
+          const skill = updateWorkspaceSkill(workspacePath, m[2], await readBody(req));
+          return json(res, 200, { skill });
+        }
+        if (method === "DELETE" && m[2]) {
+          deleteWorkspaceSkill(workspacePath, m[2]);
+          return json(res, 200, { ok: true });
+        }
+        return json(res, 405, { error: "method not allowed for this skill route" });
+      } catch (error) {
+        if (error instanceof SkillStoreError) return json(res, error.status, { error: error.message });
+        throw error;
+      }
+    }
     m = path.match(/^\/api\/bots\/([\w-]+)$/);
     if (m && method === "PATCH") {
       const body = await readBody(req);
@@ -1941,6 +2003,28 @@ const server = createServer(async (req, res) => {
       const patch: Record<string, unknown> = {};
       for (const key of ["name", "title", "description", "notifications", "modelSelection", "unread", "computer", "color", "mascotExpression", "pinned", "hidden", "speakReplies", "voice"] as const) {
         if (body[key] !== undefined) patch[key] = body[key];
+      }
+      if (body.workspacePath !== undefined) {
+        if (typeof body.workspacePath !== "string") {
+          return json(res, 400, { error: "workspacePath must be a string" });
+        }
+        const workspacePath = body.workspacePath.trim();
+        if (workspacePath && (workspacePath.length > 4096 || /[\0\r\n]/.test(workspacePath))) {
+          return json(res, 400, { error: "workspacePath contains invalid characters" });
+        }
+        if (workspacePath && !isAbsolute(workspacePath)) {
+          return json(res, 400, { error: "workspacePath must be an absolute path" });
+        }
+        if (workspacePath && resolve(workspacePath) === resolve(homedir())) {
+          return json(res, 400, { error: "workspacePath cannot be the home directory itself" });
+        }
+        patch.workspacePath = workspacePath || undefined;
+      }
+      if (body.dynamicCordis !== undefined) {
+        if (typeof body.dynamicCordis !== "boolean") {
+          return json(res, 400, { error: "dynamicCordis must be true or false" });
+        }
+        patch.dynamicCordis = body.dynamicCordis;
       }
       if (
         body.computer !== undefined &&
@@ -2238,7 +2322,7 @@ const server = createServer(async (req, res) => {
     // child proves it is OURS by echoing its pid (a stray dev server has
     // the same API shape but a different pid)
     if (method === "GET" && path === "/api/health") {
-      return json(res, 200, { app: "openmausbot", pid: process.pid, static: Boolean(STATIC_DIR) });
+      return json(res, 200, { app: "mauscrew", pid: process.pid, static: Boolean(STATIC_DIR) });
     }
 
     // ── provider instances (model picker) ──
@@ -2315,6 +2399,20 @@ const server = createServer(async (req, res) => {
           && !["off", "feedback-only", "full"].includes(String(ds.telemetry))
         ) {
           return json(res, 400, { error: "deepseekHarness.telemetry must be off, feedback-only or full" });
+        }
+        if (
+          Object.prototype.hasOwnProperty.call(ds, "sandboxMode")
+          && !["read-only", "workspace-write", "danger-full-access"].includes(String(ds.sandboxMode))
+        ) {
+          return json(res, 400, {
+            error: "deepseekHarness.sandboxMode must be read-only, workspace-write or danger-full-access",
+          });
+        }
+        if (
+          Object.prototype.hasOwnProperty.call(ds, "runtimeStrategy")
+          && !["system", "managed", "bundled"].includes(String(ds.runtimeStrategy))
+        ) {
+          return json(res, 400, { error: "deepseekHarness.runtimeStrategy must be system, managed or bundled" });
         }
       }
       const patch: Record<string, object> = {};
@@ -2463,7 +2561,7 @@ const server = createServer(async (req, res) => {
     }
 
     // packaged app: the server serves the built UI too (window → :8799 for
-    // everything, no dev proxy to die). OMB_STATIC_DIR is set by Electron.
+    // everything, no dev proxy to die). MAUSCREW_STATIC_DIR is set by Electron.
     if (method === "GET" && !path.startsWith("/api/") && STATIC_DIR) {
       const safe = path === "/" ? "/index.html" : path.replace(/\.\./g, "");
       const file = join(STATIC_DIR, safe);
@@ -2491,7 +2589,7 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(PORT, "127.0.0.1", () => {
-  console.log(`openmausbot server on http://127.0.0.1:${PORT}`);
+  console.log(`mauscrew server on http://127.0.0.1:${PORT}`);
 });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {

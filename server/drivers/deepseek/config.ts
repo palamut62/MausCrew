@@ -12,7 +12,7 @@
 import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-/** The composition OpenMausBot ships (spec §37). It is the bundled runtime
+/** The composition MausCrew ships (spec §37). It is the bundled runtime
  * default plus the approval gate, and it is the default for every instance:
  * a bot that composes no approval answerer runs the model's shell and file
  * tools unattended, which §36 does not permit. Pointing `cordis.configPath`
@@ -23,7 +23,7 @@ export const BUNDLED_CORDIS_CONFIG = join(
   "..",
   "bridges",
   "deepseek",
-  "openmaus.cordis.yml",
+  "mauscrew.cordis.yml",
 );
 
 /** Which wire the driver speaks to the harness.
@@ -32,17 +32,25 @@ export const BUNDLED_CORDIS_CONFIG = join(
  * `native` speaks the runtime's JSON-RPC directly and needs no Python at all
  * (spec §88). They are behaviourally equivalent by construction — the same
  * driver consumes the same BridgeMessage stream either way — and the parity
- * suite is what keeps that true. `python` stays the default until the live
- * acceptance runs have been done on both. */
+ * suite is what keeps that true. New installations default to native after
+ * the real runtime, model turn, restart replay, approval, and sandbox live
+ * checks passed; `python` remains the compatibility path. */
 export type TransportMode = "python" | "native";
 
 /** Where the harness runtime lives relative to us. */
 export type RuntimeMode = "bundled-python-sdk" | "external-python" | "wsl";
 
-/** How much of the host the agent may touch. Only "workspace" is honored
- * before the approval broker exists (spec §36) — the wider modes decode
- * fine so the config survives, but the driver refuses to run in them. */
-export type SandboxMode = "workspace" | "container" | "custom";
+/** How the runtime payload is acquired. `mode` says where it executes
+ * (host/WSL); strategy says who owns the installation. */
+export type RuntimeStrategy = "system" | "managed" | "bundled";
+
+/** The file-effect policy enforced by upstream's local sandbox provider.
+ *
+ * These are the runtime's real modes, not aspirational deployment labels.
+ * Containers and remote executors replace the shell/filesystem provider
+ * family; calling either one a mode here would claim isolation this driver
+ * has not mounted (spec §36, §54, §95). */
+export type SandboxMode = "read-only" | "workspace-write" | "danger-full-access";
 
 /** Session Log sharing with DeepSeek. Upstream's own default is `DISABLED`
  * and the two opt-in modes can upload complete session content, so this
@@ -60,7 +68,7 @@ export interface DeepSeekHarnessConfig {
   defaultModel: string;
   /** null = let the runtime decide. */
   maxTokens: number | null;
-  runtime: { mode: RuntimeMode; executable: string; distribution: string };
+  runtime: { mode: RuntimeMode; executable: string; distribution: string; strategy: RuntimeStrategy };
   /** Which transport to use, plus how to launch the runtime when it is
    * `native`. `launchArgs` is the full argv of the JSON-RPC runtime — either
    * the single-file executable, or `node` plus the packaged bin. Empty means
@@ -68,7 +76,7 @@ export interface DeepSeekHarnessConfig {
    * no sensible guess, and guessing would spawn some other program. */
   transport: { mode: TransportMode; launchArgs: string[] };
   cordis: { configPath: string; preset: string };
-  /** Empty means the driver picks ~/.openmausbot/deepseek-harness/sessions. */
+  /** Empty means the driver picks ~/.mauscrew/deepseek-harness/sessions. */
   sessionRoot: string;
   sandbox: { mode: SandboxMode };
   /** How long one turn may run before the driver stops waiting (spec §45).
@@ -101,7 +109,8 @@ export const DEFAULT_API_KEY_ENV = "DEEPSEEK_API_KEY";
 
 const TRANSPORT_MODES: readonly TransportMode[] = ["python", "native"];
 const RUNTIME_MODES: readonly RuntimeMode[] = ["bundled-python-sdk", "external-python", "wsl"];
-const SANDBOX_MODES: readonly SandboxMode[] = ["workspace", "container", "custom"];
+const RUNTIME_STRATEGIES: readonly RuntimeStrategy[] = ["system", "managed", "bundled"];
+const SANDBOX_MODES: readonly SandboxMode[] = ["read-only", "workspace-write", "danger-full-access"];
 const TELEMETRY_MODES: readonly TelemetryMode[] = ["off", "feedback-only", "full"];
 
 /** 30 minutes (spec §45). Long enough for a real multi-tool turn, short
@@ -196,6 +205,16 @@ export function decodeConfig(raw: unknown): DeepSeekHarnessConfig {
   const cordis = (o.cordis ?? {}) as Record<string, unknown>;
   const sandbox = (o.sandbox ?? {}) as Record<string, unknown>;
   const approval = (o.approval ?? {}) as Record<string, unknown>;
+  // A config that explicitly named Python before strategy existed keeps that
+  // behavior. A genuinely new config takes the production target: the
+  // executable carrier over native JSON-RPC.
+  const legacyStrategy: RuntimeStrategy =
+    runtime.mode === "bundled-python-sdk"
+      ? "managed"
+      : o.pythonPath || runtime.executable || transport.mode === "python"
+        ? "system"
+        : "bundled";
+  const strategy = oneOf(runtime.strategy, RUNTIME_STRATEGIES, legacyStrategy);
 
   return {
     // not absolutePath: a bare "python3" resolved through PATH is the normal
@@ -210,9 +229,10 @@ export function decodeConfig(raw: unknown): DeepSeekHarnessConfig {
       mode: oneOf(runtime.mode, RUNTIME_MODES, defaultRuntimeMode()),
       executable: str(runtime.executable, ""),
       distribution: str(runtime.distribution, ""),
+      strategy,
     },
     transport: {
-      mode: oneOf(transport.mode, TRANSPORT_MODES, "python"),
+      mode: oneOf(transport.mode, TRANSPORT_MODES, strategy === "bundled" ? "native" : "python"),
       launchArgs: argv(transport.launchArgs),
     },
     cordis: {
@@ -222,7 +242,7 @@ export function decodeConfig(raw: unknown): DeepSeekHarnessConfig {
       preset: str(cordis.preset, ""),
     },
     sessionRoot: absolutePath(o.sessionRoot, "sessionRoot"),
-    sandbox: { mode: oneOf(sandbox.mode, SANDBOX_MODES, "workspace") },
+    sandbox: { mode: sandboxMode(sandbox.mode) },
     turnTimeoutMs: timeoutMs(o.turnTimeoutMs),
     // an unrecognized mode reads as "off", never as an opt-in
     telemetry: oneOf(o.telemetry, TELEMETRY_MODES, "off"),
@@ -235,6 +255,15 @@ export function decodeConfig(raw: unknown): DeepSeekHarnessConfig {
   };
 }
 
+/** `workspace` was the pre-sandbox config value. It meant the intended
+ * boundary, not a provider that actually enforced it, so migrate it to the
+ * real upstream policy. Unknown/wider legacy values fail back to the same
+ * confined default instead of silently widening access. */
+function sandboxMode(value: unknown): SandboxMode {
+  if (value === "workspace") return "workspace-write";
+  return oneOf(value, SANDBOX_MODES, "workspace-write");
+}
+
 function approvalTimeoutMs(value: unknown): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_APPROVAL_TIMEOUT_MS;
   return Math.min(MAX_APPROVAL_TIMEOUT_MS, Math.max(MIN_APPROVAL_TIMEOUT_MS, Math.floor(value)));
@@ -242,7 +271,7 @@ function approvalTimeoutMs(value: unknown): number {
 
 /** Whether this instance actually has an approval broker in the loop.
  *
- * True only for the composition OpenMausBot ships, because that is the only
+ * True only for the composition MausCrew ships, because that is the only
  * one we can know composes the gate. A user's own composition may well have
  * something better, but "may well" is not a basis for widening a sandbox
  * (spec §54, §95) — the driver stays workspace-only in that case. */

@@ -29,7 +29,7 @@ import { existsSync } from "node:fs";
 import type { BridgeCapabilities, BridgeCommand, BridgeMessage } from "./bridge-protocol.ts";
 import type { BridgeHooks, BridgeStatus } from "./bridge.ts";
 import type { SpawnBridgeInput } from "./process-manager.ts";
-import { spawnRuntime, stopBridge } from "./process-manager.ts";
+import { runtimePath, spawnRuntime, stopBridge } from "./process-manager.ts";
 import type { BridgeChild } from "./process-manager.ts";
 import { JsonRpcConnection } from "./jsonrpc.ts";
 import { RuntimeTurn } from "./runtime-turn.ts";
@@ -152,7 +152,10 @@ export class NativeDeepSeekBridge {
     try {
       result = await this.withTimeout(
         connection.request("initialize", {
-          cwd: input.cwd,
+          // initialize creates the durable session and freezes its cwd. A
+          // Windows host path is not meaningful inside WSL; translating only
+          // DSH_CWD would leave the actual session rooted at process.cwd().
+          cwd: runtimePath(input.config, input.cwd),
           provider: input.config.provider,
           model: input.config.defaultModel,
           ...(input.config.maxTokens === null ? {} : { maxTokens: input.config.maxTokens }),

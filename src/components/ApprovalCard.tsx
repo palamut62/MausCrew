@@ -8,7 +8,7 @@ import { Check, ShieldCheck, X } from "lucide-react";
 import { type Bot, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 
-/** The tool's own name is noise to a human: mcp__ogb__computer_batch is
+/** The tool's own name is noise to a human: mcp__mauscrew__computer_batch is
  * "computer batch", Bash is "run a command". */
 function toolLabel(tool?: string): string {
   if (!tool) return "an action";
@@ -20,6 +20,7 @@ function toolLabel(tool?: string): string {
     Edit: "edit a file",
     WebFetch: "fetch a web page",
     WebSearch: "search the web",
+    cordis_run: "run a Dynamic Cordis plugin",
   };
   return nice[tool] ?? bare;
 }

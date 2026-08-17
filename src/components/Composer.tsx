@@ -165,7 +165,7 @@ export function Composer({
   // helper runs; the final transcript stays in the box, ready to edit/send
   useEffect(() => {
     if (!recording) return;
-    const bridge = window.ogb;
+    const bridge = window.mauscrew;
     if (!bridge) {
       setRecording(false);
       return;
@@ -196,7 +196,7 @@ export function Composer({
   }, [recording]);
 
   const toggleMic = () => {
-    if (!capabilities.dictation.available || !window.ogb) {
+    if (!capabilities.dictation.available || !window.mauscrew) {
       setSpeechError("Dictation isn't available in this build.");
       return;
     }

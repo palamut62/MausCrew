@@ -80,6 +80,19 @@ export interface RuntimeEventBase {
   raw?: { source: string; payload: unknown };
 }
 
+/** Optional structured detail for a delegated DeepSeek child run. It rides
+ * the generic item lifecycle so other providers and existing consumers keep
+ * working, while the chat can render more than an opaque tool pill. */
+export interface SubagentActivity {
+  childSessionId: string;
+  parentSessionId?: string;
+  provider?: string;
+  agentId?: string;
+  status: "running" | "completed" | "failed";
+  stopReason?: string;
+  lastAssistantMessage?: string;
+}
+
 export type RuntimeEvent = RuntimeEventBase &
   (
     | { type: "session.started"; sessionId: string | null; model?: string | null }
@@ -92,9 +105,9 @@ export type RuntimeEvent = RuntimeEventBase &
         cost?: number | null;
         denials?: string[];
       }
-    | { type: "item.started"; itemType: "tool" | "reasoning"; title?: string }
+    | { type: "item.started"; itemType: "tool" | "reasoning"; title?: string; subagent?: SubagentActivity }
     | { type: "item.updated"; itemType: "tool" | "reasoning"; tokens?: number | null }
-    | { type: "item.completed"; itemType: "tool"; ok: boolean }
+    | { type: "item.completed"; itemType: "tool"; ok: boolean; subagent?: SubagentActivity }
     | { type: "item.completed"; itemType: "assistant_text"; text: string }
     | { type: "content.delta"; streamKind: "assistant_text" | "reasoning_text"; delta: string }
     | {
@@ -128,10 +141,17 @@ export interface SendTurnInput {
   transcript?: Array<{ role: "user" | "assistant"; text: string }>;
   /** Bot persona (name/title/description) as a system prompt. */
   system?: string;
+  /** Experimental runtime capabilities selected for this bot. These are
+   * process-level composition choices, not instructions for the model. */
+  runtimeFeatures?: {
+    /** Let the DeepSeek agent inspect, define, and run temporary host-side
+     * Cordis plugins. Browser/client halves stay unsupported by MausCrew. */
+    dynamicCordis?: boolean;
+  };
   /** Per-bot integrations the driver may hand to the agent as tools. */
   integrations?: {
     composio?: { url: string; headers: Record<string, string> };
-    /** Cloud computer, reached through OpenMausBot's REST-to-MCP adapter. */
+    /** Cloud computer, reached through MausCrew's REST-to-MCP adapter. */
     computer?: { kind?: "box"; boxId: string; token: string };
     /** Direct stdio connection to a Cua Driver MCP server (host or sandbox). */
     localComputer?: { command: string; args: string[]; env: Record<string, string> };

@@ -43,6 +43,7 @@ function label(tool: string): string {
     Write: "File-change approval requested",
     Edit: "File-change approval requested",
     edit: "File-change approval requested",
+    cordis_run: "Dynamic plugin approval requested",
   };
   return nice[tool] ?? "Approval requested";
 }

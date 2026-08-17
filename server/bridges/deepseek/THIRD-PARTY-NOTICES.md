@@ -1,8 +1,8 @@
 # Third-party notices — DeepSeek Harness bridge
 
-This bridge (`server/bridges/deepseek/`) is OpenMausBot code and is not a
+This bridge (`server/bridges/deepseek/`) is MausCrew code and is not a
 DeepSeek Harness fork (see `docs/deepseek-harness-compatibility.md` and
-`OpenMausBot_DeepSeek_Harness_Integration_Guide.md` §3 — no upstream source is
+`MausCrew_DeepSeek_Harness_Integration_Guide.md` §3 — no upstream source is
 vendored into this repository). It does, at runtime, spawn a Python process
 that imports the following third-party packages, installed separately by the
 user per `requirements-deepseek.txt`. None of their source is copied here;
@@ -31,5 +31,5 @@ license is MIT.
 This file only covers the Python side. The Node/TypeScript side of this
 integration (`server/drivers/deepseek/`) imports no DeepSeek code; its
 dependencies are covered by the root `package.json` / `pnpm-lock.yaml` and
-whatever license-notice generation the rest of OpenMausBot's packaging
+whatever license-notice generation the rest of MausCrew's packaging
 already does.

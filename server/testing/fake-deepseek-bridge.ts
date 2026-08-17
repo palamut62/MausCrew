@@ -75,14 +75,22 @@ function runTurn(command: Record<string, unknown>): void {
   if (MODE === "hang") return;
 
   if (MODE === "subagent") {
-    emit({ type: "subagent.started", requestId, childSessionId: "child-abcdef123456" });
+    emit({
+      type: "subagent.started",
+      requestId,
+      parentSessionId: command.sessionId,
+      childSessionId: "child-abcdef123456",
+    });
     emit({
       type: "subagent.finished",
       requestId,
       childSessionId: "child-abcdef123456",
+      parentSessionId: command.sessionId,
       provider: "local",
+      agentId: "researcher",
       ok: true,
       stopReason: "completed",
+      lastAssistantMessage: "Reviewed the delegated files and found no remaining failures.",
     });
   }
 

@@ -5,7 +5,7 @@
 // the shadow-instance behavior end to end while it's at it.
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer, request, type Server } from "node:http";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -48,15 +48,15 @@ const statusWithHeaders = (headers: Record<string, string>): Promise<number> =>
   });
 
 beforeAll(async () => {
-  home = mkdtempSync(join(tmpdir(), "omb-api-test-"));
+  home = mkdtempSync(join(tmpdir(), "mauscrew-api-test-"));
   staticDir = join(home, "static");
   // a fleet of exactly one unknown driver: no CLI probes, no network
-  mkdirSync(join(home, ".openmausbot"), { recursive: true });
+  mkdirSync(join(home, ".mauscrew"), { recursive: true });
   mkdirSync(join(staticDir, "assets"), { recursive: true });
-  writeFileSync(join(staticDir, "index.html"), "<!doctype html><title>Packaged OpenMausBot</title>");
+  writeFileSync(join(staticDir, "index.html"), "<!doctype html><title>Packaged MausCrew</title>");
   writeFileSync(join(staticDir, "assets", "smoke.css"), "body { color: white; }");
   writeFileSync(
-    join(home, ".openmausbot", "config.json"),
+    join(home, ".mauscrew", "config.json"),
     JSON.stringify({ instances: { ghost: { driver: "not-a-real-driver", displayName: "Ghost" } } }),
   );
 
@@ -90,11 +90,11 @@ beforeAll(async () => {
       ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
       HOME: home,
       USERPROFILE: home,
-      OMB_PORT: String(PORT),
-      OMB_WEBHOOK_PORT: String(WEBHOOK_PORT),
-      OMB_BOX_API: `http://127.0.0.1:${boxStubPort}`,
-      OMB_COMPOSIO_API: `http://127.0.0.1:${boxStubPort}/api/v3.1`,
-      OMB_STATIC_DIR: staticDir,
+      MAUSCREW_PORT: String(PORT),
+      MAUSCREW_WEBHOOK_PORT: String(WEBHOOK_PORT),
+      MAUSCREW_BOX_API: `http://127.0.0.1:${boxStubPort}`,
+      MAUSCREW_COMPOSIO_API: `http://127.0.0.1:${boxStubPort}/api/v3.1`,
+      MAUSCREW_STATIC_DIR: staticDir,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -137,7 +137,7 @@ describe("harness HTTP API", () => {
   it("identifies itself on /api/health", async () => {
     const { status, body } = await api("GET", "/api/health");
     expect(status).toBe(200);
-    expect(body.app).toBe("openmausbot");
+    expect(body.app).toBe("mauscrew");
     expect(typeof body.pid).toBe("number");
     expect(body.static).toBe(true);
   });
@@ -146,7 +146,7 @@ describe("harness HTTP API", () => {
     const root = await fetch(`${BASE}/`);
     expect(root.status).toBe(200);
     expect(root.headers.get("content-type")).toBe("text/html");
-    expect(await root.text()).toContain("Packaged OpenMausBot");
+    expect(await root.text()).toContain("Packaged MausCrew");
 
     const asset = await fetch(`${BASE}/assets/smoke.css`);
     expect(asset.status).toBe(200);
@@ -156,7 +156,7 @@ describe("harness HTTP API", () => {
     const spa = await fetch(`${BASE}/settings/desktop`);
     expect(spa.status).toBe(200);
     expect(spa.headers.get("content-type")).toBe("text/html");
-    expect(await spa.text()).toContain("Packaged OpenMausBot");
+    expect(await spa.text()).toContain("Packaged MausCrew");
 
     const unknownApi = await api("GET", "/api/not-a-real-route");
     expect(unknownApi.status).toBe(404);
@@ -208,9 +208,22 @@ describe("harness HTTP API", () => {
     expect(created.status).toBe(201);
     const bot = created.body.bot;
 
-    const patched = await api("PATCH", `/api/bots/${bot.id}`, { name: "Renamed", pinned: true });
+    const workspacePath = join(home, "projects", "selected-workspace");
+    const patched = await api("PATCH", `/api/bots/${bot.id}`, {
+      name: "Renamed",
+      pinned: true,
+      workspacePath,
+      dynamicCordis: true,
+    });
     expect(patched.status).toBe(200);
-    expect(patched.body.bot).toMatchObject({ name: "Renamed", pinned: true });
+    expect(patched.body.bot).toMatchObject({ name: "Renamed", pinned: true, workspacePath, dynamicCordis: true });
+
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { workspacePath: "relative/project" })).status).toBe(400);
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { workspacePath: home })).status).toBe(400);
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { dynamicCordis: "yes" })).status).toBe(400);
+    const cleared = await api("PATCH", `/api/bots/${bot.id}`, { workspacePath: "" });
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.bot.workspacePath).toBeUndefined();
 
     const missing = await api("PATCH", "/api/bots/does-not-exist", { name: "x" });
     expect(missing.status).toBe(404);
@@ -219,6 +232,55 @@ describe("harness HTTP API", () => {
     expect(deleted.status).toBe(200);
     const after = await api("GET", "/api/bots");
     expect(after.body.bots.find((b: { id: string }) => b.id === bot.id)).toBeUndefined();
+  });
+
+  it("manages workspace skills without exposing arbitrary filesystem paths", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    expect((await api("GET", `/api/bots/${bot.id}/skills`)).status).toBe(409);
+
+    const workspacePath = join(home, "projects", "skill-workspace");
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { workspacePath })).status).toBe(200);
+    const empty = await api("GET", `/api/bots/${bot.id}/skills`);
+    expect(empty.status).toBe(200);
+    expect(empty.body.skills).toEqual([]);
+    expect(empty.body.rootPath).toBe(join(workspacePath, ".agents", "skills"));
+
+    const invalid = await api("POST", `/api/bots/${bot.id}/skills`, {
+      name: "../escape",
+      description: "No",
+      instructions: "No",
+    });
+    expect(invalid.status).toBe(400);
+
+    const created = await api("POST", `/api/bots/${bot.id}/skills`, {
+      name: "review-change",
+      description: "Review the current change.",
+      whenToUse: "Before delivery.",
+      instructions: "Inspect the diff and run tests.",
+      userInvocable: true,
+      modelInvocable: true,
+    });
+    expect(created.status).toBe(201);
+    expect(created.body.skill).toMatchObject({ id: "review-change", valid: true });
+    expect(existsSync(join(workspacePath, ".agents", "skills", "review-change", "SKILL.md"))).toBe(true);
+
+    const updated = await api("PUT", `/api/bots/${bot.id}/skills/review-change`, {
+      name: "review-change",
+      description: "Review and verify the current change.",
+      instructions: "Inspect the diff, run tests, and report findings.",
+      userInvocable: true,
+      modelInvocable: false,
+    });
+    expect(updated.status).toBe(200);
+    expect(updated.body.skill.modelInvocable).toBe(false);
+
+    const listed = await api("GET", `/api/bots/${bot.id}/skills`);
+    expect(listed.body.skills).toHaveLength(1);
+    expect(listed.body.skills[0].description).toContain("verify");
+
+    expect((await api("DELETE", `/api/bots/${bot.id}/skills/review-change`)).status).toBe(200);
+    expect((await api("GET", `/api/bots/${bot.id}/skills`)).body.skills).toEqual([]);
+    await api("DELETE", `/api/bots/${bot.id}`);
   });
 
   it("exports selected bots without a room and imports the team with fresh IDs", async () => {
@@ -247,7 +309,7 @@ describe("harness HTTP API", () => {
     });
     expect(selectedExport.status).toBe(200);
     expect(selectedExport.body).toMatchObject({
-      format: "openmaus.team",
+      format: "mauscrew.team",
       version: 1,
       team: {
         name: "Field Team",
@@ -479,7 +541,7 @@ describe("harness HTTP API", () => {
     expect(saved.body.composio).toEqual({ configured: true });
     expect(JSON.stringify(saved.body)).not.toContain("ak_good");
 
-    const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
+    const disk = JSON.parse(readFileSync(join(home, ".mauscrew", "config.json"), "utf8"));
     expect(disk.composio).toMatchObject({ apiKey: "", sessionId: "trs_config_test" });
     expect(JSON.stringify(disk)).not.toContain("ak_good");
 
@@ -490,7 +552,7 @@ describe("harness HTTP API", () => {
   });
 
   it.skipIf(process.platform === "win32")("stores the credentials file with owner-only permissions", () => {
-    expect(statSync(join(home, ".openmausbot", "config.json")).mode & 0o777).toBe(0o600);
+    expect(statSync(join(home, ".mauscrew", "config.json")).mode & 0o777).toBe(0o600);
   });
 
   it("stores and echoes the user profile (not write-only, unlike keys)", async () => {
@@ -550,7 +612,7 @@ describe("harness HTTP API", () => {
     expect((await api("DELETE", `/api/webhooks/${created.body.webhook.id}`)).status).toBe(200);
     expect((await api("GET", "/api/webhooks")).body.webhooks).toHaveLength(0);
     if (process.platform !== "win32") {
-      expect(statSync(join(home, ".openmausbot", "webhooks.json")).mode & 0o777).toBe(0o600);
+      expect(statSync(join(home, ".mauscrew", "webhooks.json")).mode & 0o777).toBe(0o600);
     }
   });
 

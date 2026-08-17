@@ -41,7 +41,7 @@ export function UpdateBanner() {
   if (!s || s.status === "idle" || s.status === "checking") return null;
   const key = `${s.status}:${s.version ?? ""}`;
   if (dismissed === key) return null;
-  const updater = window.ogb!.updater!;
+  const updater = window.mauscrew!.updater!;
 
   // while busy the card owns the moment: no dismissing, no second click
   const installing = s.status === "installing";
@@ -49,7 +49,7 @@ export function UpdateBanner() {
 
   const title =
     s.status === "available"
-      ? `OpenMausBot ${s.version} is available`
+      ? `MausCrew ${s.version} is available`
       : s.status === "downloading"
         ? `Downloading ${s.version ?? "update"}…`
         : s.status === "downloaded"
@@ -68,7 +68,7 @@ export function UpdateBanner() {
         : s.status === "downloaded"
           ? "Restart to finish updating."
           : installing
-            ? "OpenMausBot will reopen in a moment."
+            ? "MausCrew will reopen in a moment."
             : friendlyError(s.message);
 
   return (

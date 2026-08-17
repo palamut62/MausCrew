@@ -25,9 +25,11 @@ export function initAnalytics() {
   // one-time install marker — app_first_open counts installs (the closest
   // truth to "downloads that mattered"; raw download counts live on the
   // GitHub release assets)
-  if (!localStorage.getItem("omb-installed")) {
-    localStorage.setItem("omb-installed", new Date().toISOString());
+  if (!localStorage.getItem("mauscrew-installed") && !localStorage.getItem("omb-installed")) {
+    localStorage.setItem("mauscrew-installed", new Date().toISOString());
     posthog.capture("app_first_open", { platform });
+  } else if (!localStorage.getItem("mauscrew-installed")) {
+    localStorage.setItem("mauscrew-installed", localStorage.getItem("omb-installed")!);
   }
   posthog.capture("app_opened", { platform });
 }
@@ -44,9 +46,10 @@ export function identifyEmail(email: string) {
 }
 
 // first-run email gate state
-const GATE_KEY = "omb-email-gate";
+const GATE_KEY = "mauscrew-email-gate";
+const LEGACY_GATE_KEY = "omb-email-gate";
 export function emailGateDone(): boolean {
-  return Boolean(localStorage.getItem(GATE_KEY));
+  return Boolean(localStorage.getItem(GATE_KEY) || localStorage.getItem(LEGACY_GATE_KEY));
 }
 export function setEmailGateDone(status: "submitted" | "skipped") {
   localStorage.setItem(GATE_KEY, status);

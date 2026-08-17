@@ -1,7 +1,8 @@
 import type { GroupDefaultResponder, MausColor } from "./store.ts";
 
-export const TEAM_MANIFEST_FORMAT = "openmaus.team" as const;
+export const TEAM_MANIFEST_FORMAT = "mauscrew.team" as const;
 export const TEAM_MANIFEST_VERSION = 1 as const;
+const LEGACY_TEAM_MANIFEST_FORMAT = "openmaus.team";
 
 const COLORS: readonly MausColor[] = [
   "green",
@@ -84,7 +85,9 @@ function optionalString(value: unknown, field: string, max: number): string | un
 /** Parse an untrusted shared file into the small, portable subset we support. */
 export function parseTeamManifest(value: unknown): TeamManifestV1 {
   if (!isRecord(value)) throw new Error("This is not a team file");
-  if (value.format !== TEAM_MANIFEST_FORMAT) throw new Error("This is not an OpenMaus team file");
+  if (value.format !== TEAM_MANIFEST_FORMAT && value.format !== LEGACY_TEAM_MANIFEST_FORMAT) {
+    throw new Error("This is not a MausCrew team file");
+  }
   if (value.version !== TEAM_MANIFEST_VERSION) {
     throw new Error(`Team file version ${String(value.version)} is not supported`);
   }

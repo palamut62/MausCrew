@@ -29,7 +29,7 @@ declare global {
   };
 
   interface Window {
-    ogb?: {
+    mauscrew?: {
       platform: NodeJS.Platform;
       getCapabilities(): Promise<DesktopCapabilities>;
       screenFrame(): Promise<string | null>;
@@ -57,6 +57,8 @@ declare global {
       /** Copies an engine install command and opens a blank terminal. False
        * when no terminal could be launched; the clipboard still has it. */
       openInstallTerminal?(command: string): Promise<boolean>;
+      /** Native directory picker for a bot's coding workspace. */
+      chooseWorkspace?(): Promise<string | null>;
       /** Save a provider credential through Electron's OS-backed store. */
       setCredential?(name: "composioApiKey", value: string): Promise<ConfigStatus>;
       /** In-app auto-update (packaged app only; dormant in dev). onState

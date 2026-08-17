@@ -54,7 +54,7 @@ function profileInitials(profile?: { name?: string; email?: string }): string {
 function UpdateButton() {
   const s = useUpdaterState();
   const [checkedAt, setCheckedAt] = useState(0);
-  const updater = window.ogb?.updater;
+  const updater = window.mauscrew?.updater;
   const status = s?.status ?? "idle";
   // download and install both round-trip through main before the status
   // changes — spin on the click itself, and let the new status clear it
@@ -285,7 +285,9 @@ function importPreview(manifest: unknown): PendingTeamImport {
     throw new Error("This file does not contain a team.");
   }
   const root = manifest as Record<string, unknown>;
-  if (root.format !== "openmaus.team") throw new Error("This is not an OpenMaus team file.");
+  if (root.format !== "mauscrew.team" && root.format !== "openmaus.team") {
+    throw new Error("This is not a MausCrew team file.");
+  }
   if (root.version !== 1) throw new Error(`Team file version ${String(root.version)} is not supported.`);
   if (!root.team || typeof root.team !== "object" || Array.isArray(root.team)) {
     throw new Error("This team file is missing its team definition.");
@@ -1046,7 +1048,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         accept=".json,.mausteam.json,application/json"
         onChange={(event) => void chooseTeamFile(event)}
         className="hidden"
-        aria-label="Choose an OpenMaus team file"
+        aria-label="Choose a MausCrew team file"
       />
 
       {/* Search */}

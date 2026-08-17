@@ -59,8 +59,8 @@ function ProfileFields() {
 
 function UpdatesRow() {
   const s = useUpdaterState();
-  if (!window.ogb?.updater) return null;
-  const updater = window.ogb.updater;
+  if (!window.mauscrew?.updater) return null;
+  const updater = window.mauscrew.updater;
   const label =
     s?.status === "checking"
       ? "Checking…"
@@ -174,6 +174,18 @@ export function SettingsModal() {
               {label}
             </button>
           ))}
+          <div className="mt-auto border-t border-hairline/40 px-2 pt-3 text-[10.5px] leading-relaxed text-ink-secondary">
+            <div>Product Owner</div>
+            <div className="font-medium text-ink">Umut Çelik</div>
+            <div className="mt-1 flex gap-2">
+              <a href="https://x.com/palamut62" target="_blank" rel="noreferrer" className="hover:text-ink hover:underline">
+                X
+              </a>
+              <a href="https://github.com/palamut62" target="_blank" rel="noreferrer" className="hover:text-ink hover:underline">
+                GitHub
+              </a>
+            </div>
+          </div>
         </nav>
 
         <div className="flex min-w-0 flex-1 flex-col">

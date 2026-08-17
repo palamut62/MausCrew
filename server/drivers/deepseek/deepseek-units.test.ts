@@ -18,7 +18,15 @@ import { LineSplitter, checkHandshake, parseMessage, serializeCommand } from "./
 import { defaultWorkspaceFor, parseSessionId, sessionIdFor, sessionRootFor } from "./session-manager.ts";
 import { mapMessage, isTerminal } from "./event-mapper.ts";
 import { classifyError, describeError } from "./errors.ts";
-import { buildBridgeEnv, checkCordisConfig, pythonCandidates, toWslPath } from "./process-manager.ts";
+import {
+  buildBridgeEnv,
+  checkCordisConfig,
+  pythonCandidates,
+  resolveBundledRuntime,
+  runtimePath,
+  toWslPath,
+  withWslForwarding,
+} from "./process-manager.ts";
 
 const ctx = {
   provider: "deepseek-harness",
@@ -32,14 +40,23 @@ describe("decodeConfig", () => {
     const config = defaultConfig();
     expect(config.provider).toBe("deepseek-official");
     expect(config.apiKeyEnv).toBe("DEEPSEEK_API_KEY");
-    expect(config.sandbox.mode).toBe("workspace");
+    expect(config.sandbox.mode).toBe("workspace-write");
+    expect(config.runtime.strategy).toBe("bundled");
+    expect(config.transport.mode).toBe("native");
     expect(config.maxTokens).toBeNull();
+  });
+
+  it("keeps an explicit legacy Python setup on the compatibility transport", () => {
+    const config = decodeConfig({ pythonPath: "python3", transport: { mode: "python" } });
+    expect(config.runtime.strategy).toBe("system");
+    expect(config.transport.mode).toBe("python");
   });
 
   it("downgrades unknown enum values instead of throwing", () => {
     // a config from a newer build must still produce a usable instance
     expect(decodeConfig({ runtime: { mode: "quantum" } }).runtime.mode).toMatch(/wsl|external-python/);
-    expect(decodeConfig({ sandbox: { mode: "yolo" } }).sandbox.mode).toBe("workspace");
+    expect(decodeConfig({ sandbox: { mode: "yolo" } }).sandbox.mode).toBe("workspace-write");
+    expect(decodeConfig({ sandbox: { mode: "workspace" } }).sandbox.mode).toBe("workspace-write");
   });
 
   it("rejects control characters and relative paths", () => {
@@ -84,7 +101,7 @@ describe("bridge protocol", () => {
   it("gates on protocol version in both directions", () => {
     expect(checkHandshake({ protocolVersion: 1 }).ok).toBe(true);
     expect(checkHandshake({ protocolVersion: 0 }).ok).toBe(false);
-    expect(checkHandshake({ protocolVersion: 99 }).reason).toContain("update OpenMausBot");
+    expect(checkHandshake({ protocolVersion: 99 }).reason).toContain("update MausCrew");
   });
 
   it("serializes commands as one newline-terminated line", () => {
@@ -159,6 +176,47 @@ describe("event mapping", () => {
     expect(bad).toMatchObject({ ok: false, stopReason: "length" });
   });
 
+  it("keeps delegated-run metadata for the rich activity card", () => {
+    const [started] = mapMessage(
+      {
+        type: "subagent.started",
+        requestId: "r",
+        parentSessionId: "root",
+        childSessionId: "child-123456789",
+      },
+      ctx,
+    );
+    expect(started).toMatchObject({
+      type: "item.started",
+      subagent: { childSessionId: "child-123456789", parentSessionId: "root", status: "running" },
+    });
+
+    const [finished] = mapMessage(
+      {
+        type: "subagent.finished",
+        requestId: "r",
+        parentSessionId: "root",
+        childSessionId: "child-123456789",
+        provider: "local",
+        agentId: "researcher",
+        ok: true,
+        stopReason: "completed",
+        lastAssistantMessage: "Found the issue.",
+      },
+      ctx,
+    );
+    expect(finished).toMatchObject({
+      type: "item.completed",
+      ok: true,
+      subagent: {
+        provider: "local",
+        agentId: "researcher",
+        status: "completed",
+        lastAssistantMessage: "Found the issue.",
+      },
+    });
+  });
+
   it("produces nothing for the handshake and marks terminals", () => {
     expect(
       mapMessage(
@@ -206,6 +264,7 @@ describe("bridge environment", () => {
       expect(env.SSH_AUTH_SOCK).toBeUndefined();
       expect(env.DEEPSEEK_API_KEY).toBe("sk-test");
       expect(env.DEEPSEEK_BASE_URL).toBe("https://api.example.com");
+      expect(env.DSH_SANDBOX_MODE).toBe("workspace-write");
     } finally {
       if (before.AWS_SECRET_ACCESS_KEY === undefined) delete process.env.AWS_SECRET_ACCESS_KEY;
       else process.env.AWS_SECRET_ACCESS_KEY = before.AWS_SECRET_ACCESS_KEY;
@@ -219,11 +278,36 @@ describe("bridge environment", () => {
       config,
       apiKey: "sk-real",
       sessionRoot: "/tmp/s",
-      instanceEnv: { DEEPSEEK_API_KEY: "sk-stale", EVIL: "a\nPATH=/tmp", FINE: "ok" },
+      instanceEnv: {
+        DEEPSEEK_API_KEY: "sk-stale",
+        DSH_SANDBOX_MODE: "danger-full-access",
+        EVIL: "a\nPATH=/tmp",
+        FINE: "ok",
+      },
     });
     expect(env.DEEPSEEK_API_KEY).toBe("sk-real");
     expect(env.EVIL).toBeUndefined();
     expect(env.FINE).toBe("ok");
+    expect(env.DSH_SANDBOX_MODE).toBe("workspace-write");
+  });
+
+  it("forwards allowlisted bridge variables into WSL without replacing Linux host paths", () => {
+    const env = withWslForwarding({
+      PATH: "C:\\Windows\\System32",
+      HOME: "C:\\Users\\example",
+      DEEPSEEK_API_KEY: "sk-test",
+      DSH_CWD: "/mnt/c/workspace",
+      CUSTOM_PROVIDER_TOKEN: "token",
+    });
+
+    expect(env.WSLENV.split(":")).toEqual([
+      "DEEPSEEK_API_KEY",
+      "DSH_CWD",
+      "CUSTOM_PROVIDER_TOKEN",
+    ]);
+    expect(env.WSLENV).not.toContain("PATH");
+    expect(env.WSLENV).not.toContain("HOME");
+    expect(env.WSLENV).not.toContain("sk-test");
   });
 });
 
@@ -295,13 +379,13 @@ describe("WSL path translation", () => {
     // A Linux interpreter given C:\... writes the session log somewhere the
     // driver will never look again, so the thread silently loses its history.
     const env = buildBridgeEnv({
-      config: decodeConfig({ runtime: { mode: "wsl" }, cordis: { configPath: "C:\\conf\\openmaus.cordis.yml" } }),
+      config: decodeConfig({ runtime: { mode: "wsl" }, cordis: { configPath: "C:\\conf\\mauscrew.cordis.yml" } }),
       apiKey: "sk",
-      sessionRoot: "C:\\Users\\u\\.openmausbot\\sessions",
+      sessionRoot: "C:\\Users\\u\\.mauscrew\\sessions",
       instanceEnv: {},
     });
-    expect(env.DSH_SESSION_ROOT).toBe("/mnt/c/Users/u/.openmausbot/sessions");
-    expect(env.DSH_CORDIS_CONFIG).toBe("/mnt/c/conf/openmaus.cordis.yml");
+    expect(env.DSH_SESSION_ROOT).toBe("/mnt/c/Users/u/.mauscrew/sessions");
+    expect(env.DSH_CORDIS_CONFIG).toBe("/mnt/c/conf/mauscrew.cordis.yml");
   });
 
   it("leaves paths alone for a native interpreter", () => {
@@ -319,7 +403,7 @@ describe("cordis composition check", () => {
   it("names the missing file instead of letting the runtime fail obscurely", () => {
     const config = decodeConfig({
       runtime: { mode: "external-python" },
-      cordis: { configPath: join(tmpdir(), "omb-does-not-exist-openmaus.cordis.yml") },
+      cordis: { configPath: join(tmpdir(), "mauscrew-does-not-exist-mauscrew.cordis.yml") },
     });
     expect(() => checkCordisConfig(config)).toThrow(/missing/i);
   });
@@ -376,7 +460,7 @@ describe("model discovery", () => {
 
 describe("interpreter resolution", () => {
   it("builds a wsl argv array with no shell string anywhere", () => {
-    const config = decodeConfig({ runtime: { mode: "wsl", distribution: "Ubuntu-22.04" } });
+    const config = decodeConfig({ runtime: { mode: "wsl", distribution: "Ubuntu-22.04", strategy: "system" } });
     expect(pythonCandidates(config)[0]).toEqual(["wsl.exe", "-d", "Ubuntu-22.04", "--", "python3"]);
   });
 
@@ -385,8 +469,23 @@ describe("interpreter resolution", () => {
     expect(pythonCandidates(config)).toEqual([["/usr/local/bin/python3.12"]]);
   });
 
+  it("uses the MausCrew-owned venv when managed runtime is selected", () => {
+    const config = decodeConfig({ runtime: { mode: "wsl", strategy: "managed", distribution: "Ubuntu" } });
+    const argv = pythonCandidates(config)[0];
+    expect(argv.slice(0, 7)).toEqual(["wsl.exe", "-d", "Ubuntu", "--cd", "~", "--exec", "./.mauscrew/runtimes/deepseek/venv/bin/python"]);
+    expect(argv.join(" ")).toContain(".mauscrew/runtimes/deepseek/venv/bin/python");
+  });
+
+  it("uses the runtime executable directly when bundled strategy names one", async () => {
+    const config = decodeConfig({ runtime: { strategy: "bundled", executable: "/opt/dsh/runtime" } });
+    expect(config.transport.mode).toBe("native");
+    await expect(resolveBundledRuntime(config)).resolves.toEqual({ launchArgs: ["/opt/dsh/runtime"] });
+  });
+
   it("translates Windows paths for a Linux interpreter", () => {
     expect(toWslPath("C:\\Users\\u\\ws")).toBe("/mnt/c/Users/u/ws");
     expect(toWslPath("/already/posix")).toBe("/already/posix");
+    expect(runtimePath(decodeConfig({ runtime: { mode: "wsl" } }), "C:\\repo")).toBe("/mnt/c/repo");
+    expect(runtimePath(decodeConfig({ runtime: { mode: "external-python" } }), "C:\\repo")).toBe("C:\\repo");
   });
 });

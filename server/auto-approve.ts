@@ -48,6 +48,13 @@ export function looksDestructive(text: string): boolean {
  * actually looked at. Computed once, server-side, and echoed back by the
  * client so the two sides can never disagree about what was granted. */
 const COMMAND_TOOLS = new Set(["bash", "shell", "execute", "run_command", "computer_exec", "terminal"]);
+const ONE_TIME_ONLY_TOOLS = new Set(["cordis_run"]);
+
+/** Dynamic code activation is never delegated to Auto or Always allow. */
+export function requiresOneTimeApproval(tool: string): boolean {
+  const bare = tool.replace(/^mcp__[^_]+__/, "").toLowerCase();
+  return ONE_TIME_ONLY_TOOLS.has(bare);
+}
 
 export function approvalKey(tool: string, summary: string): string {
   const bare = tool.replace(/^mcp__[^_]+__/, "").toLowerCase();
@@ -83,6 +90,7 @@ export function autoDecision(
   // pattern list its own comment calls "not a security boundary", and it
   // must not stand in for a human at 3am.
   if (context?.unattended) return null;
+  if (requiresOneTimeApproval(tool)) return null;
   // the guards come first, so an "always allow" can never widen into them
   if (looksDestructive(summary) || looksDestructive(tool)) return null;
   if (looksSensitive(summary)) return null;

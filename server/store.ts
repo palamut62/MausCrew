@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { writeFileAtomic } from "./atomic.ts";
 import { peerAllowKey, type PeerAction } from "./peer-approval-key.ts";
 import { DATA_DIR } from "./config.ts";
-import { newId, type ModelSelection, type ThreadId } from "./contracts.ts";
+import { newId, type ModelSelection, type SubagentActivity, type ThreadId } from "./contracts.ts";
 import { pickBotName } from "./names.ts";
 
 export type MausColor =
@@ -60,6 +60,8 @@ export interface Message {
   /** `setup` marks an error the user fixes by installing or configuring
    * something — the UI offers setup instead of a retry that cannot work. */
   tool?: { name: string; ok?: boolean; spoken?: string; setup?: boolean };
+  /** Structured delegated-run detail for the richer activity card. */
+  subagent?: SubagentActivity;
   /** screen messages: a frame of the bot's computer (base64 image) */
   png?: string;
   mime?: string;
@@ -140,6 +142,13 @@ export interface BotRecord {
   mascotExpression?: MausExpression | null;
   unread: boolean;
   modelSelection: ModelSelection;
+  /** Absolute host folder used as this bot's coding workspace. Unset lets
+   * each driver choose its own private, safely scoped default. */
+  workspacePath?: string;
+  /** Allow this bot's DeepSeek runtime to mount the experimental, host-only
+   * Dynamic Cordis toolset. The generated packages live only until that
+   * provider process restarts. */
+  dynamicCordis?: boolean;
   /** provider-native continuation per instance (e.g. claude session id) */
   resumeCursors: Record<string, unknown>;
   /** which computer the bot acts on: its cloud box, this Mac (local CUA),

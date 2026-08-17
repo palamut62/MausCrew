@@ -35,7 +35,7 @@ function requireExecutable(file) {
 const appImage = exactlyOne(".AppImage");
 const deb = exactlyOne(".deb");
 const unpacked = path.join(releaseDir, "linux-unpacked");
-const executable = path.join(unpacked, "openmausbot");
+const executable = path.join(unpacked, "mauscrew");
 const resources = path.join(unpacked, "resources");
 
 requireExecutable(appImage);
@@ -55,16 +55,16 @@ const fields = execFileSync(
   { encoding: "utf8" },
 );
 for (const expected of [
-  "Package: openmausbot",
+  "Package: mauscrew",
   "Architecture: amd64",
-  "Maintainer: Milind Soni",
+  "Maintainer: Umut Çelik",
   "Section: utils",
   "Priority: optional",
 ]) {
   if (!fields.includes(expected)) fail(`DEB metadata is missing ${JSON.stringify(expected)}`);
 }
 
-const extracted = mkdtempSync(path.join(tmpdir(), "omb-deb-verify-"));
+const extracted = mkdtempSync(path.join(tmpdir(), "mauscrew-deb-verify-"));
 try {
   execFileSync("dpkg-deb", ["--extract", deb, extracted]);
   const desktopFile = path.join(
@@ -72,7 +72,7 @@ try {
     "usr",
     "share",
     "applications",
-    "com.openmausbot.app.desktop",
+    "com.mauscrew.app.desktop",
   );
   const scalableIcon = path.join(
     extracted,
@@ -82,16 +82,16 @@ try {
     "hicolor",
     "scalable",
     "apps",
-    "openmausbot.svg",
+    "mauscrew.svg",
   );
   requireFile(desktopFile);
   requireFile(scalableIcon);
   const desktop = readFileSync(desktopFile, "utf8");
   for (const expected of [
-    "Name=OpenMausBot",
-    "Exec=/opt/OpenMausBot/openmausbot %U",
-    "Icon=openmausbot",
-    "StartupWMClass=com.openmausbot.app",
+    "Name=MausCrew",
+    "Exec=/opt/MausCrew/mauscrew %U",
+    "Icon=mauscrew",
+    "StartupWMClass=com.mauscrew.app",
     "Categories=Utility;",
   ]) {
     if (!desktop.includes(expected)) fail(`desktop entry is missing ${JSON.stringify(expected)}`);

@@ -2,8 +2,8 @@
 //
 // Two modes, per cua-driver's EMBEDDING.md:
 //  - "embedded" (packaged app): spawn our own private daemon via
-//    EmbeddedCuaDriverHost so TCC grants attribute to OpenMausBot and the
-//    driver inherits them. One prompt, named OpenMausBot, out of the box.
+//    EmbeddedCuaDriverHost so TCC grants attribute to MausCrew and the
+//    driver inherits them. One prompt, named MausCrew, out of the box.
 //  - "standalone" (dev): attach to an already-installed CuaDriver.app daemon
 //    (its own TCC identity, typically already granted on a dev machine).
 //
@@ -30,7 +30,7 @@ const STANDALONE_SOCKET = path.join(
   app.getPath("home"),
   "Library/Caches/cua-driver/cua-driver.sock",
 );
-const HOST_BUNDLE_ID = "com.openmausbot.app";
+const HOST_BUNDLE_ID = "com.mauscrew.app";
 const CUA_ENV = { CUA_DRIVER_RS_TELEMETRY_ENABLED: "0" };
 process.env.CUA_DRIVER_RS_TELEMETRY_ENABLED ??= "0";
 
@@ -71,7 +71,7 @@ async function loadEmbeddedSdk() {
     ]);
     return { ...embedded, ...permissions };
   }
-  process.env.OPENMAUSBOT_CUA_SDK_LIBRARY = path.join(
+  process.env.MAUSCREW_CUA_SDK_LIBRARY = path.join(
     process.resourcesPath,
     "cua-sdk",
     "native",
@@ -86,14 +86,14 @@ async function startEmbedded(binary) {
   const sdk = await loadEmbeddedSdk();
   // CUA's embedding contract requires grants before the child daemon starts;
   // these SDK calls execute in Electron main so macOS attributes them to
-  // OpenMausBot rather than to a terminal or helper process.
+  // MausCrew rather than to a terminal or helper process.
   const permissionStatus = sdk.requestMacOSPermissions();
   if (!sdk.hasRequiredMacOSPermissions(permissionStatus)) {
     const missing = [
       !permissionStatus.accessibility && "Accessibility",
       !permissionStatus.screenRecording && "Screen Recording",
     ].filter(Boolean).join(" and ");
-    throw new Error(`${missing || "macOS permissions"} required; grant access in System Settings and restart OpenMausBot`);
+    throw new Error(`${missing || "macOS permissions"} required; grant access in System Settings and restart MausCrew`);
   }
   embeddedHost = new sdk.EmbeddedCuaDriverHost(binary, HOST_BUNDLE_ID);
   const conn = await embeddedHost.start();
@@ -116,7 +116,7 @@ export async function startCua() {
   }
 
   const wantEmbedded =
-    app.isPackaged || process.env.OPENMAUSBOT_CUA_EMBEDDED === "1";
+    app.isPackaged || process.env.MAUSCREW_CUA_EMBEDDED === "1";
   let nextConnection;
 
   if (wantEmbedded) {

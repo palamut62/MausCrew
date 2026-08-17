@@ -196,7 +196,7 @@ export class ApprovalMailbox {
             id,
             sessionId,
             tool,
-            summary: typeof o.summary === "string" ? o.summary.slice(0, 400) : "",
+            summary: typeof o.summary === "string" ? o.summary.slice(0, 8_192) : "",
             createdAt: typeof o.createdAt === "number" && Number.isFinite(o.createdAt) ? o.createdAt : 0,
         };
     }

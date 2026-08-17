@@ -1,4 +1,4 @@
-// Config + data dirs. One file, ~/.openmausbot/config.json, env fallbacks:
+// Config + data dirs. One file, ~/.mauscrew/config.json, env fallbacks:
 //   { "xai": {"key":"xai-…"}, "composio": {"apiKey":"ak_…"}, "box": {"token":"…"},
 //     "instances": { "<instanceId>": {"driver":"grok", …} } }
 import { readFileSync, mkdirSync, existsSync, renameSync } from "node:fs";
@@ -25,7 +25,13 @@ export interface AppConfig {
    * `telemetry` are settings rather than secrets: the endpoint is echoed back
    * so the UI can warn that a custom host receives this key (§97), and
    * telemetry defaults to off unless the user opts in (§57). */
-  deepseekHarness?: { apiKey?: string; baseUrl?: string; telemetry?: "off" | "feedback-only" | "full" };
+  deepseekHarness?: {
+    apiKey?: string;
+    baseUrl?: string;
+    telemetry?: "off" | "feedback-only" | "full";
+    sandboxMode?: "read-only" | "workspace-write" | "danger-full-access";
+    runtimeStrategy?: "system" | "managed" | "bundled";
+  };
   /** Voice (ElevenLabs). `key` is the credential and is never echoed back;
    * `voice` is the chosen voice id, which is a setting, not a secret. */
   tts?: { key?: string; voice?: string };
@@ -35,20 +41,26 @@ export interface AppConfig {
   instances?: InstanceConfigMap;
 }
 
-// OMB_DATA_DIR isolates test/soak rigs from the user's real fleet.
-export const DATA_DIR = process.env.OMB_DATA_DIR ?? join(homedir(), ".openmausbot");
-const LEGACY_DATA_DIR = join(homedir(), ".opengrokbot");
+// MAUSCREW_DATA_DIR isolates test/soak rigs from the user's real fleet.
+// OMB_DATA_DIR remains a compatibility alias for existing scripts.
+export const DATA_DIR =
+  process.env.MAUSCREW_DATA_DIR ?? process.env.OMB_DATA_DIR ?? join(homedir(), ".mauscrew");
+const LEGACY_DATA_DIRS = [join(homedir(), ".openmausbot"), join(homedir(), ".opengrokbot")];
 export const EVENTS_DIR = join(DATA_DIR, "events");
 export const NATIVE_DIR = join(DATA_DIR, "native");
 
 export function ensureDirs() {
   // one-time migration from the pre-rename data dir — bots, transcripts,
   // config and keys all carry over
-  if (!existsSync(DATA_DIR) && existsSync(LEGACY_DATA_DIR)) {
-    try {
-      renameSync(LEGACY_DATA_DIR, DATA_DIR);
-    } catch {
-      /* cross-device or busy — fall through to a fresh dir */
+  if (!existsSync(DATA_DIR)) {
+    for (const legacyDataDir of LEGACY_DATA_DIRS) {
+      if (!existsSync(legacyDataDir)) continue;
+      try {
+        renameSync(legacyDataDir, DATA_DIR);
+        break;
+      } catch {
+        /* cross-device or busy — try the next legacy path */
+      }
     }
   }
   for (const dir of [DATA_DIR, EVENTS_DIR, NATIVE_DIR]) mkdirSync(dir, { recursive: true });
@@ -69,11 +81,11 @@ export function loadConfig(): AppConfig {
   cfg.box = { token: process.env.BOX_TOKEN, ...cfg.box };
   cfg.opencodeGo = { apiKey: process.env.OPENCODE_API_KEY, ...cfg.opencodeGo };
   cfg.deepseekHarness = { apiKey: process.env.DEEPSEEK_API_KEY, ...cfg.deepseekHarness };
-  cfg.tts = { key: process.env.OMB_TTS_KEY, ...cfg.tts };
+  cfg.tts = { key: process.env.MAUSCREW_TTS_KEY ?? process.env.OMB_TTS_KEY, ...cfg.tts };
   return cfg;
 }
 
-/** Merge a partial config into ~/.openmausbot/config.json (secrets never
+/** Merge a partial config into ~/.mauscrew/config.json (secrets never
  * echoed back — callers report configured-or-not booleans only). */
 export function saveConfig(patch: Partial<AppConfig>): void {
   const p = join(DATA_DIR, "config.json");
@@ -143,10 +155,12 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
     // `config` still wins: someone who hand-edited config.json for one bot
     // meant it, and the Settings form is the default for bots that have not.
     if (entry.driver === "deepseek-harness" && cfg.deepseekHarness) {
-      const { baseUrl, telemetry } = cfg.deepseekHarness;
+      const { baseUrl, telemetry, sandboxMode, runtimeStrategy } = cfg.deepseekHarness;
       entry.config = {
         ...(baseUrl ? { baseUrl } : {}),
         ...(telemetry ? { telemetry } : {}),
+        ...(sandboxMode ? { sandbox: { mode: sandboxMode } } : {}),
+        ...(runtimeStrategy ? { runtime: { strategy: runtimeStrategy } } : {}),
         ...(typeof entry.config === "object" && entry.config !== null ? entry.config : {}),
       };
     }

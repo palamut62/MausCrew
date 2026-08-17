@@ -31,7 +31,7 @@ export function browserDesktopCapabilities(): DesktopCapabilities {
 }
 
 export function initialDesktopCapabilities(): DesktopCapabilities {
-  const platform = window.ogb?.platform;
+  const platform = window.mauscrew?.platform;
   if (!platform) return browserCapabilities;
   const isMac = platform === "darwin";
   return {
@@ -53,9 +53,9 @@ export function initialDesktopCapabilities(): DesktopCapabilities {
 
 export async function loadDesktopCapabilities(): Promise<DesktopCapabilities> {
   if (cached) return cached;
-  if (!window.ogb?.getCapabilities) return browserCapabilities;
+  if (!window.mauscrew?.getCapabilities) return browserCapabilities;
   try {
-    cached = await window.ogb.getCapabilities();
+    cached = await window.mauscrew.getCapabilities();
   } catch {
     cached = browserCapabilities;
   }

@@ -8,7 +8,7 @@ import { nextOccurrence, RoutineManager, type RoutineManagerOptions } from "./ro
 const dirs: string[] = [];
 
 function tempFile() {
-  const dir = mkdtempSync(join(tmpdir(), "omb-routines-"));
+  const dir = mkdtempSync(join(tmpdir(), "mauscrew-routines-"));
   dirs.push(dir);
   return join(dir, "routines.json");
 }

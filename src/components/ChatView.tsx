@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Copy,
   Crown,
+  GitFork,
   Loader2,
   Monitor,
   Pencil,
@@ -434,6 +435,7 @@ function ActivityChip({ message }: { message: Message }) {
       </div>
     );
   }
+  if (message.subagent) return <SubagentActivityCard message={message} />;
   const failed = tool.ok === false;
   return (
     <div className="flex justify-start">
@@ -451,6 +453,80 @@ function ActivityChip({ message }: { message: Message }) {
           <Check size={13} className="text-success" />
         )}
         <span className="max-w-[480px] truncate font-mono">{tool.name}</span>
+      </div>
+    </div>
+  );
+}
+
+/** A delegated run keeps the compact transcript rhythm, but exposes the
+ * child identity, provider, outcome and final handoff instead of flattening
+ * the whole lifecycle into an opaque tool name. */
+function SubagentActivityCard({ message }: { message: Message }) {
+  const detail = message.subagent;
+  const tool = message.tool;
+  const [open, setOpen] = useState(false);
+  if (!detail || !tool) return null;
+  const running = detail.status === "running" && tool.ok === undefined;
+  const failed = detail.status === "failed" || tool.ok === false;
+  const shortId = detail.childSessionId.slice(-12);
+
+  return (
+    <div className="flex justify-start">
+      <div
+        className={cn(
+          "w-full max-w-[560px] rounded-xl border bg-panel text-[13px]",
+          failed ? "border-danger/30" : "border-hairline/40",
+        )}
+      >
+        <button
+          onClick={() => setOpen((value) => !value)}
+          aria-expanded={open}
+          className="flex w-full items-center gap-2 px-3 py-2 text-left"
+        >
+          {running ? (
+            <Loader2 size={14} className="shrink-0 animate-spin text-accent" />
+          ) : failed ? (
+            <X size={14} className="shrink-0 text-danger" />
+          ) : (
+            <Check size={14} className="shrink-0 text-success" />
+          )}
+          <GitFork size={14} className="shrink-0 text-ink-secondary" />
+          <span className="min-w-0 flex-1">
+            <span className="font-medium text-ink">Delegated agent</span>
+            <span className="ml-2 font-mono text-[11.5px] text-ink-secondary">{shortId}</span>
+          </span>
+          <span className={cn("text-[11.5px]", failed ? "text-danger" : "text-ink-secondary")}>
+            {running ? "Running" : failed ? "Failed" : "Completed"}
+          </span>
+          <ChevronDown size={13} className={cn("text-ink-secondary transition-transform", open && "rotate-180")} />
+        </button>
+        {open && (
+          <div className="border-t border-hairline/30 px-3 py-2.5 text-[12px] text-ink-secondary">
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+              <dt>Provider</dt>
+              <dd className="font-mono text-ink">{detail.provider || "DeepSeek Harness"}</dd>
+              <dt>Session</dt>
+              <dd className="break-all font-mono text-ink">{detail.childSessionId}</dd>
+              {detail.agentId && (
+                <>
+                  <dt>Agent</dt>
+                  <dd className="font-mono text-ink">{detail.agentId}</dd>
+                </>
+              )}
+              {detail.stopReason && (
+                <>
+                  <dt>Result</dt>
+                  <dd className="font-mono text-ink">{detail.stopReason}</dd>
+                </>
+              )}
+            </dl>
+            {detail.lastAssistantMessage && (
+              <div className="mt-2 rounded-lg border border-hairline/25 bg-inset px-3 py-2 whitespace-pre-wrap text-ink">
+                {detail.lastAssistantMessage}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -669,7 +745,7 @@ export function ChatView({ bot }: { bot: Bot }) {
 
   // on Windows the frameless window's min/max/close overlay sits at the
   // top-right: the header becomes the drag strip and clears room for it
-  const isWin = window.ogb?.platform === "win32";
+  const isWin = window.mauscrew?.platform === "win32";
   const drag = isWin ? ({ WebkitAppRegion: "drag" } as React.CSSProperties) : undefined;
   const noDrag = isWin ? ({ WebkitAppRegion: "no-drag" } as React.CSSProperties) : undefined;
 

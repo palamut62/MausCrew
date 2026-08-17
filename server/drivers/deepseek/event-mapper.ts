@@ -93,7 +93,12 @@ export function mapMessage(message: BridgeMessage, ctx: EventContext): RuntimeEv
           itemId: subagentItemId(message.childSessionId),
           type: "item.started",
           itemType: "tool",
-          title: `subagent ${message.childSessionId.slice(-12)}`,
+          title: `Delegated agent ${message.childSessionId.slice(-12)}`,
+          subagent: {
+            childSessionId: message.childSessionId,
+            ...(message.parentSessionId ? { parentSessionId: message.parentSessionId } : {}),
+            status: "running",
+          },
         },
       ];
 
@@ -105,6 +110,15 @@ export function mapMessage(message: BridgeMessage, ctx: EventContext): RuntimeEv
           type: "item.completed",
           itemType: "tool",
           ok: message.ok,
+          subagent: {
+            childSessionId: message.childSessionId,
+            ...(message.parentSessionId ? { parentSessionId: message.parentSessionId } : {}),
+            provider: message.provider,
+            ...(message.agentId ? { agentId: message.agentId } : {}),
+            status: message.ok ? "completed" : "failed",
+            stopReason: message.stopReason,
+            ...(message.lastAssistantMessage ? { lastAssistantMessage: message.lastAssistantMessage } : {}),
+          },
         },
       ];
 

@@ -34,15 +34,26 @@ describe("DeepSeek Harness configuration", () => {
     expect(instances.codex.environment).toEqual({});
   });
 
-  it("passes endpoint and telemetry as driver config, not as environment", () => {
+  it("passes endpoint, telemetry and sandbox policy as driver config, not as environment", () => {
     // They are settings rather than secrets, and the driver decodes them —
     // routing them through the environment would put them outside the
     // validation decodeConfig applies.
     const instances = instanceConfigs({
-      deepseekHarness: { apiKey: "sk", baseUrl: "https://models.internal", telemetry: "feedback-only" },
+      deepseekHarness: {
+        apiKey: "sk",
+        baseUrl: "https://models.internal",
+        telemetry: "feedback-only",
+        sandboxMode: "read-only",
+        runtimeStrategy: "managed",
+      },
       instances: { deepseek: { driver: "deepseek-harness" } },
     });
-    expect(instances.deepseek.config).toEqual({ baseUrl: "https://models.internal", telemetry: "feedback-only" });
+    expect(instances.deepseek.config).toEqual({
+      baseUrl: "https://models.internal",
+      telemetry: "feedback-only",
+      sandbox: { mode: "read-only" },
+      runtime: { strategy: "managed" },
+    });
     expect(instances.deepseek.environment).toEqual({ DEEPSEEK_API_KEY: "sk" });
   });
 

@@ -9,7 +9,12 @@ import { existsSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { approvalsActive, BUNDLED_CORDIS_CONFIG, decodeConfig, DEFAULT_APPROVAL_TIMEOUT_MS } from "./config.ts";
-import { needsApproval } from "../../bridges/deepseek/openmaus-approval.mjs";
+import {
+  needsApproval,
+  rememberCordisDefinition,
+  summarize,
+  unsupportedCordisClientReason,
+} from "../../bridges/deepseek/mauscrew-approval.mjs";
 
 describe("approval configuration", () => {
   it("defaults every bot to the composition that actually gates tools", () => {
@@ -23,7 +28,7 @@ describe("approval configuration", () => {
     // checkCordisConfig fails a bot whose composition is missing, so a
     // packaging mistake here would take every DeepSeek bot down.
     expect(existsSync(BUNDLED_CORDIS_CONFIG)).toBe(true);
-    expect(existsSync(BUNDLED_CORDIS_CONFIG.replace("openmaus.cordis.yml", "openmaus-approval.mjs"))).toBe(true);
+    expect(existsSync(BUNDLED_CORDIS_CONFIG.replace("mauscrew.cordis.yml", "mauscrew-approval.mjs"))).toBe(true);
   });
 
   it("stops claiming approvals when the user composes their own runtime", () => {
@@ -65,5 +70,62 @@ describe("tool risk classification", () => {
     // so the unknown case is the one that has to be safe.
     expect(needsApproval("deploy_to_production")).toBe(true);
     expect(needsApproval("")).toBe(true);
+  });
+
+  it("allows Dynamic Cordis inspection and definition but asks before activation", () => {
+    for (const tool of ["cordis_inspect_list", "cordis_inspect_query", "cordis_inspect_self", "cordis_define", "cordis_stop", "cordis_undefine"]) {
+      expect(needsApproval(tool)).toBe(false);
+    }
+    expect(needsApproval("cordis_run")).toBe(true);
+  });
+});
+
+describe("Dynamic Cordis approval evidence", () => {
+  it("rejects browser client code while accepting a host-only definition", () => {
+    expect(unsupportedCordisClientReason("cordis_define", {
+      code: { host: "return { apply() {} }", client: "return { apply() {} }" },
+    })).toContain("host-side");
+    expect(unsupportedCordisClientReason("cordis_define", {
+      code: { host: "return { apply() {} }" },
+    })).toBeNull();
+  });
+
+  it("shows the successful definition's purpose and host code before run", () => {
+    const definitions = new Map<string, { name: string; purpose: string; host: string }>();
+    const args = {
+      plugin: { kind: "new", idPrefix: "snap" },
+      name: "Snapshot helper",
+      purpose: "Adds a read-only snapshot tool.",
+      code: { host: "return { name: 'snapshot', apply(ctx) {} }" },
+    };
+    rememberCordisDefinition(definitions, "cordis_define", args, {
+      isError: false,
+      value: { pluginId: "snap-1", packageId: "pkg-1", name: args.name, purpose: args.purpose },
+    }, "session-a");
+
+    const detail = summarize(
+      "cordis_run",
+      { pluginId: "snap-1", packageId: "pkg-1", mode: "run" },
+      definitions,
+      "session-a",
+    );
+    expect(detail).toContain('Run Dynamic Cordis plugin "Snapshot helper"');
+    expect(detail).toContain("Adds a read-only snapshot tool.");
+    expect(detail).toContain("return { name: 'snapshot'");
+  });
+
+  it("never uses another session's source as approval evidence", () => {
+    const definitions = new Map<string, { name: string; purpose: string; host: string }>();
+    rememberCordisDefinition(definitions, "cordis_define", {
+      name: "Private helper",
+      purpose: "Session A only.",
+      code: { host: "return { apply() {} }" },
+    }, {
+      isError: false,
+      value: { pluginId: "plug-1", packageId: "pkg-1" },
+    }, "session-a");
+    const detail = summarize("cordis_run", { pluginId: "plug-1", packageId: "pkg-1" }, definitions, "session-b");
+    expect(detail).toContain("Host code: unavailable");
+    expect(detail).not.toContain("Session A only");
   });
 });

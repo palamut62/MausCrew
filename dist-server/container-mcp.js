@@ -25,7 +25,7 @@ const child = spawn(runtime, [
     "-e",
     "CUA_DRIVER_RS_TELEMETRY_ENABLED=0",
     container,
-    "/usr/local/libexec/openmausbot/cua-driver",
+    "/usr/local/libexec/mauscrew/cua-driver",
     "mcp",
     "--socket",
     socket,

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, desktopCapturer, ipcMain, safeStorage, session, shell, systemPreferences, utilityProcess } from "electron";
+import { app, BrowserWindow, clipboard, desktopCapturer, dialog, ipcMain, safeStorage, session, shell, systemPreferences, utilityProcess } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,7 +19,7 @@ const APP_ICON = path.join(__dirname, "resources/app-icon.png");
 
 // GNOME groups the window with its installed desktop entry only when both
 // identities match. This must run before Electron becomes ready.
-if (process.platform === "linux") app.setDesktopName("com.openmausbot.app.desktop");
+if (process.platform === "linux") app.setDesktopName("com.mauscrew.app.desktop");
 
 // Packaged: the harness server ships in Resources (compiled JS, zero deps)
 // and runs on Electron's own Node via utilityProcess. It serves the built
@@ -32,6 +32,23 @@ let serverReady = true;
 let secureCredentials = {};
 
 const CREDENTIALS_FILE = path.join(app.getPath("userData"), "credentials.bin");
+
+function migrateLegacySecureCredentials() {
+  if (fs.existsSync(CREDENTIALS_FILE)) return;
+  const appData = app.getPath("appData");
+  for (const legacyName of ["OpenMausBot", "openmausbot"]) {
+    const legacyFile = path.join(appData, legacyName, "credentials.bin");
+    if (!fs.existsSync(legacyFile) || legacyFile === CREDENTIALS_FILE) continue;
+    try {
+      fs.mkdirSync(path.dirname(CREDENTIALS_FILE), { recursive: true });
+      fs.copyFileSync(legacyFile, CREDENTIALS_FILE, fs.constants.COPYFILE_EXCL);
+      slog(`migrated secure credentials from ${legacyName}`);
+      return;
+    } catch (error) {
+      slog(`secure credential migration failed: ${error?.message ?? error}`);
+    }
+  }
+}
 
 async function loadSecureCredentials() {
   try {
@@ -56,7 +73,7 @@ async function saveSecureCredentials(credentials) {
 }
 
 async function secureComposioConfig() {
-  const dataDir = process.env.OMB_DATA_DIR || path.join(app.getPath("home"), ".openmausbot");
+  const dataDir = process.env.MAUSCREW_DATA_DIR || process.env.OMB_DATA_DIR || path.join(app.getPath("home"), ".mauscrew");
   const configPath = path.join(dataDir, "config.json");
   try {
     const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
@@ -93,8 +110,8 @@ async function secureComposioConfig() {
 }
 
 // The packaged app has no terminal: everything about the server child's life
-// goes to server.log in the OS log dir (~/Library/Logs/OpenMausBot on macOS,
-// Console.app-visible; %APPDATA%\OpenMausBot\logs on Windows), which is also
+// goes to server.log in the OS log dir (~/Library/Logs/MausCrew on macOS,
+// Console.app-visible; %APPDATA%\MausCrew\logs on Windows), which is also
 // why stdio is piped, not inherited — under a Finder/Explorer launch the
 // parent's stdio leads nowhere and a failed boot is otherwise undiagnosable.
 const LOG_DIR = app.getPath("logs");
@@ -117,9 +134,9 @@ async function startServerOn(port) {
   const proc = utilityProcess.fork(entry, [], {
     env: {
       ...process.env,
-      OMB_STATIC_DIR: path.join(process.resourcesPath, "ui"),
-      OMB_PORT: String(port),
-      OMB_USER_DATA: app.getPath("userData"),
+      MAUSCREW_STATIC_DIR: path.join(process.resourcesPath, "ui"),
+      MAUSCREW_PORT: String(port),
+      MAUSCREW_USER_DATA: app.getPath("userData"),
       ...(secureCredentials.composioApiKey
         ? { COMPOSIO_API_KEY: secureCredentials.composioApiKey }
         : {}),
@@ -144,7 +161,7 @@ async function startServerOn(port) {
       const res = await fetch(`http://127.0.0.1:${port}/api/health`);
       if (res.ok) {
         const body = await res.json().catch(() => null);
-        if (body?.app === "openmausbot" && body.pid === proc.pid && body.static) return proc;
+        if (body?.app === "mauscrew" && body.pid === proc.pid && body.static) return proc;
         break; // someone else owns this port — try the next one
       }
     } catch {
@@ -178,7 +195,7 @@ async function startServerPackaged() {
 const ERROR_PAGE =
   "data:text/html;charset=utf-8," +
   encodeURIComponent(
-    `<body style="margin:0;display:flex;align-items:center;justify-content:center;height:100vh;background:#070707;color:#fcfcfc;font:15px -apple-system,system-ui"><div style="text-align:center;max-width:360px"><div style="font-size:40px">🐭</div><h2 style="font-weight:600;margin:12px 0 6px">Couldn't start the bot server</h2><p style="color:#fcfcfc99;line-height:1.5">Something else is using its ports. Quit and reopen OpenMausBot — if it keeps happening, restart your computer.</p></div></body>`,
+    `<body style="margin:0;display:flex;align-items:center;justify-content:center;height:100vh;background:#070707;color:#fcfcfc;font:15px -apple-system,system-ui"><div style="text-align:center;max-width:360px"><div style="font-size:40px">🐭</div><h2 style="font-weight:600;margin:12px 0 6px">Couldn't start the bot server</h2><p style="color:#fcfcfc99;line-height:1.5">Something else is using its ports. Quit and reopen MausCrew — if it keeps happening, restart your computer.</p></div></body>`,
   );
 
 let cuaReady = Promise.resolve({ mode: "unavailable", reason: "not-started" });
@@ -221,14 +238,14 @@ function createWindow() {
   // Packaged CI smoke hook. It validates the real renderer/preload bridge and
   // same-origin embedded server, then follows the normal window-close path.
   // No debugging port or sandbox override is needed.
-  if (process.env.OMB_SMOKE_TEST === "1") {
+  if (process.env.MAUSCREW_SMOKE_TEST === "1") {
     win.webContents.once("did-finish-load", async () => {
       try {
         const result = await win.webContents.executeJavaScript(`
           (async () => {
-            if (!window.ogb?.getCapabilities) throw new Error("desktop preload bridge is unavailable");
+            if (!window.mauscrew?.getCapabilities) throw new Error("desktop preload bridge is unavailable");
             const [capabilities, healthResponse] = await Promise.all([
-              window.ogb.getCapabilities(),
+              window.mauscrew.getCapabilities(),
               fetch("/api/health"),
             ]);
             if (!healthResponse.ok) {
@@ -293,6 +310,14 @@ ipcMain.handle("engine:open-terminal", async (_event, command) => {
   if (typeof command !== "string" || !command.trim()) return false;
   clipboard.writeText(command);
   return openBlankTerminal();
+});
+
+ipcMain.handle("workspace:choose", async () => {
+  const result = await dialog.showOpenDialog({
+    title: "Choose bot workspace",
+    properties: ["openDirectory", "createDirectory"],
+  });
+  return result.canceled ? null : (result.filePaths[0] ?? null);
 });
 
 ipcMain.handle("perm:status", () => ({
@@ -379,6 +404,7 @@ ipcMain.handle("credential:set", async (_event, name, value) => {
 app.whenReady().then(async () => {
   if (process.platform === "darwin") app.dock.setIcon(APP_ICON);
   if (app.isPackaged) {
+    migrateLegacySecureCredentials();
     secureCredentials = await loadSecureCredentials();
     await secureComposioConfig();
   }

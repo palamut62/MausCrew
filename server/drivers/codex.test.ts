@@ -46,7 +46,7 @@ describe("CodexDriver turns (fake app-server)", () => {
 
   beforeEach(() => {
     chmodSync(FAKE_CLI, 0o755);
-    scratch = mkdtempSync(join(tmpdir(), "omb-codex-test-"));
+    scratch = mkdtempSync(join(tmpdir(), "mauscrew-codex-test-"));
   });
 
   afterEach(async () => {

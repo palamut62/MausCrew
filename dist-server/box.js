@@ -1,6 +1,6 @@
 import { ensureRemoteCuaCommand, remoteComputerBootstrapCommand } from "./remote-computer.js";
 // overridable so tests can point at a stub instead of the live provider
-const BOX_API = process.env.OMB_BOX_API || "https://ascii.dev/api/box/v1";
+const BOX_API = process.env.MAUSCREW_BOX_API || "https://ascii.dev/api/box/v1";
 const READY = new Set(["idle", "ready", "running"]);
 function boxFetch(cfg, path, opts = {}) {
     return fetch(`${BOX_API}${path}`, {
@@ -24,7 +24,7 @@ async function boxNameFor(botId) {
         .map((b) => b.toString(16).padStart(2, "0"))
         .join("")
         .slice(0, 6);
-    return `ogb-${botId.slice(0, 8).toLowerCase().replace(/[^a-z0-9]/g, "")}-${hash}`;
+    return `mauscrew-${botId.slice(0, 8).toLowerCase().replace(/[^a-z0-9]/g, "")}-${hash}`;
 }
 export async function runCommand(cfg, boxId, command, { timeoutMs = 120_000 } = {}) {
     const res = await boxFetch(cfg, `/boxes/${boxId}/commands`, {
@@ -172,7 +172,7 @@ export async function boxStatus(cfg, botId) {
  */
 export async function provisionBox(cfg, botId, botName) {
     if (!boxConfigured(cfg)) {
-        throw new Error('box provider not enabled — add {"box":{"token":"…"}} to ~/.openmausbot/config.json');
+        throw new Error('box provider not enabled — add {"box":{"token":"…"}} to ~/.mauscrew/config.json');
     }
     const vmName = await boxNameFor(botId);
     let box = await findBox(cfg, botId);
@@ -282,7 +282,7 @@ export async function execOnBox(cfg, botId, command) {
 // Base64 over command stdout is NOT reliable for the panel's full-size
 // frames (probed 2026-08-12: an otherwise-complete payload came back with
 // a corrupted length), so the frame is always fetched over HTTP here.
-const PANEL_PATH = "/tmp/ogb-panel.jpg";
+const PANEL_PATH = "/tmp/mauscrew-panel.jpg";
 const PANEL_WIDTH = 1024;
 const SHOT_CMD = [
     "export DISPLAY=${DISPLAY:-:0}",

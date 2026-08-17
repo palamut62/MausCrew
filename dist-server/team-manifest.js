@@ -1,5 +1,6 @@
-export const TEAM_MANIFEST_FORMAT = "openmaus.team";
+export const TEAM_MANIFEST_FORMAT = "mauscrew.team";
 export const TEAM_MANIFEST_VERSION = 1;
+const LEGACY_TEAM_MANIFEST_FORMAT = "openmaus.team";
 const COLORS = [
     "green",
     "blue",
@@ -35,8 +36,9 @@ function optionalString(value, field, max) {
 export function parseTeamManifest(value) {
     if (!isRecord(value))
         throw new Error("This is not a team file");
-    if (value.format !== TEAM_MANIFEST_FORMAT)
-        throw new Error("This is not an OpenMaus team file");
+    if (value.format !== TEAM_MANIFEST_FORMAT && value.format !== LEGACY_TEAM_MANIFEST_FORMAT) {
+        throw new Error("This is not a MausCrew team file");
+    }
     if (value.version !== TEAM_MANIFEST_VERSION) {
         throw new Error(`Team file version ${String(value.version)} is not supported`);
     }

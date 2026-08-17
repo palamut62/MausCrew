@@ -13,7 +13,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { EffortLevel } from "../../server/contracts.ts";
+import type { EffortLevel, SubagentActivity } from "../../server/contracts.ts";
 import type { MausColor, MausMotion } from "@/lib/mascot";
 import type { Routine, RoutineInput, RoutineRun } from "@/lib/routines";
 import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "@/lib/webhooks";
@@ -49,6 +49,8 @@ export interface Message {
    * narration of the same chip ("reading a file"), used by call mode. */
   /** `setup` marks an error fixed by installing something, not by retrying. */
   tool?: { name: string; ok?: boolean; spoken?: string; setup?: boolean };
+  /** Structured delegated-run detail for the richer activity card. */
+  subagent?: SubagentActivity;
   /** screen messages: a frame of the bot's computer (base64) */
   png?: string;
   mime?: string;
@@ -113,6 +115,10 @@ export interface Bot {
   unread: boolean;
   busy?: boolean;
   modelSelection: ModelSelection;
+  /** Absolute host folder selected for coding tasks. */
+  workspacePath?: string;
+  /** Experimental DeepSeek-only, host-side Dynamic Cordis plugins. */
+  dynamicCordis?: boolean;
   /** Where this bot's computer runs; unset = auto (cloud box if one exists, else local). */
   computer?: "cloud" | "vm" | "local" | "off";
   /** auto mode: the bot approves its own tool permissions */
@@ -172,7 +178,13 @@ export interface ConfigStatus {
    * echoed. `baseUrl` and `telemetry` are settings, not secrets, and come
    * back so the form can show what is in effect — the endpoint in particular,
    * because the UI has to warn that a custom host receives the key. */
-  deepseekHarness?: { configured: boolean; baseUrl: string; telemetry: "off" | "feedback-only" | "full" };
+  deepseekHarness?: {
+    configured: boolean;
+    baseUrl: string;
+    telemetry: "off" | "feedback-only" | "full";
+    sandboxMode: "read-only" | "workspace-write" | "danger-full-access";
+    runtimeStrategy: "system" | "managed" | "bundled";
+  };
   /** Voice (ElevenLabs). `configured` = a key is saved; `ready` = a key AND
    * a voice, which is what it takes to actually speak. The key itself is
    * never echoed back. */
@@ -333,6 +345,8 @@ type Action =
           | "chiefOfStaff"
           | "approvePeerComms"
           | "modelSelection"
+          | "workspacePath"
+          | "dynamicCordis"
         >
       >;
     };
@@ -992,6 +1006,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   description: source.description,
                   notifications: source.notifications,
                   modelSelection: source.modelSelection,
+                  ...(source.workspacePath ? { workspacePath: source.workspacePath } : {}),
+                  ...(source.dynamicCordis ? { dynamicCordis: true } : {}),
                   ...(source.computer ? { computer: source.computer } : {}),
                 }),
               }).then(({ bot: patched }) =>
@@ -1303,6 +1319,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               xai: frame.xai,
               composio: frame.composio,
               box: frame.box,
+              opencodeGo: frame.opencodeGo,
+              deepseekHarness: frame.deepseekHarness,
               tts: frame.tts,
               profile: frame.profile,
             },

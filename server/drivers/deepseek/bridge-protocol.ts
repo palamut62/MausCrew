@@ -55,14 +55,17 @@ export type BridgeMessage =
   // than behind a bump: parseMessage drops types it does not know, so an
   // older Node driving a newer bridge ignores these, and a newer Node
   // driving an older bridge simply never sees them. Neither end breaks.
-  | { type: "subagent.started"; requestId: string; childSessionId: string }
+  | { type: "subagent.started"; requestId: string; childSessionId: string; parentSessionId?: string }
   | {
       type: "subagent.finished";
       requestId: string;
       childSessionId: string;
+      parentSessionId?: string;
       provider: string;
+      agentId?: string;
       ok: boolean;
       stopReason: string;
+      lastAssistantMessage?: string;
     }
   | { type: "approval.requested"; requestId: string; approvalId: string; tool: string; summary: string }
   | {
@@ -170,7 +173,9 @@ export function parseMessage(value: unknown): BridgeMessage | null {
       return { type, requestId, input: num(o.input), output: num(o.output) };
     case "subagent.started": {
       const childSessionId = str(o.childSessionId);
-      return childSessionId ? { type, requestId, childSessionId } : null;
+      return childSessionId
+        ? { type, requestId, childSessionId, parentSessionId: str(o.parentSessionId) || undefined }
+        : null;
     }
     case "subagent.finished": {
       const childSessionId = str(o.childSessionId);
@@ -179,9 +184,12 @@ export function parseMessage(value: unknown): BridgeMessage | null {
         type,
         requestId,
         childSessionId,
+        parentSessionId: str(o.parentSessionId) || undefined,
         provider: str(o.provider, "subagent"),
+        agentId: str(o.agentId) || undefined,
         ok: o.ok !== false,
         stopReason: str(o.stopReason, "completed"),
+        lastAssistantMessage: str(o.lastAssistantMessage).slice(0, 4_000) || undefined,
       };
     }
     case "approval.requested": {
@@ -220,7 +228,7 @@ export function checkHandshake(ready: { protocolVersion: number }): HandshakeChe
   if (v > MAX_SUPPORTED_PROTOCOL) {
     return {
       ok: false,
-      reason: `bridge protocol version ${v} is newer than this build supports (${MAX_SUPPORTED_PROTOCOL}) — update OpenMausBot`,
+      reason: `bridge protocol version ${v} is newer than this build supports (${MAX_SUPPORTED_PROTOCOL}) — update MausCrew`,
     };
   }
   return { ok: true };

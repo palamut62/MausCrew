@@ -4,7 +4,13 @@
 // question is never answered by the machine.
 import { describe, expect, it } from "vitest";
 
-import { approvalKey, autoDecision, looksDestructive, looksSensitive } from "./auto-approve.ts";
+import {
+  approvalKey,
+  autoDecision,
+  looksDestructive,
+  looksSensitive,
+  requiresOneTimeApproval,
+} from "./auto-approve.ts";
 
 describe("looksDestructive", () => {
   const dangerous = [
@@ -71,7 +77,7 @@ describe("approvalKey", () => {
 
   it("leaves ordinary tools alone", () => {
     expect(approvalKey("Read", "src/index.ts")).toBe("Read");
-    expect(approvalKey("mcp__ogb__computer_batch", "click 5,5")).toBe("mcp__ogb__computer_batch");
+    expect(approvalKey("mcp__mauscrew__computer_batch", "click 5,5")).toBe("mcp__mauscrew__computer_batch");
   });
 
   it("grants one program, not the whole shell", () => {
@@ -103,6 +109,12 @@ describe("autoDecision", () => {
 
   it("never lets always-allow override the destructive guard", () => {
     expect(autoDecision({ alwaysAllow: ["Bash"] }, "Bash", "sudo rm -rf /var")).toBeNull();
+  });
+
+  it("never delegates Dynamic Cordis code activation", () => {
+    expect(requiresOneTimeApproval("cordis_run")).toBe(true);
+    expect(autoDecision({ autoApprove: true }, "cordis_run", "Run plugin")).toBeNull();
+    expect(autoDecision({ alwaysAllow: ["cordis_run"] }, "cordis_run", "Run plugin")).toBeNull();
   });
 });
 

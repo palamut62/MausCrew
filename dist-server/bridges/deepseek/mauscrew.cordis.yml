@@ -1,9 +1,9 @@
-# OpenMausBot's Cordis composition for the DeepSeek Harness runtime
+# MausCrew's Cordis composition for the DeepSeek Harness runtime
 # (spec §37–§43, §61, §82).
 #
 # DSH_CORDIS_CONFIG names the WHOLE plugin tree — there is no merge with a
 # built-in default and no working-directory fallback, so this file has to
-# carry everything the bundled runtime config carries plus what OpenMausBot
+# carry everything the bundled runtime config carries plus what MausCrew
 # adds. It is a copy of that bundled config (python/sdk-runtime `cordis.yml`)
 # with one row appended, kept deliberately close to the original so a diff
 # against a future SDK release is readable.
@@ -26,6 +26,12 @@
   config:
     workspaceContext:
       maxBytes: 65536
+    # The rc6 carrier does not bundle dsh-bash-sandbox. Never expose its
+    # unconfined bash-local provider in a confined mode; filesystem editing
+    # remains available through fs-sandbox below. Full access is explicit and
+    # its bash calls still pass through MausCrew approval.
+    toolBash: !!js "process.env.DSH_SANDBOX_MODE === 'danger-full-access' ? {} : false"
+    toolJobs: !!js "process.env.DSH_SANDBOX_MODE === 'danger-full-access' ? {} : false"
 
 # Stock DeepSeek adapters. The adapter resolves DEEPSEEK_API_KEY and
 # DEEPSEEK_BASE_URL from the environment the driver builds, so this file names
@@ -43,6 +49,20 @@
 - id: session-checkpoints
   name: '@deepseek-ai/dsh-session-checkpoint-policy'
 
+# One policy home is shared by bash and filesystem tools. The provider fails
+# closed when bwrap/Landlock/Seatbelt cannot enforce the requested mode; it
+# never falls through to an unrestricted child. `danger-full-access` remains
+# an explicit user choice and still passes mutating calls through MausCrew's
+# approval gate below.
+- id: sandbox
+  name: '@deepseek-ai/dsh-sandbox-local'
+
+- id: sandbox-policy
+  name: '@deepseek-ai/dsh-sandbox-policy'
+  config:
+    mode: !!js process.env.DSH_SANDBOX_MODE ?? 'workspace-write'
+    workspaceRoot: !!js process.env.DSH_CWD ?? process.cwd()
+
 - id: subprocess
   name: '@deepseek-ai/dsh-subprocess-local'
 
@@ -51,19 +71,26 @@
   config:
     cwd: !!js process.env.DSH_CWD ?? process.cwd()
 
-- id: fs-local
-  name: '@deepseek-ai/dsh-fs-local'
+- id: fs-sandbox
+  name: '@deepseek-ai/dsh-fs-sandbox'
   config:
     cwd: !!js process.env.DSH_CWD ?? process.cwd()
 
-# ── OpenMausBot ─────────────────────────────────────────────────────────────
+# fs-sandbox is the policy-enforcing filesystem backend; the editor is the
+# model-facing tool that uses it. Keeping these as separate rows is important:
+# mounting only fs-sandbox lets the runtime read workspace instructions but
+# gives the model no safe way to perform a requested file edit.
+- id: str-replace-editor
+  name: '@deepseek-ai/dsh-tool-str-replace-editor'
+
+# ── MausCrew ─────────────────────────────────────────────────────────────
 
 # The approval gate. Relative names resolve beside this file, so the plugin
-# ships with OpenMausBot and needs no install step.
+# ships with MausCrew and needs no install step.
 #
 # Everything is read from the environment rather than inlined: the mailbox
 # directory is per provider instance, and a path baked in here would make one
-# bot's approvals answerable from another's. An unset DSH_OPENMAUS_APPROVAL_DIR
+# bot's approvals answerable from another's. An unset DSH_MAUSCREW_APPROVAL_DIR
 # is not "no approvals" — the plugin denies every dangerous tool in that case.
-- id: openmaus-approval
-  name: './openmaus-approval.mjs'
+- id: mauscrew-approval
+  name: './mauscrew-approval.mjs'
