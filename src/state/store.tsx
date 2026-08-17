@@ -168,6 +168,11 @@ export interface ConfigStatus {
   composio: { configured: boolean };
   box: { configured: boolean };
   opencodeGo?: { configured: boolean };
+  /** DeepSeek Harness. `configured` = a key is saved; the key itself is never
+   * echoed. `baseUrl` and `telemetry` are settings, not secrets, and come
+   * back so the form can show what is in effect — the endpoint in particular,
+   * because the UI has to warn that a custom host receives the key. */
+  deepseekHarness?: { configured: boolean; baseUrl: string; telemetry: "off" | "feedback-only" | "full" };
   /** Voice (ElevenLabs). `configured` = a key is saved; `ready` = a key AND
    * a voice, which is what it takes to actually speak. The key itself is
    * never echoed back. */

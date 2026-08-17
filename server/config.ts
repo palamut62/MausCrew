@@ -20,6 +20,12 @@ export interface AppConfig {
   box?: { token?: string };
   /** OpenCode Go key; persisted write-only and passed only to its child. */
   opencodeGo?: { apiKey?: string };
+  /** DeepSeek Harness. `apiKey` is write-only and reaches the bridge process
+   * as an environment variable, never the renderer (spec §96). `baseUrl` and
+   * `telemetry` are settings rather than secrets: the endpoint is echoed back
+   * so the UI can warn that a custom host receives this key (§97), and
+   * telemetry defaults to off unless the user opts in (§57). */
+  deepseekHarness?: { apiKey?: string; baseUrl?: string; telemetry?: "off" | "feedback-only" | "full" };
   /** Voice (ElevenLabs). `key` is the credential and is never echoed back;
    * `voice` is the chosen voice id, which is a setting, not a secret. */
   tts?: { key?: string; voice?: string };
@@ -62,6 +68,7 @@ export function loadConfig(): AppConfig {
   };
   cfg.box = { token: process.env.BOX_TOKEN, ...cfg.box };
   cfg.opencodeGo = { apiKey: process.env.OPENCODE_API_KEY, ...cfg.opencodeGo };
+  cfg.deepseekHarness = { apiKey: process.env.DEEPSEEK_API_KEY, ...cfg.deepseekHarness };
   cfg.tts = { key: process.env.OMB_TTS_KEY, ...cfg.tts };
   return cfg;
 }
@@ -76,7 +83,7 @@ export function saveConfig(patch: Partial<AppConfig>): void {
   } catch {
     /* first write */
   }
-  for (const key of ["xai", "composio", "box", "opencodeGo", "tts", "profile"] as const) {
+  for (const key of ["xai", "composio", "box", "opencodeGo", "deepseekHarness", "tts", "profile"] as const) {
     if (patch[key] && typeof patch[key] === "object") {
       disk[key] = { ...(disk[key] as object), ...patch[key] };
     }
@@ -123,8 +130,26 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
       ...(entry.driver === "opencodeGo" && cfg.opencodeGo?.apiKey
         ? { OPENCODE_API_KEY: cfg.opencodeGo.apiKey }
         : {}),
+      // Scoped to the driver that needs it: a DeepSeek key has no business
+      // in a Codex or Claude child process (spec §12).
+      ...(entry.driver === "deepseek-harness" && cfg.deepseekHarness?.apiKey
+        ? { DEEPSEEK_API_KEY: cfg.deepseekHarness.apiKey }
+        : {}),
       ...entry.environment,
     };
+
+    // Endpoint and telemetry are settings, not credentials, so they travel in
+    // the driver config rather than the environment. The instance's own
+    // `config` still wins: someone who hand-edited config.json for one bot
+    // meant it, and the Settings form is the default for bots that have not.
+    if (entry.driver === "deepseek-harness" && cfg.deepseekHarness) {
+      const { baseUrl, telemetry } = cfg.deepseekHarness;
+      entry.config = {
+        ...(baseUrl ? { baseUrl } : {}),
+        ...(telemetry ? { telemetry } : {}),
+        ...(typeof entry.config === "object" && entry.config !== null ? entry.config : {}),
+      };
+    }
   }
   return map;
 }

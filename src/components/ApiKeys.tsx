@@ -6,7 +6,7 @@ import { Check, CircleHelp, ExternalLink, Loader2, TriangleAlert } from "lucide-
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import { cn } from "@/lib/cn";
 
-export type ConfigSection = "composio" | "box" | "opencodeGo";
+export type ConfigSection = "composio" | "box" | "opencodeGo" | "deepseekHarness";
 
 const SECTIONS: Record<
   ConfigSection,
@@ -18,6 +18,10 @@ const SECTIONS: Record<
   },
   box: { body: (v) => ({ box: { token: v } }), flag: (c) => c.box.configured },
   opencodeGo: { body: (v) => ({ opencodeGo: { apiKey: v } }), flag: (c) => c.opencodeGo?.configured ?? false },
+  deepseekHarness: {
+    body: (v) => ({ deepseekHarness: { apiKey: v } }),
+    flag: (c) => c.deepseekHarness?.configured ?? false,
+  },
 };
 
 const CREDENTIALS: Record<
@@ -55,6 +59,15 @@ const CREDENTIALS: Record<
     description: "Run OpenCode Go models through the maintained OpenCode CLI and ACP.",
     href: "https://opencode.ai/docs/go/",
     linkLabel: "Open OpenCode Go setup guide",
+    optional: true,
+  },
+  deepseekHarness: {
+    label: "DeepSeek API key",
+    placeholder: "sk-…",
+    description:
+      "Run DeepSeek Harness bots. Also needs the Python SDK installed — the bot shows what is missing until it is.",
+    href: "https://platform.deepseek.com/api_keys",
+    linkLabel: "Create or copy a DeepSeek API key",
     optional: true,
   },
 };
@@ -206,6 +219,108 @@ export function ApiKeyRow({
         </button>
       </div>
       {error && <div className="mt-1 text-[12px] text-danger">{error}</div>}
+    </div>
+  );
+}
+
+/** DeepSeek settings that are not credentials: which endpoint the key is sent
+ * to, and whether the runtime may report telemetry.
+ *
+ * Kept beside the key row rather than in a separate panel because the two
+ * decisions are the same decision — §97 says the user must be told that a
+ * custom base URL receives their API key, and that warning is only useful
+ * next to the field that holds the key. */
+export function DeepSeekOptions() {
+  const { state, dispatch } = useStore();
+  const saved = state.config?.deepseekHarness;
+  const [baseUrl, setBaseUrl] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const telemetryId = useId();
+  const baseUrlId = useId();
+
+  // null means "not edited yet", so a save elsewhere does not clobber typing
+  const shown = baseUrl ?? saved?.baseUrl ?? "";
+  const telemetry = saved?.telemetry ?? "off";
+
+  const put = (body: Record<string, unknown>) => {
+    setSaving(true);
+    setError(null);
+    api("/api/config", { method: "PUT", body: JSON.stringify({ deepseekHarness: body }) })
+      .then((status: ConfigStatus) => {
+        dispatch({ type: "configStatus", config: status });
+        setBaseUrl(null);
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setSaving(false));
+  };
+
+  // Advisory only — the server decides what is acceptable and answers 400.
+  // This exists so the user reads the consequence before pressing Save, not
+  // after.
+  const trimmed = shown.trim();
+  const custom = Boolean(trimmed) && !/^https:\/\/api\.deepseek\.com\/?$/i.test(trimmed);
+  const plaintext = /^http:\/\//i.test(trimmed) && !/^http:\/\/(localhost|127\.0\.0\.1)\b/i.test(trimmed);
+
+  return (
+    <div className="mt-3 space-y-3">
+      <div>
+        <label htmlFor={baseUrlId} className="mb-1.5 block text-[13px] text-ink-secondary">
+          DeepSeek endpoint
+        </label>
+        <div className="flex gap-2">
+          <input
+            id={baseUrlId}
+            type="url"
+            inputMode="url"
+            value={shown}
+            onChange={(e) => setBaseUrl(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && put({ baseUrl: trimmed })}
+            placeholder="https://api.deepseek.com (default)"
+            autoComplete="off"
+            className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
+          />
+          <button
+            onClick={() => put({ baseUrl: trimmed })}
+            disabled={saving || (baseUrl === null)}
+            className="flex w-[72px] shrink-0 items-center justify-center gap-1.5 rounded-lg bg-raised py-2 text-[13px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {saving ? <Loader2 size={13} className="animate-spin" /> : <><Check size={13} />Save</>}
+          </button>
+        </div>
+        {custom && (
+          <div className="mt-1.5 flex gap-1.5 rounded-lg border border-warning/25 bg-warning/10 px-2 py-1.5 text-[11px] leading-[1.4] text-warning">
+            <TriangleAlert size={13} className="mt-px shrink-0" aria-hidden="true" />
+            <span>
+              Your DeepSeek API key will be sent to this host{plaintext ? " over plain HTTP, unencrypted" : ""}. Only
+              use an endpoint you trust.
+            </span>
+          </div>
+        )}
+      </div>
+
+      <div>
+        <label htmlFor={telemetryId} className="mb-1.5 block text-[13px] text-ink-secondary">
+          DeepSeek telemetry
+        </label>
+        <select
+          id={telemetryId}
+          value={telemetry}
+          disabled={saving}
+          onChange={(e) => put({ telemetry: e.target.value })}
+          className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink focus:border-hairline focus:outline-none disabled:opacity-50"
+        >
+          <option value="off">Off — send nothing (default)</option>
+          <option value="feedback-only">Feedback only</option>
+          <option value="full">Full</option>
+        </select>
+        <div className="mt-1.5 text-[11px] leading-[1.45] text-ink-secondary">
+          Off is enforced as a hard opt-out before the runtime loads. Note that DeepSeek may still send an anonymous
+          user id with API requests, which this switch does not control.
+        </div>
+      </div>
+
+      {error && <div className="text-[12px] text-danger">{error}</div>}
     </div>
   );
 }

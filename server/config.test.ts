@@ -17,3 +17,40 @@ describe("OpenCode Go configuration", () => {
     expect(instances.grok.environment).toEqual({});
   });
 });
+
+describe("DeepSeek Harness configuration", () => {
+  it("gives the key only to DeepSeek instances", () => {
+    const cfg: AppConfig = {
+      deepseekHarness: { apiKey: "sk-secret" },
+      instances: {
+        deepseek: { driver: "deepseek-harness" },
+        codex: { driver: "codex" },
+      },
+    };
+
+    const instances = instanceConfigs(cfg);
+    expect(instances.deepseek.environment).toEqual({ DEEPSEEK_API_KEY: "sk-secret" });
+    // a DeepSeek key has no business in another engine's child process
+    expect(instances.codex.environment).toEqual({});
+  });
+
+  it("passes endpoint and telemetry as driver config, not as environment", () => {
+    // They are settings rather than secrets, and the driver decodes them —
+    // routing them through the environment would put them outside the
+    // validation decodeConfig applies.
+    const instances = instanceConfigs({
+      deepseekHarness: { apiKey: "sk", baseUrl: "https://models.internal", telemetry: "feedback-only" },
+      instances: { deepseek: { driver: "deepseek-harness" } },
+    });
+    expect(instances.deepseek.config).toEqual({ baseUrl: "https://models.internal", telemetry: "feedback-only" });
+    expect(instances.deepseek.environment).toEqual({ DEEPSEEK_API_KEY: "sk" });
+  });
+
+  it("lets a hand-written instance config win over the shared form", () => {
+    const instances = instanceConfigs({
+      deepseekHarness: { baseUrl: "https://shared.example" },
+      instances: { deepseek: { driver: "deepseek-harness", config: { baseUrl: "https://this-bot-only.example" } } },
+    });
+    expect((instances.deepseek.config as { baseUrl: string }).baseUrl).toBe("https://this-bot-only.example");
+  });
+});

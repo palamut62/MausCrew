@@ -26,6 +26,7 @@ import { buildNotification, type Notification } from "./notify.ts";
 import { isEffortLevel, type RuntimeEvent } from "./contracts.ts";
 
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
+import { describeBaseUrl } from "./drivers/deepseek/config.ts";
 import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type CommsBus } from "./comms-visibility.ts";
 import { discardDelegations, drainDelegations, queueDelegation, type QueueResult } from "./delegations.ts";
 import { EventBus } from "./harness/bus.ts";
@@ -1261,6 +1262,15 @@ function configStatus() {
     },
     box: { configured: Boolean(cfg.box?.token) },
     opencodeGo: { configured: Boolean(cfg.opencodeGo?.apiKey) },
+    // The key is reported configured-or-not like every other credential and
+    // never echoed (spec §96). The endpoint is not a secret and is echoed on
+    // purpose: the UI warns that a custom host receives this key (§97), and
+    // it cannot warn about a value it is not allowed to see.
+    deepseekHarness: {
+      configured: Boolean(cfg.deepseekHarness?.apiKey),
+      baseUrl: cfg.deepseekHarness?.baseUrl ?? "",
+      telemetry: cfg.deepseekHarness?.telemetry ?? "off",
+    },
     // the chosen voice is a setting, not a secret; the key is reported the
     // same configured-or-not way as every other credential
     tts: tts.describeVoice(cfg),
@@ -2278,8 +2288,37 @@ const server = createServer(async (req, res) => {
       ) {
         return json(res, 400, { error: "opencodeGo.apiKey must be a string" });
       }
+      const rawDeepSeek = body.deepseekHarness;
+      if (
+        rawDeepSeek !== undefined
+        && (rawDeepSeek === null || typeof rawDeepSeek !== "object" || Array.isArray(rawDeepSeek))
+      ) {
+        return json(res, 400, { error: "deepseekHarness must be an object" });
+      }
+      if (rawDeepSeek) {
+        const ds = rawDeepSeek as Record<string, unknown>;
+        for (const field of ["apiKey", "baseUrl"] as const) {
+          if (Object.prototype.hasOwnProperty.call(ds, field) && typeof ds[field] !== "string") {
+            return json(res, 400, { error: `deepseekHarness.${field} must be a string` });
+          }
+        }
+        // Validated here rather than at the first turn: an endpoint that
+        // cannot be used is a mistake the user should hear about while the
+        // field is still in front of them, and this is also the point where
+        // a non-http scheme would otherwise be persisted.
+        if (typeof ds.baseUrl === "string" && ds.baseUrl.trim()) {
+          const verdict = describeBaseUrl(ds.baseUrl.trim());
+          if (!verdict.ok) return json(res, 400, { error: verdict.reason ?? "deepseekHarness.baseUrl is not usable" });
+        }
+        if (
+          Object.prototype.hasOwnProperty.call(ds, "telemetry")
+          && !["off", "feedback-only", "full"].includes(String(ds.telemetry))
+        ) {
+          return json(res, 400, { error: "deepseekHarness.telemetry must be off, feedback-only or full" });
+        }
+      }
       const patch: Record<string, object> = {};
-      for (const key of ["xai", "composio", "box", "opencodeGo", "tts", "profile"] as const) {
+      for (const key of ["xai", "composio", "box", "opencodeGo", "deepseekHarness", "tts", "profile"] as const) {
         if (body[key] && typeof body[key] === "object") patch[key] = body[key];
       }
       if (!Object.keys(patch).length) return json(res, 400, { error: "nothing to save" });
