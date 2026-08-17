@@ -11,5 +11,41 @@
 #
 #     python3 -m pip install --pre -r requirements-deepseek.txt
 #
-# The SDK is still pre-release, so --pre is required.
-deepseek-harness-sdk==0.1.0rc6
+# The SDK is still pre-release, so --pre is required. This file verifies the
+# two entries it hashes; it is NOT a `--require-hashes`-clean file by itself
+# (pip's hash-checking mode demands a hash for every package it installs,
+# including pydantic and its transitive dependencies, which are intentionally
+# left unpinned here — see below). Plain `pip install -r` still checks each
+# hashed entry's digest against what it downloads and refuses a mismatch.
+#
+# Hash pinning (spec §66): the two hashed entries below are the direct
+# dependency and its platform-specific runtime binary, fetched from PyPI's
+# JSON API for the exact pinned version — not computed locally, so a
+# corrupted or substituted download fails closed instead of installing
+# silently. Full `--require-hashes` mode needs the whole transitive tree
+# hashed, so pydantic and its own dependencies are intentionally NOT pinned
+# here: doing that by hand invites a stale hash blocking a legitimate patch
+# release. Generate a full transitive lock instead when a hash-checked
+# install is required end to end:
+#
+#     pip install pip-tools
+#     pip-compile --generate-hashes --allow-unsafe --pre \
+#         --output-file requirements-deepseek.lock.txt requirements-deepseek.in
+#
+# (where requirements-deepseek.in contains just `deepseek-harness-sdk==0.1.0rc6`).
+# That command must run on each target platform, since pydantic-core and
+# deepseek-harness-runtime-bin ship separate wheels per platform.
+deepseek-harness-sdk==0.1.0rc6 \
+    --hash=sha256:8a05421be4298196cf94383e0a3164b020f5f5977a8d30019cc5add64cb208eb
+
+# Transitive, but pinned+hashed explicitly because it is the large native
+# payload (the packaged dsh-jsonrpc-agent runtime executable) and its
+# identity is exactly what the protocol handshake in bridge.py assumes.
+# One hash per platform pip may resolve to; pip picks the matching wheel and
+# ignores the others, so listing all three is correct on every OS, not just
+# the one currently installing (spec §65 support matrix: macOS ARM64, Linux
+# x64, Linux ARM64 — macOS Intel and native Windows have no wheel here).
+deepseek-harness-runtime-bin==0.1.0rc6 \
+    --hash=sha256:2bbd65edd52dfc340d74f88a890e8031a272a820e58406c2de1f5f5dee51bd9f \
+    --hash=sha256:99d0ef334a4e3cb178d7b0302bbdd01c8dde6068ee5fe8b01e074541db5c7747 \
+    --hash=sha256:d7261d3bdadfa8d10ab03fd06c6bbc66a182ae27d39892a0eb7c2ce9d63a5448

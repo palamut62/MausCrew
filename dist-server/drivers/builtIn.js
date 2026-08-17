@@ -8,6 +8,7 @@ import { GeminiAgentDriver } from "./acp/gemini.js";
 import { KimiAgentDriver } from "./acp/kimi.js";
 import { DroidAgentDriver } from "./acp/droid.js";
 import { OpenCodeGoDriver } from "./acp/opencode-go.js";
+import { DeepSeekHarnessDriver } from "./deepseek-harness.js";
 export const BUILT_IN_DRIVERS = [
     GrokDriver,
     GrokAgentDriver,
@@ -19,4 +20,6 @@ export const BUILT_IN_DRIVERS = [
     CodexDriver,
     AntigravityDriver,
     BoxAgentDriver,
+    // appended last so the existing engine ordering in the UI is unchanged
+    DeepSeekHarnessDriver,
 ];

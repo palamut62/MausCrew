@@ -10,9 +10,16 @@ Verified: 2026-08-17, against `deepseek-harness-sdk` **0.1.0rc6**.
 | Component | Pinned | Where |
 | --- | --- | --- |
 | `deepseek-harness-sdk` | `0.1.0rc6` | [`server/bridges/deepseek/requirements-deepseek.txt`](../server/bridges/deepseek/requirements-deepseek.txt) |
-| `deepseek-harness-runtime-bin` | resolved by the SDK | transitive dependency |
+| `deepseek-harness-runtime-bin` | `0.1.0rc6` (hash-pinned, resolved by the SDK) | same file |
 | Bridge protocol | `1` | `bridge.py` and `server/drivers/deepseek/bridge-protocol.ts` |
 | Python | 3.10+ | required by the SDK |
+
+License notices and a component inventory for everything the Python bridge
+pulls in live in
+[`server/bridges/deepseek/THIRD-PARTY-NOTICES.md`](../server/bridges/deepseek/THIRD-PARTY-NOTICES.md)
+and [`server/bridges/deepseek/sbom.json`](../server/bridges/deepseek/sbom.json)
+(CycloneDX 1.5) — spec §66. Both cover only the opt-in DeepSeek Harness
+engine; they are not part of OpenMausBot's own dependency tree.
 
 The SDK is pre-release (`rc`), so `pip install` needs `--pre`. Its version
 number will move before it stabilizes; the handshake exists so a mismatched
