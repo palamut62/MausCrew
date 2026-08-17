@@ -133,25 +133,32 @@ export class DeepSeekBridge {
     });
 
     child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => this.consume(chunk));
+    child.stdout.on("data", (chunk: string) => {
+      if (this.child === child) this.consume(chunk);
+    });
 
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk: string) => {
-      this.stderrTail = (this.stderrTail + chunk).slice(-8192);
+      if (this.child === child) this.stderrTail = (this.stderrTail + chunk).slice(-8192);
     });
 
     child.on("error", (error) => {
+      if (this.child !== child) return;
       this.onReady?.(error instanceof Error ? error : new Error(String(error)));
-      this.handleExit(null);
+      this.handleExit(child, null);
     });
     child.on("close", (code) => {
+      // A hard cancel may already have spawned the replacement runtime.
+      // Late events from the old child must never reject the new handshake
+      // or clear the new child reference.
+      if (this.child !== child) return;
       this.onReady?.(
         new DeepSeekBridgeError(
           "bridge_crashed",
           `the bridge exited (${code}) before its handshake${this.stderrTail ? `: ${this.stderrTail.trim().slice(-300)}` : ""}`,
         ),
       );
-      this.handleExit(code);
+      this.handleExit(child, code);
     });
 
     await ready;
@@ -202,8 +209,8 @@ export class DeepSeekBridge {
     }
   }
 
-  private handleExit(code: number | null): void {
-    if (!this.child) return;
+  private handleExit(child: BridgeChild, code: number | null): void {
+    if (this.child !== child) return;
     const expected = this.stopping;
     this.child = null;
     this.capabilities = null;

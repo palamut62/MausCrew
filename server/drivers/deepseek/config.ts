@@ -155,7 +155,13 @@ function str(value: unknown, fallback: string): string {
 function absolutePath(value: unknown, field: string): string {
   const raw = str(value, "");
   if (!raw) return "";
-  if (!isAbsolute(raw)) throw new DeepSeekConfigError(`${field} must be an absolute path, got "${raw}"`);
+  // WSL settings legitimately contain a Windows host path even when config
+  // is decoded by a POSIX CI runner. node:path.isAbsolute() follows the host
+  // platform, so recognize drive-rooted and UNC paths explicitly as well.
+  const windowsAbsolute = /^[A-Za-z]:[\\/]/.test(raw) || /^\\\\[^\\]+\\[^\\]+/.test(raw);
+  if (!isAbsolute(raw) && !windowsAbsolute) {
+    throw new DeepSeekConfigError(`${field} must be an absolute path, got "${raw}"`);
+  }
   return raw;
 }
 
