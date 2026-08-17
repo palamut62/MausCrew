@@ -39,6 +39,7 @@ export function loadConfig() {
     };
     cfg.box = { token: process.env.BOX_TOKEN, ...cfg.box };
     cfg.opencodeGo = { apiKey: process.env.OPENCODE_API_KEY, ...cfg.opencodeGo };
+    cfg.deepseekHarness = { apiKey: process.env.DEEPSEEK_API_KEY, ...cfg.deepseekHarness };
     cfg.tts = { key: process.env.OMB_TTS_KEY, ...cfg.tts };
     return cfg;
 }
@@ -53,7 +54,7 @@ export function saveConfig(patch) {
     catch {
         /* first write */
     }
-    for (const key of ["xai", "composio", "box", "opencodeGo", "tts", "profile"]) {
+    for (const key of ["xai", "composio", "box", "opencodeGo", "deepseekHarness", "tts", "profile"]) {
         if (patch[key] && typeof patch[key] === "object") {
             disk[key] = { ...disk[key], ...patch[key] };
         }
@@ -98,8 +99,25 @@ export function instanceConfigs(cfg) {
             ...(entry.driver === "opencodeGo" && cfg.opencodeGo?.apiKey
                 ? { OPENCODE_API_KEY: cfg.opencodeGo.apiKey }
                 : {}),
+            // Scoped to the driver that needs it: a DeepSeek key has no business
+            // in a Codex or Claude child process (spec §12).
+            ...(entry.driver === "deepseek-harness" && cfg.deepseekHarness?.apiKey
+                ? { DEEPSEEK_API_KEY: cfg.deepseekHarness.apiKey }
+                : {}),
             ...entry.environment,
         };
+        // Endpoint and telemetry are settings, not credentials, so they travel in
+        // the driver config rather than the environment. The instance's own
+        // `config` still wins: someone who hand-edited config.json for one bot
+        // meant it, and the Settings form is the default for bots that have not.
+        if (entry.driver === "deepseek-harness" && cfg.deepseekHarness) {
+            const { baseUrl, telemetry } = cfg.deepseekHarness;
+            entry.config = {
+                ...(baseUrl ? { baseUrl } : {}),
+                ...(telemetry ? { telemetry } : {}),
+                ...(typeof entry.config === "object" && entry.config !== null ? entry.config : {}),
+            };
+        }
     }
     return map;
 }

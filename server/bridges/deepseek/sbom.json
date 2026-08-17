@@ -1,0 +1,58 @@
+{
+  "$schema": "https://cyclonedx.org/schema/bom-1.5.schema.json",
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "version": 1,
+  "metadata": {
+    "component": {
+      "type": "application",
+      "name": "openmausbot-deepseek-harness-bridge",
+      "description": "OpenMausBot's optional DeepSeek Harness engine — the Python bridge process spawned by server/drivers/deepseek-harness.ts, not a fork of DeepSeek Harness itself."
+    }
+  },
+  "components": [
+    {
+      "type": "library",
+      "name": "deepseek-harness-sdk",
+      "version": "0.1.0rc6",
+      "purl": "pkg:pypi/deepseek-harness-sdk@0.1.0rc6",
+      "licenses": [{ "license": { "id": "MIT" } }],
+      "externalReferences": [
+        { "type": "vcs", "url": "https://github.com/deepseek-ai/deepseek-harness" },
+        { "type": "distribution", "url": "https://pypi.org/project/deepseek-harness-sdk/0.1.0rc6/" }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "8a05421be4298196cf94383e0a3164b020f5f5977a8d30019cc5add64cb208eb"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "deepseek-harness-runtime-bin",
+      "version": "0.1.0rc6",
+      "purl": "pkg:pypi/deepseek-harness-runtime-bin@0.1.0rc6",
+      "description": "Packaged dsh-jsonrpc-agent runtime executable; one wheel per supported platform.",
+      "licenses": [{ "license": { "id": "MIT" } }],
+      "externalReferences": [
+        { "type": "vcs", "url": "https://github.com/deepseek-ai/deepseek-harness" },
+        { "type": "distribution", "url": "https://pypi.org/project/deepseek-harness-runtime-bin/0.1.0rc6/" }
+      ],
+      "hashes": [
+        { "alg": "SHA-256", "content": "2bbd65edd52dfc340d74f88a890e8031a272a820e58406c2de1f5f5dee51bd9f" },
+        { "alg": "SHA-256", "content": "99d0ef334a4e3cb178d7b0302bbdd01c8dde6068ee5fe8b01e074541db5c7747" },
+        { "alg": "SHA-256", "content": "d7261d3bdadfa8d10ab03fd06c6bbc66a182ae27d39892a0eb7c2ce9d63a5448" }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "pydantic",
+      "version": ">=2.12,<3",
+      "purl": "pkg:pypi/pydantic",
+      "description": "Transitive dependency of deepseek-harness-sdk; version resolved by pip at install time, not pinned by this repository.",
+      "licenses": [{ "license": { "id": "MIT" } }],
+      "externalReferences": [{ "type": "vcs", "url": "https://github.com/pydantic/pydantic" }]
+    }
+  ]
+}
