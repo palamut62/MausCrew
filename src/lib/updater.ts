@@ -3,12 +3,12 @@
 // onState emits the current state immediately on subscribe, so a component
 // mounted after the download finished still sees "downloaded".
 import { useEffect, useState } from "react";
-import type { UpdaterState } from "@/types/ogb";
+import type { UpdaterState } from "@/types/mauscrew";
 
 export type { UpdaterState };
 
 export function useUpdaterState(): UpdaterState | null {
   const [state, setState] = useState<UpdaterState | null>(null);
-  useEffect(() => window.ogb?.updater?.onState(setState), []);
-  return window.ogb?.updater ? state : null;
+  useEffect(() => window.mauscrew?.updater?.onState(setState), []);
+  return window.mauscrew?.updater ? state : null;
 }

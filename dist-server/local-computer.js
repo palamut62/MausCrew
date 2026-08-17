@@ -22,7 +22,7 @@ function decodeDescriptor(value) {
         env: env,
     };
 }
-export function readCuaConnection({ platform = process.platform, userData = process.env.OMB_USER_DATA, home = homedir(), } = {}) {
+export function readCuaConnection({ platform = process.platform, userData = process.env.MAUSCREW_USER_DATA, home = homedir(), } = {}) {
     // Linux local automation is deliberately outside the Ubuntu baseline.
     // Ignore even a forged or stale descriptor until the CUA follow-up adds
     // session-aware readiness and end-to-end evidence.
@@ -31,7 +31,7 @@ export function readCuaConnection({ platform = process.platform, userData = proc
     const candidates = userData ? [join(userData, "cua-connection.json")] : [];
     if (platform === "darwin") {
         // Legacy/dev fallback. Packaged Electron passes its exact userData path.
-        for (const dir of ["OpenMausBot", "openmausbot", "OpenGrokBot", "opengrokbot"]) {
+        for (const dir of ["MausCrew", "mauscrew", "OpenGrokBot", "opengrokbot"]) {
             candidates.push(join(home, "Library", "Application Support", dir, "cua-connection.json"));
         }
     }

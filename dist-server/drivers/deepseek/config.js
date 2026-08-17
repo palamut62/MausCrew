@@ -11,18 +11,19 @@
 // uses, so credentials never round-trip through config JSON (spec §11, §96).
 import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
-/** The composition OpenMausBot ships (spec §37). It is the bundled runtime
+/** The composition MausCrew ships (spec §37). It is the bundled runtime
  * default plus the approval gate, and it is the default for every instance:
  * a bot that composes no approval answerer runs the model's shell and file
  * tools unattended, which §36 does not permit. Pointing `cordis.configPath`
  * somewhere else is allowed and takes that responsibility on. */
-export const BUNDLED_CORDIS_CONFIG = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "bridges", "deepseek", "openmaus.cordis.yml");
+export const BUNDLED_CORDIS_CONFIG = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "bridges", "deepseek", "mauscrew.cordis.yml");
 export const DEFAULT_PROVIDER = "deepseek-official";
 export const DEFAULT_MODEL = "deepseek-v4-flash";
 export const DEFAULT_API_KEY_ENV = "DEEPSEEK_API_KEY";
 const TRANSPORT_MODES = ["python", "native"];
 const RUNTIME_MODES = ["bundled-python-sdk", "external-python", "wsl"];
-const SANDBOX_MODES = ["workspace", "container", "custom"];
+const RUNTIME_STRATEGIES = ["system", "managed", "bundled"];
+const SANDBOX_MODES = ["read-only", "workspace-write", "danger-full-access"];
 const TELEMETRY_MODES = ["off", "feedback-only", "full"];
 /** 30 minutes (spec §45). Long enough for a real multi-tool turn, short
  * enough that a wedged runtime frees the thread the same day. */
@@ -113,6 +114,15 @@ export function decodeConfig(raw) {
     const cordis = (o.cordis ?? {});
     const sandbox = (o.sandbox ?? {});
     const approval = (o.approval ?? {});
+    // A config that explicitly named Python before strategy existed keeps that
+    // behavior. A genuinely new config takes the production target: the
+    // executable carrier over native JSON-RPC.
+    const legacyStrategy = runtime.mode === "bundled-python-sdk"
+        ? "managed"
+        : o.pythonPath || runtime.executable || transport.mode === "python"
+            ? "system"
+            : "bundled";
+    const strategy = oneOf(runtime.strategy, RUNTIME_STRATEGIES, legacyStrategy);
     return {
         // not absolutePath: a bare "python3" resolved through PATH is the normal
         // case, and env-path's resolver is what makes that safe
@@ -126,9 +136,10 @@ export function decodeConfig(raw) {
             mode: oneOf(runtime.mode, RUNTIME_MODES, defaultRuntimeMode()),
             executable: str(runtime.executable, ""),
             distribution: str(runtime.distribution, ""),
+            strategy,
         },
         transport: {
-            mode: oneOf(transport.mode, TRANSPORT_MODES, "python"),
+            mode: oneOf(transport.mode, TRANSPORT_MODES, strategy === "bundled" ? "native" : "python"),
             launchArgs: argv(transport.launchArgs),
         },
         cordis: {
@@ -138,7 +149,7 @@ export function decodeConfig(raw) {
             preset: str(cordis.preset, ""),
         },
         sessionRoot: absolutePath(o.sessionRoot, "sessionRoot"),
-        sandbox: { mode: oneOf(sandbox.mode, SANDBOX_MODES, "workspace") },
+        sandbox: { mode: sandboxMode(sandbox.mode) },
         turnTimeoutMs: timeoutMs(o.turnTimeoutMs),
         // an unrecognized mode reads as "off", never as an opt-in
         telemetry: oneOf(o.telemetry, TELEMETRY_MODES, "off"),
@@ -150,6 +161,15 @@ export function decodeConfig(raw) {
         },
     };
 }
+/** `workspace` was the pre-sandbox config value. It meant the intended
+ * boundary, not a provider that actually enforced it, so migrate it to the
+ * real upstream policy. Unknown/wider legacy values fail back to the same
+ * confined default instead of silently widening access. */
+function sandboxMode(value) {
+    if (value === "workspace")
+        return "workspace-write";
+    return oneOf(value, SANDBOX_MODES, "workspace-write");
+}
 function approvalTimeoutMs(value) {
     if (typeof value !== "number" || !Number.isFinite(value))
         return DEFAULT_APPROVAL_TIMEOUT_MS;
@@ -157,7 +177,7 @@ function approvalTimeoutMs(value) {
 }
 /** Whether this instance actually has an approval broker in the loop.
  *
- * True only for the composition OpenMausBot ships, because that is the only
+ * True only for the composition MausCrew ships, because that is the only
  * one we can know composes the gate. A user's own composition may well have
  * something better, but "may well" is not a basis for widening a sandbox
  * (spec §54, §95) — the driver stays workspace-only in that case. */

@@ -49,10 +49,10 @@ if (MODE === "crash-on-start") {
 
 let messageSerial = 0;
 
-function runTurn(sessionId: string, messageId: string): void {
+function runTurn(sessionId: string, messageId: string, includeReceipt = true): void {
   // The receipt. Until the driver sees this it must not treat an idle status
   // as the end of its turn — that gate is the whole reason this frame exists.
-  sessionEvent(sessionId, "agent/inbox/spliced", { inserted: [{ id: messageId }] });
+  if (includeReceipt) sessionEvent(sessionId, "agent/inbox/spliced", { inserted: [{ id: messageId }] });
   notify("session.status", { sessionId, status: "running" });
 
   if (MODE === "crash-mid-turn") {
@@ -72,6 +72,7 @@ function runTurn(sessionId: string, messageId: string): void {
       childSessionId: "child-abcdef123456",
       status: "ok",
       stopReason: "completed",
+      lastAssistantMessage: "Reviewed the delegated files and found no remaining failures.",
     });
   }
 
@@ -124,6 +125,12 @@ rl.on("line", (line) => {
       }
       const sessionId = String(params.sessionId ?? "");
       const messageId = `msg-${++messageSerial}`;
+      if (MODE === "receipt-before-response") {
+        sessionEvent(sessionId, "agent/inbox/spliced", { inserted: [{ id: messageId }] });
+        send({ jsonrpc: "2.0", id, result: { messageId } });
+        setTimeout(() => runTurn(sessionId, messageId, false), 5);
+        return;
+      }
       send({ jsonrpc: "2.0", id, result: { messageId } });
       // A tick of delay so the response lands before the notifications, the
       // ordering a real out-of-process runtime produces.

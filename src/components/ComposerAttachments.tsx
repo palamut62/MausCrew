@@ -14,7 +14,7 @@ import {
 
 /** Electron 32 removed File.path — only the preload can name a file. */
 function pathForFile(file: File): string {
-  return window.ogb?.getPathForFile?.(file) ?? "";
+  return window.mauscrew?.getPathForFile?.(file) ?? "";
 }
 
 export function ComposerAttachments({

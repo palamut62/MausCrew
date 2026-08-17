@@ -76,7 +76,7 @@ describe("OpenCode Go catalog", () => {
   });
 
   it("recognizes an OpenCode Go login stored by the CLI", async () => {
-    const scratch = mkdtempSync(join(tmpdir(), "omb-opencode-auth-"));
+    const scratch = mkdtempSync(join(tmpdir(), "mauscrew-opencode-auth-"));
     const authDir = join(scratch, "opencode");
     mkdirSync(authDir, { recursive: true });
     writeFileSync(join(authDir, "auth.json"), JSON.stringify({
@@ -103,7 +103,7 @@ describe("OpenCode Go catalog", () => {
   });
 
   it("keeps the OpenCode key in the child environment only", async () => {
-    const scratch = mkdtempSync(join(tmpdir(), "omb-opencode-go-"));
+    const scratch = mkdtempSync(join(tmpdir(), "mauscrew-opencode-go-"));
     try {
       const dump = join(scratch, "env.json");
       const driver = createOpenCodeGoDriver(async () => new Response(JSON.stringify([{ id: "minimax-m3" }]), { status: 200 }));

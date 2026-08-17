@@ -1,8 +1,8 @@
 // Renderer bridge. contextIsolation stays on; the renderer only ever sees
-// this narrow surface (window.ogb), never Node or ipcRenderer itself.
+// this narrow surface (window.mauscrew), never Node or ipcRenderer itself.
 const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
-contextBridge.exposeInMainWorld("ogb", {
+contextBridge.exposeInMainWorld("mauscrew", {
   /** Host platform ("darwin" | "win32" | "linux") — for platform-aware UI. */
   platform: process.platform,
   getCapabilities: () => ipcRenderer.invoke("desktop:capabilities"),
@@ -42,6 +42,8 @@ contextBridge.exposeInMainWorld("ogb", {
   /** Copies an engine install command and opens a blank terminal. Resolves
    * false if no terminal could be launched; the clipboard still has it. */
   openInstallTerminal: (command) => ipcRenderer.invoke("engine:open-terminal", command),
+  /** Choose one absolute host directory for a bot's coding workspace. */
+  chooseWorkspace: () => ipcRenderer.invoke("workspace:choose"),
   /** Store a provider credential with OS-backed encryption. */
   setCredential: (name, value) => ipcRenderer.invoke("credential:set", name, value),
 

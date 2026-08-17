@@ -75,7 +75,7 @@ function serializePayload(payload) {
     }
     if (text.length <= MAX_EVENT_CHARS)
         return text;
-    return `${text.slice(0, MAX_EVENT_CHARS)}\n\n[Payload truncated by OpenMausBot]`;
+    return `${text.slice(0, MAX_EVENT_CHARS)}\n\n[Payload truncated by MausCrew]`;
 }
 function previewPayload(payload) {
     return serializePayload(payload).replace(/\s+/g, " ").trim().slice(0, 2_000);
@@ -247,16 +247,16 @@ export class WebhookManager {
             throw error;
         }
     }
-    test(id, payload = { event: "openmaus.test", message: "Test webhook delivery" }) {
+    test(id, payload = { event: "mauscrew.test", message: "Test webhook delivery" }) {
         const trigger = this.webhooks.find((candidate) => candidate.id === id);
         if (!trigger)
             return null;
-        const eventName = trigger.eventTypes?.[0] ?? "openmaus.test";
+        const eventName = trigger.eventTypes?.[0] ?? "mauscrew.test";
         return this.dispatch(trigger, {
             payload,
             contentType: "application/json",
             eventName,
-            userAgent: "OpenMausBot webhook tester",
+            userAgent: "MausCrew webhook tester",
             deliveryId: `test-${randomUUID()}`,
         });
     }

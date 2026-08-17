@@ -52,6 +52,10 @@ export class RuntimeTurn {
   /** The `session/prompt` receipt we are waiting to observe. Empty until the
    * request returns — notifications can arrive before it does. */
   private messageId = "";
+  /** Inbox receipts may arrive before the JSON-RPC response that tells us
+   * which message id belongs to this prompt. Retain their ids so response vs
+   * notification scheduling cannot strand an otherwise completed turn. */
+  private readonly inboxReceipts = new Set<string>();
   private spliced = false;
   private finalResponse = "";
   private finishReason: string | null = null;
@@ -66,6 +70,7 @@ export class RuntimeTurn {
    * cannot recognize its own receipt, so it also cannot end. */
   setMessageId(messageId: string): void {
     this.messageId = messageId;
+    if (this.inboxReceipts.has(messageId)) this.spliced = true;
   }
 
   /** Translate one notification. Returns the messages to emit, plus the
@@ -96,7 +101,17 @@ export class RuntimeTurn {
     }
     if (method === "subagent.started") {
       this.descendants.add(child);
-      return { messages: [{ type: "subagent.started", requestId: this.requestId, childSessionId: child }], outcome: null };
+      return {
+        messages: [
+          {
+            type: "subagent.started",
+            requestId: this.requestId,
+            childSessionId: child,
+            parentSessionId: typeof parent === "string" ? parent : undefined,
+          },
+        ],
+        outcome: null,
+      };
     }
     return {
       messages: [
@@ -104,12 +119,15 @@ export class RuntimeTurn {
           type: "subagent.finished",
           requestId: this.requestId,
           childSessionId: child,
+          parentSessionId: typeof parent === "string" ? parent : undefined,
           provider: str(params.provider, "subagent"),
+          agentId: str(params.agentId, "") || undefined,
           // `ok` | `error` is the deployment-mapped outcome. Anything that is
           // not an explicit ok renders as a failed chip rather than a guess,
           // so a child that errored never shows as finished.
           ok: params.status === "ok",
           stopReason: str(params.stopReason, "completed"),
+          lastAssistantMessage: str(params.lastAssistantMessage, "").slice(0, 4_000) || undefined,
         },
       ],
       outcome: null,
@@ -218,13 +236,14 @@ export class RuntimeTurn {
   }
 
   private noteReceipt(data: Record<string, unknown>): void {
-    if (this.spliced || !this.messageId) return;
     const inserted = data.inserted;
     if (!Array.isArray(inserted)) return;
     for (const entry of inserted) {
-      if (typeof entry === "object" && entry !== null && (entry as Record<string, unknown>).id === this.messageId) {
-        this.spliced = true;
-        return;
+      if (typeof entry === "object" && entry !== null) {
+        const id = (entry as Record<string, unknown>).id;
+        if (typeof id !== "string" || !id) continue;
+        this.inboxReceipts.add(id);
+        if (this.messageId && id === this.messageId) this.spliced = true;
       }
     }
   }

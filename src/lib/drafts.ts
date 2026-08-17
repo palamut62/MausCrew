@@ -5,8 +5,10 @@
 import { useCallback, useState, type SetStateAction } from "react";
 import { isAttachment, type Attachment } from "./composer-attachments.js";
 
-const KEY = "omb-drafts";
-const ATTACHMENTS_KEY = "omb-draft-attachments";
+const KEY = "mauscrew-drafts";
+const ATTACHMENTS_KEY = "mauscrew-draft-attachments";
+const LEGACY_KEY = "omb-drafts";
+const LEGACY_ATTACHMENTS_KEY = "omb-draft-attachments";
 
 type Values = Record<string, unknown>;
 type Store = Pick<Storage, "getItem" | "setItem"> | undefined;
@@ -15,7 +17,8 @@ type Store = Pick<Storage, "getItem" | "setItem"> | undefined;
 // value must never cost a keystroke — every failure reads as "no drafts".
 function read(store: Store, key: string): Values {
   try {
-    const raw = store?.getItem(key);
+    const legacyKey = key === KEY ? LEGACY_KEY : key === ATTACHMENTS_KEY ? LEGACY_ATTACHMENTS_KEY : undefined;
+    const raw = store?.getItem(key) ?? (legacyKey ? store?.getItem(legacyKey) : null);
     const parsed = raw ? JSON.parse(raw) : null;
     return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Values) : {};
   } catch {

@@ -31,7 +31,7 @@ describe("team manifests", () => {
     );
 
     expect(manifest).toMatchObject({
-      format: "openmaus.team",
+      format: "mauscrew.team",
       version: 1,
       team: {
         name: "Launch Crew",
@@ -47,7 +47,7 @@ describe("team manifests", () => {
 
   it("parses the supported portable fields and drops unrelated settings", () => {
     const manifest = parseTeamManifest({
-      format: "openmaus.team",
+      format: "mauscrew.team",
       version: 1,
       team: {
         name: "  Research Lab  ",
@@ -87,10 +87,10 @@ describe("team manifests", () => {
   });
 
   it("rejects unsupported versions and dangling member references", () => {
-    expect(() => parseTeamManifest({ format: "openmaus.team", version: 99 })).toThrow("not supported");
+    expect(() => parseTeamManifest({ format: "mauscrew.team", version: 99 })).toThrow("not supported");
     expect(() =>
       parseTeamManifest({
-        format: "openmaus.team",
+        format: "mauscrew.team",
         version: 1,
         team: {
           name: "Broken",

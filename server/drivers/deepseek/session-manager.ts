@@ -1,4 +1,4 @@
-// OpenMaus threadId ↔ DeepSeek session_id mapping (spec §18, §19).
+// MausCrew threadId ↔ DeepSeek session_id mapping (spec §18, §19).
 //
 // The mapping is a pure function, not a lookup table, and that is the whole
 // point: the same thread must land on the same DeepSeek session after a
@@ -35,7 +35,7 @@ export function parseSessionId(sessionId: string): { instanceId: string; threadI
 }
 
 export function defaultSessionRoot(): string {
-  return join(homedir(), ".openmausbot", "deepseek-harness", "sessions");
+  return join(homedir(), ".mauscrew", "deepseek-harness", "sessions");
 }
 
 /** Per-instance session directory. Kept separate so two provider instances
@@ -50,5 +50,5 @@ export function sessionRootFor(instanceId: string, configuredRoot: string): stri
  * Never the home directory: the agent gets filesystem and shell tools, and
  * an unscoped cwd is precisely the §35 failure the spec calls unacceptable. */
 export function defaultWorkspaceFor(instanceId: string, threadId: string): string {
-  return join(homedir(), ".openmausbot", "workspaces", sanitize(instanceId), sanitize(threadId));
+  return join(homedir(), ".mauscrew", "workspaces", sanitize(instanceId), sanitize(threadId));
 }

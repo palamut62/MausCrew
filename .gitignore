@@ -7,6 +7,12 @@ dist-native
 .DS_Store
 *.tsbuildinfo
 electron/resources/speech-helper
+electron/resources/MausCrew Speech.app
 electron/resources/OpenMausBot Speech.app
 release
-.omb-scratch
+.mauscrew-scratch
+output/
+.playwright-cli/
+# Guard against malformed Windows temp paths accidentally materialized as a
+# single repository-relative directory by cross-platform runtime tests.
+C*Users*AppData*Local*Temp*/

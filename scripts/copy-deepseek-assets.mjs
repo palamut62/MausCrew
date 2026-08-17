@@ -5,8 +5,8 @@
 // drops them:
 //
 //   bridge.py               — the Python bridge process-manager.ts spawns
-//   openmaus.cordis.yml     — the bundled Cordis composition config.ts points at
-//   openmaus-approval.mjs   — the Cordis pre-execute plugin the config references
+//   mauscrew.cordis.yml     — the bundled Cordis composition config.ts points at
+//   mauscrew-approval.mjs   — the Cordis pre-execute plugin the config references
 //
 // In dev this is invisible: server/index.ts runs from source, so the files
 // are just sitting next to the .ts that reference them. In a packaged build
@@ -26,7 +26,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const srcDir = join(root, "server", "bridges", "deepseek");
 const destDir = join(root, "dist-server", "bridges", "deepseek");
 
-const ASSETS = ["bridge.py", "openmaus.cordis.yml", "openmaus-approval.mjs", "openmaus-approval.d.mts"];
+const ASSETS = ["bridge.py", "mauscrew.cordis.yml", "mauscrew-approval.mjs", "mauscrew-approval.d.mts"];
 
 await mkdir(destDir, { recursive: true });
 for (const name of ASSETS) {

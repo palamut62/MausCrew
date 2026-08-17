@@ -6,8 +6,8 @@
   "metadata": {
     "component": {
       "type": "application",
-      "name": "openmausbot-deepseek-harness-bridge",
-      "description": "OpenMausBot's optional DeepSeek Harness engine — the Python bridge process spawned by server/drivers/deepseek-harness.ts, not a fork of DeepSeek Harness itself."
+      "name": "mauscrew-deepseek-harness-bridge",
+      "description": "MausCrew's optional DeepSeek Harness engine — the Python bridge process spawned by server/drivers/deepseek-harness.ts, not a fork of DeepSeek Harness itself."
     }
   },
   "components": [

@@ -1,9 +1,9 @@
 /**
- * OpenMausBot approval gate — the runtime's half of the mailbox
+ * MausCrew approval gate — the runtime's half of the mailbox
  * (spec §37–§43, §82, §87, §95, §103).
  *
- * This is a Cordis plugin. It is loaded by name from `openmaus.cordis.yml`
- * as `./openmaus-approval.mjs`, which app-boot resolves beside the config
+ * This is a Cordis plugin. It is loaded by name from `mauscrew.cordis.yml`
+ * as `./mauscrew-approval.mjs`, which app-boot resolves beside the config
  * file, so nothing here has to be published or installed.
  *
  * It is plain JavaScript on purpose. This file executes inside the DeepSeek
@@ -15,7 +15,7 @@
  * version it does not recognize.
  *
  * What it does: for every tool call the model makes, decide whether the call
- * is one OpenMausBot's user should see before it happens. If it is, write a
+ * is one MausCrew's user should see before it happens. If it is, write a
  * request file, block until the driver writes the answer, and turn that
  * answer into a Cordis `PreToolDecision`.
  *
@@ -28,7 +28,7 @@ import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from '
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 
-export const name = 'openmaus-approval'
+export const name = 'mauscrew-approval'
 
 /** Must match MAILBOX_VERSION in approval-mailbox.ts. */
 const MAILBOX_VERSION = 1
@@ -59,6 +59,7 @@ const DANGEROUS = [
   'delete',
   'move',
   'web_fetch',
+  'cordis_run',
   'mcp_*',
   'subagent*',
 ]
@@ -82,6 +83,11 @@ const SAFE = [
   'exit_plan_mode',
   'skill',
   'goal*',
+  'cordis_inspect*',
+  'cordis_runtime_inspect',
+  'cordis_define',
+  'cordis_stop',
+  'cordis_undefine',
 ]
 
 /** `*` is the only metacharacter; everything else is matched literally. */
@@ -111,9 +117,85 @@ export function needsApproval(toolName) {
  * rm -rf /" is — but they are also model output, so the value is truncated
  * hard and never interpreted.
  */
-function summarize(toolName, args) {
+export function summarize(toolName, args, definitions = new Map(), sessionId = '') {
+  if (String(toolName || '').toLowerCase() === 'cordis_run') {
+    return summarizeCordisRun(args, definitions, sessionId)
+  }
   const detail = describeArguments(args)
   return detail ? `${toolName}: ${detail}` : toolName
+}
+
+function summarizeCordisRun(args, definitions, sessionId) {
+  const parsed = objectArguments(args)
+  const pluginId = textValue(parsed?.pluginId) || 'unknown-plugin'
+  const packageId = textValue(parsed?.packageId) || 'unknown-package'
+  const mode = textValue(parsed?.mode) || 'run'
+  const definition = definitions.get(definitionKey(sessionId, pluginId, packageId))
+  const heading = `${mode === 'update' ? 'Update' : 'Run'} Dynamic Cordis plugin${definition?.name ? ` "${definition.name}"` : ''}`
+  const lines = [heading]
+  if (definition?.purpose) lines.push(`Purpose: ${definition.purpose}`)
+  lines.push(`Package: ${pluginId}/${packageId}`)
+  if (definition?.host) {
+    lines.push('Host code:', truncate(definition.host, 7_400))
+  } else {
+    lines.push('Host code: unavailable; inspect the package before approving.')
+  }
+  return truncate(lines.join('\n'), 8_000)
+}
+
+function truncate(value, max) {
+  const text = String(value || '')
+  if (text.length <= max) return text
+  return `${text.slice(0, Math.max(0, max - 28))}\n… [truncated by MausCrew]`
+}
+
+function textValue(value) {
+  return typeof value === 'string' && value ? value : ''
+}
+
+function objectArguments(args) {
+  if (typeof args === 'object' && args !== null) return args
+  if (typeof args !== 'string') return null
+  try {
+    const parsed = JSON.parse(args)
+    return typeof parsed === 'object' && parsed !== null ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+function definitionKey(sessionId, pluginId, packageId) {
+  return `${String(sessionId || '')}:${pluginId}/${packageId}`
+}
+
+/**
+ * MausCrew embeds only the Host dynamic runner. A browser-half Package
+ * would appear to define successfully but can never render here, so reject it
+ * before it enters the session registry instead of leaving a dead version.
+ */
+export function unsupportedCordisClientReason(toolName, args) {
+  if (String(toolName || '').toLowerCase() !== 'cordis_define') return null
+  const parsed = objectArguments(args)
+  const client = parsed?.code && typeof parsed.code === 'object' ? parsed.code.client : undefined
+  if (typeof client !== 'string' || client.trim() === '') return null
+  return 'MausCrew supports host-side Dynamic Cordis plugins only; browser client/UI code is not available in this app.'
+}
+
+/** Remember source only after cordis_define has authoritatively succeeded. */
+export function rememberCordisDefinition(definitions, toolName, args, result, sessionId = '') {
+  if (String(toolName || '').toLowerCase() !== 'cordis_define' || result?.isError) return
+  const parsed = objectArguments(args)
+  const value = result?.value
+  if (!parsed || typeof value !== 'object' || value === null) return
+  const pluginId = textValue(value.pluginId)
+  const packageId = textValue(value.packageId)
+  const host = parsed.code && typeof parsed.code === 'object' ? textValue(parsed.code.host) : ''
+  if (!pluginId || !packageId || !host) return
+  definitions.set(definitionKey(sessionId, pluginId, packageId), {
+    name: textValue(value.name) || textValue(parsed.name),
+    purpose: textValue(value.purpose) || textValue(parsed.purpose),
+    host,
+  })
 }
 
 function describeArguments(args) {
@@ -159,11 +241,9 @@ function sleep(ms) {
   Atomics.wait(buffer, 0, 0, ms)
 }
 
-export const inject = { optional: ['logger'] }
-
 export function apply(ctx, config = {}) {
-  const root = config.mailbox || process.env.DSH_OPENMAUS_APPROVAL_DIR || ''
-  const configured = Number(config.timeoutMs || process.env.DSH_OPENMAUS_APPROVAL_TIMEOUT_MS)
+  const root = config.mailbox || process.env.DSH_MAUSCREW_APPROVAL_DIR || ''
+  const configured = Number(config.timeoutMs || process.env.DSH_MAUSCREW_APPROVAL_TIMEOUT_MS)
   const timeoutMs = Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_TIMEOUT_MS
   // 'never' is upstream's own vocabulary for "do not prompt anyone"; here it
   // means every dangerous call is refused without a round trip, which is the
@@ -175,9 +255,18 @@ export function apply(ctx, config = {}) {
   // be reached, so the gate closes: dangerous tools are refused and the
   // reason says why, rather than the agent quietly getting a free hand.
   const ready = Boolean(root) && ensureDir(root)
+  const dynamicDefinitions = new Map()
+
+  // Observe the immutable final result so failed or later-vetoed definitions
+  // never become approval evidence for a future cordis_run call.
+  ctx.on('tools/result', (exec, result) => {
+    rememberCordisDefinition(dynamicDefinitions, exec?.name, exec?.arguments, result, exec?.agent?.id)
+  })
 
   ctx.on('tools/pre-execute', async (exec, next) => {
     const toolName = String(exec?.name || '')
+    const unsupportedReason = unsupportedCordisClientReason(toolName, exec?.arguments)
+    if (unsupportedReason) return { kind: 'deny', reason: unsupportedReason }
     if (!needsApproval(toolName)) return next()
 
     if (policy === 'never') {
@@ -193,7 +282,7 @@ export function apply(ctx, config = {}) {
     const decision = ask(root, {
       sessionId: String(exec?.agent?.id || ''),
       tool: toolName,
-      summary: summarize(toolName, exec?.arguments),
+      summary: summarize(toolName, exec?.arguments, dynamicDefinitions, exec?.agent?.id),
       signal: exec?.signal,
       timeoutMs,
     })

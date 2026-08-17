@@ -40,7 +40,7 @@ beforeAll(async () => {
       return res.end(JSON.stringify({
         session_id: "trs_test",
         mcp: { type: "http", url: "https://app.composio.dev/tool_router/v3/trs_test/mcp" },
-        config: { user_id: "openmausbot_existing" },
+        config: { user_id: "mauscrew_existing" },
       }));
     }
     if (req.method === "GET" && url.pathname.endsWith("/toolkits")) {
@@ -66,11 +66,11 @@ beforeAll(async () => {
   });
   await new Promise<void>((resolve) => api.listen(0, "127.0.0.1", resolve));
   base = `http://127.0.0.1:${(api.address() as { port: number }).port}/api/v3.1`;
-  process.env.OMB_COMPOSIO_API = base;
+  process.env.MAUSCREW_COMPOSIO_API = base;
 });
 
 afterAll(async () => {
-  delete process.env.OMB_COMPOSIO_API;
+  delete process.env.MAUSCREW_COMPOSIO_API;
   await new Promise<void>((resolve) => api.close(() => resolve()));
 });
 
@@ -81,27 +81,27 @@ describe.sequential("Composio Sessions", () => {
   });
 
   it("creates one stable per-installation session and reuses it", async () => {
-    const created = await prepareProjectSession("ak_test", { userId: "openmausbot_existing" });
+    const created = await prepareProjectSession("ak_test", { userId: "mauscrew_existing" });
     expect(created).toEqual({
       apiKey: "ak_test",
-      userId: "openmausbot_existing",
+      userId: "mauscrew_existing",
       sessionId: "trs_test",
     });
     expect(calls.filter((call) => call.method === "POST" && call.path.endsWith("/session")).at(-1)?.body).toEqual({
-      user_id: "openmausbot_existing",
+      user_id: "mauscrew_existing",
     });
 
     const reused = await prepareProjectSession("ak_test", created);
     expect(reused).toEqual({
       apiKey: "ak_test",
-      userId: "openmausbot_existing",
+      userId: "mauscrew_existing",
       sessionId: "trs_test",
     });
   });
 
   it("mounts the Session MCP endpoint with the project key header", async () => {
     const cfg: AppConfig = {
-      composio: { apiKey: "ak_test", userId: "openmausbot_existing", sessionId: "trs_test" },
+      composio: { apiKey: "ak_test", userId: "mauscrew_existing", sessionId: "trs_test" },
     };
     await expect(mcpIntegration(cfg)).resolves.toEqual({
       url: "https://app.composio.dev/tool_router/v3/trs_test/mcp",
@@ -111,7 +111,7 @@ describe.sequential("Composio Sessions", () => {
 
   it("reports connection state, creates auth links and revokes disconnects", async () => {
     const cfg: AppConfig = {
-      composio: { apiKey: "ak_test", userId: "openmausbot_existing", sessionId: "trs_test" },
+      composio: { apiKey: "ak_test", userId: "mauscrew_existing", sessionId: "trs_test" },
     };
     await expect(connectionStatus(cfg, ["github", "gmail", "slack", "notion"])).resolves.toEqual({
       github: { connected: true, status: "ACTIVE" },

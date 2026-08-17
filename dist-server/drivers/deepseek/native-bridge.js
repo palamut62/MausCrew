@@ -25,7 +25,7 @@
 // completion. bridge.py got it from the Python SDK's blocking `run()`; here
 // the state machine in runtime-turn.ts owns it.
 import { existsSync } from "node:fs";
-import { spawnRuntime, stopBridge } from "./process-manager.js";
+import { runtimePath, spawnRuntime, stopBridge } from "./process-manager.js";
 import { JsonRpcConnection } from "./jsonrpc.js";
 import { RuntimeTurn } from "./runtime-turn.js";
 import { DeepSeekBridgeError } from "./errors.js";
@@ -131,7 +131,10 @@ export class NativeDeepSeekBridge {
         let result;
         try {
             result = await this.withTimeout(connection.request("initialize", {
-                cwd: input.cwd,
+                // initialize creates the durable session and freezes its cwd. A
+                // Windows host path is not meaningful inside WSL; translating only
+                // DSH_CWD would leave the actual session rooted at process.cwd().
+                cwd: runtimePath(input.config, input.cwd),
                 provider: input.config.provider,
                 model: input.config.defaultModel,
                 ...(input.config.maxTokens === null ? {} : { maxTokens: input.config.maxTokens }),

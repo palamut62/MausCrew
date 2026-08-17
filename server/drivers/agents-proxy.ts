@@ -14,23 +14,23 @@
 // Speaks raw JSON-RPC 2.0 over stdio (no MCP SDK — house style, matches
 // computer-proxy / permission-proxy). All state comes from env, injected by
 // the harness when it builds the integration:
-//   OMB_HARNESS_URL  base URL of the harness (http://127.0.0.1:8799)
-//   OMB_BOT_ID       the calling bot's id (excluded from list_bots; sender)
-//   OMB_COMMS_TOKEN  shared secret for the localhost-only internal endpoints
-//   OMB_TURN_DEPTH   this turn's comms depth (the harness refuses recursion)
+//   MAUSCREW_HARNESS_URL  base URL of the harness (http://127.0.0.1:8799)
+//   MAUSCREW_BOT_ID       the calling bot's id (excluded from list_bots; sender)
+//   MAUSCREW_COMMS_TOKEN  shared secret for the localhost-only internal endpoints
+//   MAUSCREW_TURN_DEPTH   this turn's comms depth (the harness refuses recursion)
 import readline from "node:readline";
 
-const HARNESS = process.env.OMB_HARNESS_URL ?? "http://127.0.0.1:8799";
-const BOT_ID = process.env.OMB_BOT_ID ?? "";
-const THREAD_ID = process.env.OMB_THREAD_ID ?? "";
-const TOKEN = process.env.OMB_COMMS_TOKEN ?? "";
-const DEPTH = Number(process.env.OMB_TURN_DEPTH ?? "0") || 0;
+const HARNESS = process.env.MAUSCREW_HARNESS_URL ?? "http://127.0.0.1:8799";
+const BOT_ID = process.env.MAUSCREW_BOT_ID ?? "";
+const THREAD_ID = process.env.MAUSCREW_THREAD_ID ?? "";
+const TOKEN = process.env.MAUSCREW_COMMS_TOKEN ?? "";
+const DEPTH = Number(process.env.MAUSCREW_TURN_DEPTH ?? "0") || 0;
 
 const TOOLS = [
   {
     name: "list_bots",
     description:
-      "List the other bots (agents) in this OpenMausBot workspace you can message, with their model and whether they're busy. Call this before ask_bot to discover who's available.",
+      "List the other bots (agents) in this MausCrew workspace you can message, with their model and whether they're busy. Call this before ask_bot to discover who's available.",
     inputSchema: { type: "object", properties: {} },
   },
   {

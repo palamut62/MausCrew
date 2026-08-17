@@ -18,7 +18,7 @@ import { cn } from "@/lib/cn";
 type Platform = "darwin" | "win32" | "linux";
 
 function hostPlatform(): Platform {
-  const p = window.ogb?.platform;
+  const p = window.mauscrew?.platform;
   if (p === "darwin" || p === "win32" || p === "linux") return p;
   // browser/dev shell — guess from the UA so the copy button still offers
   // something sensible, since there's no bridge to ask
@@ -42,7 +42,7 @@ export function needsSignIn(instance: InstanceInfo | undefined): boolean {
 
 function CommandRow({ command }: { command: string }) {
   const [done, setDone] = useState<"copied" | "opened" | null>(null);
-  const canOpen = Boolean(window.ogb?.openInstallTerminal);
+  const canOpen = Boolean(window.mauscrew?.openInstallTerminal);
 
   const copy = async () => {
     try {
@@ -57,7 +57,7 @@ function CommandRow({ command }: { command: string }) {
   const openTerminal = async () => {
     // the bridge copies to the clipboard too, so a failed launch still
     // leaves the user able to paste
-    const ok = await window.ogb!.openInstallTerminal!(command);
+    const ok = await window.mauscrew!.openInstallTerminal!(command);
     setDone(ok ? "opened" : "copied");
     setTimeout(() => setDone(null), 2500);
   };

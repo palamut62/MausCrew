@@ -119,8 +119,8 @@ interface Ask {
 }
 
 const DENY_TIMEOUT_NOTE =
-  "OpenMausBot: nobody answered this permission request in time. Skip this action and finish what you can without it.";
-const QUESTION_TIMEOUT_NOTE = "OpenMausBot: nobody answered in time. Use your best judgment and continue.";
+  "MausCrew: nobody answered this permission request in time. Skip this action and finish what you can without it.";
+const QUESTION_TIMEOUT_NOTE = "MausCrew: nobody answered in time. Use your best judgment and continue.";
 
 /** One human-readable line for an ask — what the card subtitle shows. */
 function askSummary(ask: Ask): string {
@@ -206,8 +206,8 @@ function createPermissionBroker(opts: {
     },
     close() {
       for (const p of [...pending.values()]) {
-        if (p.ask.kind === "question") p.finish("answer", "OpenMausBot: the turn is ending — wrap up.", "shutdown");
-        else p.finish("deny", "OpenMausBot: the turn ended", "shutdown");
+        if (p.ask.kind === "question") p.finish("answer", "MausCrew: the turn is ending — wrap up.", "shutdown");
+        else p.finish("deny", "MausCrew: the turn ended", "shutdown");
       }
       try {
         server.close();
@@ -375,9 +375,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
               source: resolved.source,
             }),
         });
-        args.push("--permission-prompt-tool", "mcp__ogb__approve");
-        mcpServers.ogb = { command: process.execPath, args: [PERM_PROXY_PATH, socketPath], env: { ...NODE_ENV_FLAG } };
-        allowed.push("mcp__ogb");
+        args.push("--permission-prompt-tool", "mcp__mauscrew__approve");
+        mcpServers.mauscrew = { command: process.execPath, args: [PERM_PROXY_PATH, socketPath], env: { ...NODE_ENV_FLAG } };
+        allowed.push("mcp__mauscrew");
       }
       // The MCP config carries credentials — a Composio consumer key in a
       // header, the box token in the computer proxy's env, the comms token in
@@ -387,7 +387,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       // is removed when the turn settles.
       let mcpConfigPath: string | null = null;
       if (Object.keys(mcpServers).length) {
-        mcpConfigPath = join(mkdtempSync(join(tmpdir(), "omb-mcp-")), "mcp.json");
+        mcpConfigPath = join(mkdtempSync(join(tmpdir(), "mauscrew-mcp-")), "mcp.json");
         writeFileSync(mcpConfigPath, JSON.stringify({ mcpServers }), { mode: 0o600 });
         args.push("--mcp-config", mcpConfigPath);
         args.push("--allowedTools", allowed.join(","));

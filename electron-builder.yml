@@ -1,18 +1,16 @@
-appId: com.openmausbot.app
-productName: OpenMausBot
-artifactName: OpenMausBot-${version}-${arch}.${ext}
+appId: com.mauscrew.app
+productName: MausCrew
+artifactName: MausCrew-${version}-${arch}.${ext}
 
 # In-app auto-update reads latest-mac.yml + the .zip (macOS) or latest.yml +
-# the NSIS .exe (Windows) from this PUBLIC releases repo (separate from the
-# source repo). Public → no token on users' machines. Baked into
-# app-update.yml; both metadata files are emitted here even with
-# --publish never, and must be uploaded to the GitHub release alongside the
-# artifacts — a release missing latest.yml leaves every Windows install
-# stranded on its installed version.
+# the NSIS .exe (Windows). The MausCrew repository is private, so anonymous
+# desktop updates are intentionally unavailable until a public, signed release
+# feed is configured. This block still emits branded metadata for authorized
+# internal packaging; never embed a GitHub token in a distributed client.
 publish:
   - provider: github
-    owner: milind-soni
-    repo: openmausbot-releases
+    owner: palamut62
+    repo: MausCrew
 
 directories:
   buildResources: build
@@ -29,7 +27,7 @@ files:
   - "!electron/resources/speech-helper"
   - "!electron/resources/speech-helper.swift"
   - "!electron/resources/speech-helper-Info.plist"
-  - "!electron/resources/OpenMausBot Speech.app/**"
+  - "!electron/resources/MausCrew Speech.app/**"
   - "!**/node_modules/**"
   - package.json
 
@@ -55,8 +53,8 @@ mac:
   entitlementsInherit: build/entitlements.mac.plist
   # the dictation helper is a signed background app — Windows and Linux never see it
   extraResources:
-    - from: electron/resources/OpenMausBot Speech.app
-      to: OpenMausBot Speech.app
+    - from: electron/resources/MausCrew Speech.app
+      to: MausCrew Speech.app
     # CUA must live outside ASAR. prepare-cua stages the signed executable and
     # a self-contained JS/native SDK bundle selected for macOS arm64.
     - from: dist-native/cua-driver
@@ -64,17 +62,17 @@ mac:
     - from: dist-native/cua-sdk
       to: cua-sdk
   extendInfo:
-    NSMicrophoneUsageDescription: OpenMausBot uses the microphone for voice dictation into the composer.
-    NSSpeechRecognitionUsageDescription: OpenMausBot transcribes your voice on-device to type messages for you.
-    NSAccessibilityUsageDescription: OpenMausBot uses Accessibility when you let a bot control this Mac.
-    NSScreenCaptureUsageDescription: OpenMausBot uses Screen Recording so bots can see this Mac before acting.
+    NSMicrophoneUsageDescription: MausCrew uses the microphone for voice dictation into the composer.
+    NSSpeechRecognitionUsageDescription: MausCrew transcribes your voice on-device to type messages for you.
+    NSAccessibilityUsageDescription: MausCrew uses Accessibility when you let a bot control this Mac.
+    NSScreenCaptureUsageDescription: MausCrew uses Screen Recording so bots can see this Mac before acting.
   # Notarization runs manually after the build (notarytool + staple),
   # mirroring the BlueyLite ship_release.sh flow.
   notarize: false
 
 dmg:
   sign: true
-  artifactName: OpenMausBot-${version}.dmg
+  artifactName: MausCrew-${version}.dmg
 
 win:
   target:
@@ -96,11 +94,11 @@ win:
 nsis:
   oneClick: true
   perMachine: false
-  shortcutName: OpenMausBot
+  shortcutName: MausCrew
   # Versioned, like the .dmg. The README's /latest/download/ button needs a
-  # STABLE filename, so ship a second copy named OpenMausBot-setup.exe on the
-  # release — the same trick as OpenMausBot.dmg beside OpenMausBot-${version}.dmg.
-  artifactName: OpenMausBot-${version}-setup.${ext}
+  # STABLE filename, so ship a second copy named MausCrew-setup.exe on the
+  # release — the same trick as MausCrew.dmg beside MausCrew-${version}.dmg.
+  artifactName: MausCrew-${version}-setup.${ext}
 
 linux:
   target:
@@ -112,15 +110,15 @@ linux:
   # lone 1024px PNG is not indexed by GNOME's hicolor theme on Ubuntu 24.04.
   icon: build/icon.svg
   category: Utility
-  executableName: openmausbot
+  executableName: mauscrew
   synopsis: Your own team of AI bots, in a chat app
   description: A local-first chat app for running a team of AI agents.
-  maintainer: Milind Soni <46266943+milind-soni@users.noreply.github.com>
-  vendor: OpenMausBot
+  maintainer: Umut Çelik <palamut62@users.noreply.github.com>
+  vendor: MausCrew
   syncDesktopName: true
   desktop:
     entry:
-      Name: OpenMausBot
+      Name: MausCrew
       Comment: Your own team of AI bots, in a chat app
       Keywords: AI;Agents;Chat;Productivity;
 

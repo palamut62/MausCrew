@@ -77,17 +77,17 @@ describe("deepseek bridge assets reach dist-server", () => {
     // script writes exactly there. If either side moves, the packaged app
     // points DSH_CORDIS_CONFIG at a file that was never written.
     const fromServerRoot = relative(serverRoot, BUNDLED_CORDIS_CONFIG).split(sep).join("/");
-    expect(fromServerRoot).toBe("bridges/deepseek/openmaus.cordis.yml");
+    expect(fromServerRoot).toBe("bridges/deepseek/mauscrew.cordis.yml");
     expect(readFileSync(copyScript, "utf8")).toContain('join(root, "dist-server", "bridges", "deepseek")');
   });
 
   it("ships the approval plugin the bundled composition names", () => {
-    // The composition resolves './openmaus-approval.mjs' beside itself. A
+    // The composition resolves './mauscrew-approval.mjs' beside itself. A
     // composition that ships without its plugin is worse than no gate: the
     // runtime refuses to boot, so the bot is simply broken.
     const composition = readFileSync(BUNDLED_CORDIS_CONFIG, "utf8");
     const referenced = [...composition.matchAll(/name:\s*'\.\/([^']+)'/g)].map((m) => m[1]);
-    expect(referenced).toContain("openmaus-approval.mjs");
+    expect(referenced).toContain("mauscrew-approval.mjs");
     const assets = new Set(copiedAssets());
     for (const name of referenced) expect(assets.has(name), `${name} is composed but never copied`).toBe(true);
   });

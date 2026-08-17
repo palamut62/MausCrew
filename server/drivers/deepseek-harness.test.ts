@@ -5,7 +5,7 @@
 // Python nor the DeepSeek SDK installed. That is deliberate: what is under
 // test is the Node half — correlation, normalization, settlement, and the
 // refusals — not the SDK.
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,6 +16,7 @@ import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import { createDeepSeekInstance, DeepSeekHarnessDriver, DRIVER_KIND } from "./deepseek-harness.ts";
 import { BUILT_IN_DRIVERS } from "./builtIn.ts";
 import { decodeConfig } from "./deepseek/config.ts";
+import { runtimePath } from "./deepseek/process-manager.ts";
 
 const FAKE_BRIDGE = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-deepseek-bridge.ts");
 
@@ -80,7 +81,7 @@ describe("DeepSeekHarnessDriver turns (fake bridge)", () => {
   };
 
   beforeEach(() => {
-    scratch = mkdtempSync(join(tmpdir(), "omb-dsh-test-"));
+    scratch = mkdtempSync(join(tmpdir(), "mauscrew-dsh-test-"));
   });
 
   afterEach(async () => {
@@ -301,7 +302,7 @@ describe("DeepSeekHarnessDriver turns (fake bridge)", () => {
 
     const opened = recorder.events.filter(
       (e) => e.type === "item.started" && (e as { itemId?: string }).itemId?.startsWith("subagent:"),
-    ) as Array<{ itemId: string; title: string }>;
+    ) as Array<{ itemId: string; title: string; subagent?: { status: string; childSessionId: string } }>;
     const closed = recorder.events.filter(
       (e) => e.type === "item.completed" && (e as { itemId?: string }).itemId?.startsWith("subagent:"),
     ) as Array<{ itemId: string; ok: boolean }>;
@@ -311,7 +312,14 @@ describe("DeepSeekHarnessDriver turns (fake bridge)", () => {
     // one spinning and adding a second
     expect(closed[0].itemId).toBe(opened[0].itemId);
     expect(closed[0].ok).toBe(true);
-    expect(opened[0].title).toContain("subagent");
+    expect(opened[0].title).toContain("agent");
+    expect(opened[0].subagent).toMatchObject({ status: "running", childSessionId: "child-abcdef123456" });
+    expect((closed[0] as { subagent?: unknown }).subagent).toMatchObject({
+      status: "completed",
+      provider: "local",
+      agentId: "researcher",
+      lastAssistantMessage: expect.stringContaining("delegated files"),
+    });
   });
 
   // ── integration mounts (spec §52, §53; P4-05/06/07) ────────────────────
@@ -333,12 +341,12 @@ describe("DeepSeekHarnessDriver turns (fake bridge)", () => {
 
     const { env } = JSON.parse(readFileSync(dump, "utf8"));
     const composition = env.DSH_CORDIS_CONFIG as string;
-    expect(composition).toMatch(/openmaus\.generated\.cordis\.yml$/);
+    expect(composition).toMatch(/mauscrew\.generated\.cordis\.yml$/);
     const text = readFileSync(composition, "utf8");
     // the base composition is still there — mounting adds tools, it does not
     // replace the model, the files, or the approval gate
     expect(text).toContain("@deepseek-ai/dsh-llm-deepseek");
-    expect(text).toContain("openmaus-mcp-composio");
+    expect(text).toContain("mauscrew-mcp-composio");
     expect(text).toContain("https://mcp.composio.dev/x");
   });
 
@@ -349,8 +357,26 @@ describe("DeepSeekHarnessDriver turns (fake bridge)", () => {
     await recorder.until((e) => e.type === "turn.completed");
 
     const { env } = JSON.parse(readFileSync(dump, "utf8"));
-    expect(env.DSH_CORDIS_CONFIG).toMatch(/openmaus\.cordis\.yml$/);
+    expect(env.DSH_CORDIS_CONFIG).toMatch(/mauscrew\.cordis\.yml$/);
     expect(env.DSH_CORDIS_CONFIG).not.toMatch(/generated/);
+  });
+
+  it("mounts the host-only Dynamic Cordis toolset for an opted-in turn", async () => {
+    const dump = join(scratch, "dump.json");
+    await create({ FAKE_DSH_DUMP: dump });
+    await instance.adapter.sendTurn({
+      threadId: "t-cordis",
+      text: "hi",
+      cwd: scratch,
+      runtimeFeatures: { dynamicCordis: true },
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const { env } = JSON.parse(readFileSync(dump, "utf8"));
+    const composition = readFileSync(env.DSH_CORDIS_CONFIG as string, "utf8");
+    expect(composition).toContain("@deepseek-ai/dsh-cordis-host-runner");
+    expect(composition).toContain("@deepseek-ai/dsh-tool-cordis");
+    expect(composition).not.toContain("cordis-client-runner");
   });
 
   it("restarts the runtime when the mounted set changes between turns", async () => {
@@ -408,16 +434,23 @@ describe("DeepSeekHarnessDriver refusals", () => {
   });
   afterEach(() => rmSync(scratch, { recursive: true, force: true }));
 
-  it("will not run outside a scoped workspace while there is no approval broker", async () => {
+  it("runs with an explicitly selected upstream sandbox policy", async () => {
     const instance = await createDeepSeekInstance(
       {
         ...base,
         environment: { DEEPSEEK_API_KEY: "sk-test" },
-        config: decodeConfig({ sandbox: { mode: "custom" }, runtime: { mode: "external-python" } }),
+        config: decodeConfig({
+          pythonPath: process.execPath,
+          sandbox: { mode: "read-only" },
+          runtime: { mode: "external-python" },
+        }),
       },
       { scriptPath: FAKE_BRIDGE },
     );
-    await expect(instance.adapter.sendTurn({ threadId: "t", text: "hi" })).rejects.toThrow(/workspace/i);
+    const recorder = recordEvents(instance.adapter);
+    await expect(instance.adapter.sendTurn({ threadId: "t", text: "hi", cwd: scratch })).resolves.toBeTruthy();
+    await recorder.until((event) => event.type === "turn.completed");
+    recorder.stop();
     await instance.dispose();
   });
 
@@ -453,6 +486,40 @@ describe("DeepSeekHarnessDriver refusals", () => {
     await instance.dispose();
   });
 
+  it("refuses Dynamic Cordis when the MausCrew approval composition is not active", async () => {
+    const customComposition = join(scratch, "their-own.cordis.yml");
+    writeFileSync(customComposition, "- id: custom\n  name: '@example/custom'\n");
+    const dump = join(scratch, "dump.json");
+    const instance = await createDeepSeekInstance(
+      {
+        ...base,
+        environment: { DEEPSEEK_API_KEY: "sk-test", FAKE_DSH_DUMP: dump },
+        config: decodeConfig({
+          pythonPath: process.execPath,
+          runtime: { mode: "external-python" },
+          cordis: { configPath: customComposition },
+        }),
+      },
+      { scriptPath: FAKE_BRIDGE },
+    );
+    const recorder = recordEvents(instance.adapter);
+    await instance.adapter.sendTurn({
+      threadId: "t-custom-cordis",
+      text: "hi",
+      cwd: scratch,
+      runtimeFeatures: { dynamicCordis: true },
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+
+    expect(recorder.events.some(
+      (event) => event.type === "runtime.error" && /Dynamic Cordis was not enabled/.test((event as { message: string }).message),
+    )).toBe(true);
+    const { env } = JSON.parse(readFileSync(dump, "utf8"));
+    expect(env.DSH_CORDIS_CONFIG).toBe(customComposition);
+    recorder.stop();
+    await instance.dispose();
+  });
+
   it("exposes the configured model in its catalog", () => {
     expect(DeepSeekHarnessDriver.models.default).toBe("deepseek-v4-flash");
     expect(DeepSeekHarnessDriver.decodeConfig({}).defaultModel).toBe("deepseek-v4-flash");
@@ -475,7 +542,7 @@ describe("DeepSeekHarnessDriver session survival and hostile input", () => {
     );
 
   beforeEach(() => {
-    scratch = mkdtempSync(join(tmpdir(), "omb-dsh-sess-"));
+    scratch = mkdtempSync(join(tmpdir(), "mauscrew-dsh-sess-"));
   });
 
   afterEach(() => {
@@ -486,9 +553,10 @@ describe("DeepSeekHarnessDriver session survival and hostile input", () => {
     }
   });
 
-  it("resumes the same DeepSeek session after the whole instance is recreated", async () => {
-    // The session's JSONL log on disk is the model's context, so a restart
-    // must land on the same session id or the thread silently forgets.
+  it("replays the active conversation into a fresh runtime session after recreation", async () => {
+    // rc6's JSON-RPC server cannot resume an existing id across processes;
+    // it calls agents.create rather than agents.resume. A fresh incarnation
+    // avoids that collision and receives the active MausCrew transcript once.
     const read = (dump: string) =>
       JSON.parse(readFileSync(dump, "utf8")).commands.find((c: { type: string }) => c.type === "turn.start")
         .sessionId as string;
@@ -504,12 +572,26 @@ describe("DeepSeekHarnessDriver session survival and hostile input", () => {
     const second = join(scratch, "second.json");
     const b = await build("survivor", { FAKE_DSH_DUMP: second });
     const rb = recordEvents(b.adapter);
-    await b.adapter.sendTurn({ threadId: "t-keep", text: "two", cwd: scratch });
+    await b.adapter.sendTurn({
+      threadId: "t-keep",
+      text: "two",
+      cwd: scratch,
+      transcript: [
+        { role: "user", text: "one" },
+        { role: "assistant", text: "hello from fake" },
+      ],
+    });
     await rb.until((e) => e.type === "turn.completed");
     rb.stop();
     await b.dispose();
 
-    expect(read(second)).toBe(read(first));
+    expect(read(second)).not.toBe(read(first));
+    expect(read(second)).toMatch(/^dsh:survivor:t-keep:replay-[0-9a-f]{12}$/);
+    const secondTurn = JSON.parse(readFileSync(second, "utf8")).commands.find(
+      (c: { type: string }) => c.type === "turn.start",
+    );
+    expect(secondTurn.prompt).toContain("<conversation-history>");
+    expect(secondTurn.prompt).toContain("hello from fake");
   });
 
   it("keeps two bots on the same thread name completely separate", async () => {
@@ -570,23 +652,195 @@ describe("DeepSeekHarnessDriver session survival and hostile input", () => {
 
 // Opt-in: runs only with a real key and a real SDK, because it costs money
 // and needs an interpreter this repo cannot assume exists.
-const LIVE = process.env.DEEPSEEK_API_KEY && process.env.OMB_DEEPSEEK_LIVE === "1";
+const LIVE = process.env.DEEPSEEK_API_KEY && process.env.MAUSCREW_DEEPSEEK_LIVE === "1";
 describe.skipIf(!LIVE)("DeepSeekHarnessDriver against the real SDK", () => {
   it("completes a turn end to end", async () => {
-    const scratch = mkdtempSync(join(tmpdir(), "omb-dsh-live-"));
+    const scratch = mkdtempSync(join(tmpdir(), "mauscrew-dsh-live-"));
+    const strategy = process.env.MAUSCREW_DEEPSEEK_RUNTIME_STRATEGY || "system";
     const instance = await createDeepSeekInstance({
-      instanceId: "live",
+      instanceId: `live-${strategy}`,
       displayName: undefined,
       environment: { DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY! },
       enabled: true,
-      config: decodeConfig({ pythonPath: process.env.OMB_DEEPSEEK_PYTHON || "" }),
+      config: decodeConfig({
+        pythonPath: process.env.MAUSCREW_DEEPSEEK_PYTHON || "",
+        runtime: { mode: "wsl", distribution: "Ubuntu", strategy },
+      }),
     });
     const recorder = recordEvents(instance.adapter);
-    await instance.adapter.sendTurn({ threadId: "t-live", text: "Reply with exactly: ok", cwd: scratch });
-    const done = (await recorder.until((e) => e.type === "turn.completed", 120_000)) as { ok: boolean };
-    expect(done.ok).toBe(true);
-    recorder.stop();
-    await instance.dispose();
-    rmSync(scratch, { recursive: true, force: true });
+    try {
+      await instance.adapter.sendTurn({ threadId: `t-live-${strategy}`, text: "Reply with exactly: ok", cwd: scratch });
+      const done = (await recorder.until((e) => e.type === "turn.completed", 120_000)) as { ok: boolean };
+      expect(
+        done.ok,
+        JSON.stringify(
+          recorder.events.map((event) => ({
+            type: event.type,
+            ...(event.type === "turn.completed" ? { stopReason: event.stopReason } : {}),
+            ...(event.type === "runtime.error" ? { message: event.message } : {}),
+          })),
+        ),
+      ).toBe(true);
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  }, 180_000);
+
+  it("retains a real native session after the provider process restarts", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "mauscrew-dsh-live-resume-"));
+    const phrase = `quartz-${Date.now().toString(36)}`;
+    const config = decodeConfig({
+      sessionRoot: join(scratch, "sessions"),
+      runtime: { mode: "wsl", distribution: "Ubuntu", strategy: "bundled" },
+    });
+    const create = () =>
+      createDeepSeekInstance({
+        instanceId: "live-native-resume",
+        displayName: undefined,
+        environment: { DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY! },
+        enabled: true,
+        config,
+      });
+    const run = async (
+      instance: Awaited<ReturnType<typeof create>>,
+      text: string,
+      transcript?: Array<{ role: "user" | "assistant"; text: string }>,
+    ) => {
+      const recorder = recordEvents(instance.adapter);
+      try {
+        await instance.adapter.sendTurn({ threadId: "t-live-resume", text, cwd: scratch, transcript });
+        const done = (await recorder.until((e) => e.type === "turn.completed", 120_000)) as { ok: boolean };
+        expect(
+          done.ok,
+          JSON.stringify(
+            recorder.events.map((event) => ({
+              type: event.type,
+              ...(event.type === "turn.completed" ? { stopReason: event.stopReason } : {}),
+              ...(event.type === "runtime.error" ? { message: event.message } : {}),
+              ...(event.type === "item.completed" && event.itemType === "assistant_text"
+                ? { text: event.text }
+                : {}),
+            })),
+          ),
+        ).toBe(true);
+        return recorder.events
+          .filter((event) => event.type === "item.completed" && event.itemType === "assistant_text")
+          .map((event) => ("text" in event ? event.text : ""))
+          .join("\n");
+      } finally {
+        recorder.stop();
+      }
+    };
+
+    let first = await create();
+    try {
+      await run(first, `Remember this exact phrase for the next turn: ${phrase}. Reply only: stored`);
+    } finally {
+      await first.dispose();
+    }
+
+    const second = await create();
+    try {
+      const answer = await run(
+        second,
+        "What exact phrase did I ask you to remember in the previous turn?",
+        [
+          { role: "user", text: `Remember this exact phrase for the next turn: ${phrase}. Reply only: stored` },
+          { role: "assistant", text: "stored" },
+        ],
+      );
+      expect(answer).toContain(phrase);
+    } finally {
+      await second.dispose();
+      if (process.env.MAUSCREW_KEEP_DEEPSEEK_LIVE_SCRATCH !== "1") {
+        rmSync(scratch, { recursive: true, force: true });
+      } else {
+        console.error(`kept live DeepSeek scratch: ${scratch}`);
+      }
+    }
+  }, 240_000);
+});
+
+const LIVE_BUNDLED_SANDBOX = LIVE && process.env.MAUSCREW_DEEPSEEK_RUNTIME_STRATEGY === "bundled";
+describe.skipIf(!LIVE_BUNDLED_SANDBOX)("DeepSeekHarnessDriver real sandbox", () => {
+  it("allows a workspace file edit and denies an adjacent escape", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "mauscrew-dsh-sandbox-"));
+    const outside = `${scratch}-escape.txt`;
+    const config = decodeConfig({
+      runtime: { mode: "wsl", distribution: "Ubuntu", strategy: "bundled" },
+      sandbox: { mode: "workspace-write" },
+    });
+    const instance = await createDeepSeekInstance({
+      instanceId: "live-sandbox",
+      displayName: undefined,
+      environment: { DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY! },
+      enabled: true,
+      config,
+    });
+    const recorder = recordEvents(instance.adapter);
+    const runApprovedEdit = async (threadId: string, target: string, content: string) => {
+      let approvalChain = Promise.resolve();
+      let approvalCount = 0;
+      // A model may inspect or correct its edit with more than one tool call.
+      // Approve every card from this test turn so the assertion measures the
+      // sandbox boundary, not the model's chosen number of editor calls.
+      const stopApproving = instance.adapter.onEvent((event) => {
+        if (event.type !== "request.opened" || event.threadId !== threadId || !event.requestId) return;
+        const requestId = event.requestId;
+        approvalCount += 1;
+        approvalChain = approvalChain.then(() =>
+          instance.adapter.respondToRequest(threadId, requestId, { behavior: "allow" }),
+        );
+      });
+      try {
+        await instance.adapter.sendTurn({
+          threadId,
+          cwd: scratch,
+          text: `Do not use bash. Use the filesystem/string-replace editor tool to create exactly this file: ${runtimePath(config, target)} with exact content: ${content}`,
+        });
+        const done = await recorder.until(
+          (e) => e.type === "turn.completed" && e.threadId === threadId,
+          120_000,
+        );
+        await approvalChain;
+        expect(approvalCount).toBeGreaterThan(0);
+        return done;
+      } finally {
+        stopApproving();
+      }
+    };
+    try {
+      const insidePath = join(scratch, "inside.txt");
+      const insideDone = (await runApprovedEdit("t-live-sandbox-inside", insidePath, "inside")) as { ok: boolean };
+      expect(insideDone.ok).toBe(true);
+      expect(
+        existsSync(insidePath),
+        `${scratch} ` + JSON.stringify(
+          recorder.events.map((event) => ({
+            type: event.type,
+            ...(event.type === "item.started" ? { title: event.title } : {}),
+            ...(event.type === "item.completed"
+              ? {
+                  itemType: event.itemType,
+                  ok: "ok" in event ? event.ok : undefined,
+                  text: "text" in event ? event.text : undefined,
+                }
+              : {}),
+            ...(event.type === "runtime.error" ? { message: event.message } : {}),
+          })),
+        ),
+      ).toBe(true);
+      expect(readFileSync(insidePath, "utf8")).toBe("inside");
+
+      await runApprovedEdit("t-live-sandbox-escape", outside, "outside");
+      expect(existsSync(outside)).toBe(false);
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+      rmSync(scratch, { recursive: true, force: true });
+      rmSync(outside, { force: true });
+    }
   }, 180_000);
 });

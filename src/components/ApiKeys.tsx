@@ -1,5 +1,5 @@
 // Paste-a-key rows for PUT /api/config. The server persists to
-// ~/.openmausbot/config.json and hot-reloads the provider fleet; secrets
+// ~/.mauscrew/config.json and hot-reloads the provider fleet; secrets
 // are write-only — GET /api/config returns configured flags, never values.
 import { useEffect, useId, useRef, useState } from "react";
 import { Check, CircleHelp, ExternalLink, Loader2, TriangleAlert } from "lucide-react";
@@ -163,8 +163,8 @@ export function ApiKeyRow({
     if (saving || (!value.trim() && !configured)) return;
     setSaving(true);
     setError(null);
-    const request = section === "composio" && window.ogb?.setCredential
-      ? window.ogb.setCredential("composioApiKey", value.trim())
+    const request = section === "composio" && window.mauscrew?.setCredential
+      ? window.mauscrew.setCredential("composioApiKey", value.trim())
       : api("/api/config", {
           method: "PUT",
           body: JSON.stringify(SECTIONS[section].body(value.trim())),
@@ -237,11 +237,15 @@ export function DeepSeekOptions() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const telemetryId = useId();
+  const sandboxId = useId();
+  const runtimeId = useId();
   const baseUrlId = useId();
 
   // null means "not edited yet", so a save elsewhere does not clobber typing
   const shown = baseUrl ?? saved?.baseUrl ?? "";
   const telemetry = saved?.telemetry ?? "off";
+  const sandboxMode = saved?.sandboxMode ?? "workspace-write";
+  const runtimeStrategy = saved?.runtimeStrategy ?? "bundled";
 
   const put = (body: Record<string, unknown>) => {
     setSaving(true);
@@ -295,6 +299,55 @@ export function DeepSeekOptions() {
               Your DeepSeek API key will be sent to this host{plaintext ? " over plain HTTP, unencrypted" : ""}. Only
               use an endpoint you trust.
             </span>
+          </div>
+        )}
+      </div>
+
+      <div>
+        <label htmlFor={runtimeId} className="mb-1.5 block text-[13px] text-ink-secondary">
+          Runtime installation
+        </label>
+        <select
+          id={runtimeId}
+          value={runtimeStrategy}
+          disabled={saving}
+          onChange={(e) => put({ runtimeStrategy: e.target.value })}
+          className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink focus:border-hairline focus:outline-none disabled:opacity-50"
+        >
+          <option value="system">System Python</option>
+          <option value="managed">MausCrew managed venv</option>
+          <option value="bundled">Bundled runtime (native transport)</option>
+        </select>
+        <div className="mt-1.5 text-[11px] leading-[1.45] text-ink-secondary">
+          Managed uses <code className="font-mono">~/.mauscrew/runtimes/deepseek/venv</code>. Bundled starts the
+          pinned wheel&rsquo;s single-file runtime directly; Python is used only to locate that executable.
+        </div>
+      </div>
+
+      <div>
+        <label htmlFor={sandboxId} className="mb-1.5 block text-[13px] text-ink-secondary">
+          File sandbox
+        </label>
+        <select
+          id={sandboxId}
+          value={sandboxMode}
+          disabled={saving}
+          onChange={(e) => put({ sandboxMode: e.target.value })}
+          className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink focus:border-hairline focus:outline-none disabled:opacity-50"
+        >
+          <option value="read-only">Read only</option>
+          <option value="workspace-write">Workspace write (default)</option>
+          <option value="danger-full-access">Full file access</option>
+        </select>
+        <div className="mt-1.5 text-[11px] leading-[1.45] text-ink-secondary">
+          The local DeepSeek sandbox fails closed if it cannot enforce this policy. Full file access still asks through
+          MausCrew before mutating or high-risk tools run. Read-only and workspace-write keep the current runtime&rsquo;s
+          unconfined local shell disabled; safe file edits use the sandboxed editor.
+        </div>
+        {sandboxMode === "danger-full-access" && (
+          <div className="mt-1.5 flex gap-1.5 rounded-lg border border-warning/25 bg-warning/10 px-2 py-1.5 text-[11px] leading-[1.4] text-warning">
+            <TriangleAlert size={13} className="mt-px shrink-0" aria-hidden="true" />
+            <span>The runtime can modify files outside the workspace after you approve a tool. Use only when necessary.</span>
           </div>
         )}
       </div>

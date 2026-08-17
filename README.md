@@ -1,8 +1,8 @@
-> ⚠️ **No affiliation with any cryptocurrency.** OpenMausBot has no token. Any coin using the OpenMausBot, Maus, or SupaMaus name is not created, endorsed, or affiliated with this project or its maintainer. I have received no tokens, payment, or allocation from anyone, and I will not be endorsing any token.
+> ⚠️ **No affiliation with any cryptocurrency.** MausCrew has no token. Any coin using the MausCrew, Maus, or SupaMaus name is not created, endorsed, or affiliated with this project or its maintainer. I have received no tokens, payment, or allocation from anyone, and I will not be endorsing any token.
 
 <div align="center">
 
-# OpenMausBot
+# MausCrew
 
 **Your own team of AI bots, in a chat app.**
 
@@ -20,20 +20,16 @@ Talk to them like contacts. Watch them work. Approve what matters.
 
 <br>
 
-<a href="https://github.com/milind-soni/openmausbot-releases/releases/latest/download/OpenMausBot.dmg">
-  <img src="https://img.shields.io/github/v/release/milind-soni/openmausbot-releases?style=for-the-badge&label=%E2%AC%87%EF%B8%8F%20%20Download%20for%20macOS&labelColor=070707&color=1084fe&cacheSeconds=300" alt="Download the latest OpenMausBot for macOS (.dmg)" height="40">
-</a>
-&nbsp;
-<a href="https://github.com/milind-soni/openmausbot-releases/releases/latest/download/OpenMausBot-setup.exe">
-  <img src="https://img.shields.io/github/v/release/milind-soni/openmausbot-releases?style=for-the-badge&label=%E2%AC%87%EF%B8%8F%20%20Download%20for%20Windows&labelColor=070707&color=4cc2ff&cacheSeconds=300" alt="Download the latest OpenMausBot for Windows (.exe)" height="40">
-</a>
+<sub>Private development repository · desktop packages can be built for macOS, Windows, and Ubuntu.</sub>
 
-<sub>macOS: Apple silicon · signed & notarized · one-click .dmg &nbsp;·&nbsp; Windows: 64-bit · one-click installer, no admin rights &nbsp;·&nbsp; both always the latest · [all releases](https://github.com/milind-soni/openmausbot-releases/releases)</sub>
+<br>
+
+<sub>Product Owner: <strong>Umut Çelik</strong> · <a href="https://x.com/palamut62">X</a> · <a href="https://github.com/palamut62">GitHub</a></sub>
 
 <br>
 <br>
 
-<img src="docs/screenshots/hero.png" alt="OpenMausBot — a Telegram-style chat app where every chat is a real AI agent" width="900">
+<img src="docs/screenshots/hero.png" alt="MausCrew — a Telegram-style chat app where every chat is a real AI agent" width="900">
 
 </div>
 
@@ -41,7 +37,7 @@ Talk to them like contacts. Watch them work. Approve what matters.
 
 ## Why
 
-One assistant in one box is the wrong shape for agents. OpenMausBot is an open-source take on **Grok Bot** —
+One assistant in one box is the wrong shape for agents. MausCrew is an open-source take on **Grok Bot** —
 it keeps the idea (AI as a *messaging app*: a roster of bots you chat with, each with its own personality,
 memory of its thread, model, computer, and apps) and rebuilds it open, local-first, and on the agents you
 already have:
@@ -49,7 +45,7 @@ already have:
 - **Bring your own agents.** Bots run on the `claude`, `codex`, and `grok` CLIs installed on your own machine
   — your existing logins and subscriptions, no new accounts, no proxy in the middle.
 - **Local first.** One small harness server on `127.0.0.1` owns every agent process. Transcripts, keys, and
-  events live in `~/.openmausbot`, not a cloud.
+  events live in `~/.mauscrew`, not a cloud.
 - **Agents with hands.** Each bot can get a real computer — a cloud Linux desktop it drives while you watch
   live, or your own Mac — plus 500+ apps through Composio.
 
@@ -176,21 +172,11 @@ flowchart LR
 
 ## Quick start
 
-**Released builds:** the harness server is embedded, so macOS and Windows need no separate server setup.
-
-| | Download | Install |
-|---|---|---|
-| **macOS** (Apple silicon) | [OpenMausBot.dmg](https://github.com/milind-soni/openmausbot-releases/releases/latest/download/OpenMausBot.dmg) | Drag it to Applications, open it. Signed & notarized. |
-| **Windows** (x64) | [OpenMausBot-setup.exe](https://github.com/milind-soni/openmausbot-releases/releases/latest/download/OpenMausBot-setup.exe) | Run it — one-click, per-user, no admin rights. The installer isn't code-signed yet, so SmartScreen shows "unknown publisher": **More info → Run anyway**. |
-
-**Ubuntu Desktop beta:** build the `.deb` or AppImage from source using the commands below. Release downloads
-will be linked here once Linux publishing is enabled. See [the Ubuntu Desktop guide](docs/linux-desktop.md) for
-installation, capabilities, and troubleshooting.
-
-**From source:**
+The repository is private. Authorized collaborators can run it from source; the harness server is embedded
+when a desktop package is built.
 
 ```sh
-git clone https://github.com/milind-soni/OpenMausBot && cd OpenMausBot
+git clone https://github.com/palamut62/MausCrew && cd MausCrew
 pnpm install
 
 pnpm dev:server    # harness server → 127.0.0.1:8799
@@ -204,10 +190,18 @@ in the model picker automatically.
 
 ### DeepSeek Harness (optional engine)
 
-DeepSeek Harness is the one engine that is not a CLI. It runs through a Python
-bridge (`server/bridges/deepseek/bridge.py`) that OpenMausBot starts and keeps
-alive per bot, so it needs Python 3.10+ and the SDK rather than a binary on
-PATH:
+DeepSeek Harness is the one engine that is not a CLI. MausCrew can drive
+its JSON-RPC runtime directly, or keep the Python SDK bridge as a compatibility
+path. Choose the installation strategy in Settings → Engines → DeepSeek
+Harness:
+
+- **System Python** uses a Python 3.10+ installation you manage.
+- **MausCrew managed venv** uses
+  `~/.mauscrew/runtimes/deepseek/venv` for dependency isolation.
+- **Bundled runtime** locates the executable carried by the pinned runtime
+  wheel and drives it over native JSON-RPC; Python is not in the turn data path.
+
+For System Python, install the exact pinned SDK set:
 
 ```sh
 python3 -m pip install --pre -r server/bridges/deepseek/requirements-deepseek.txt
@@ -224,9 +218,24 @@ is set.
 | macOS x64 | not supported — no runtime wheel |
 | Windows | **WSL2 only** — install the SDK inside your distribution and set the runtime mode to WSL |
 
-Current limits, reported honestly rather than faked: no tool-approval prompts
-(so the agent is confined to a scoped workspace and refuses to run anywhere
-wider), no mid-turn cancellation, and no in-session model switching. See
+The default `workspace-write` sandbox confines filesystem mutations to the
+selected workspace. `read-only` and `danger-full-access` are explicit choices;
+restricted modes do not expose the unconfined shell shipped by the current
+runtime carrier. Risky tool calls are routed to MausCrew Allow/Deny cards,
+and nested DeepSeek agents appear as expandable activity cards. Mid-turn
+cancellation and in-session model switching remain unsupported and are
+reported as such.
+
+DeepSeek bots include a workspace-scoped **Skill Center** in Bot Settings.
+It creates and manages portable `.agents/skills/<name>/SKILL.md` workflows,
+including discovery guidance and separate model/user invocation controls.
+Skills stay with the selected project instead of being locked inside
+MausCrew, so other compatible agents can read the same files.
+
+Each DeepSeek bot also has an experimental, opt-in **Dynamic Cordis plugins**
+setting. It supports temporary host-side plugins only: browser UI code is
+blocked, plugins disappear with the runtime process, and every code activation
+requires a one-time approval even when Auto mode is enabled. See
 [`server/bridges/deepseek/README.md`](server/bridges/deepseek/README.md).
 
 Package the desktop application:
@@ -247,15 +256,15 @@ pnpm package:linux    # Ubuntu x64: .deb + AppImage; no Swift required
 | Native on-device dictation | Supported | Planned | Planned |
 
 Unavailable native features fail closed on Ubuntu without blocking chat or cloud features. Linux local computer
-control, Wayland capture/automation, dictation, and ARM64 are tracked in
-[#29](https://github.com/milind-soni/OpenMausBot/issues/29) and are not claimed by the baseline package.
+control, Wayland capture/automation, dictation, and ARM64 remain follow-up work and are not claimed by the
+baseline package.
 
 These credentials are optional — local chat works without them. Paste a key once in **App Settings** (gear
 in the sidebar footer) when you want to enable its integration:
 
 | Credential | What it enables | Where to get it |
 |---|---|---|
-| Composio project key (`ak_…`) | Connect Gmail, GitHub, Slack, Notion, and other apps to your bots | [OpenMausBot Composio setup](docs/composio.md) |
+| Composio project key (`ak_…`) | Connect Gmail, GitHub, Slack, Notion, and other apps to your bots | [MausCrew Composio setup](docs/composio.md) |
 | Box API key | Give bots an isolated remote Linux computer with a desktop and terminal | [Box API key guide](https://docs.ascii.dev/box/api-keys) |
 | ElevenLabs key | Read replies aloud, and call your bots | [ElevenLabs API keys](https://elevenlabs.io/app/settings/api-keys) |
 
@@ -277,19 +286,19 @@ Routines can run once or on selected weekdays, using either a MAUS's configured 
 Cloud VM runner. Webhook triggers are independent from schedules but reuse the same queued task executor
 and calendar receipts.
 
-OpenMausBot starts a webhook-only receiver on `127.0.0.1:8800` by default (or one port above `OMB_PORT`).
-Set `OMB_WEBHOOK_PORT` to choose another port. A webhook secret is shown once when the trigger is created
+MausCrew starts a webhook-only receiver on `127.0.0.1:8800` by default (or one port above `MAUSCREW_PORT`).
+Set `MAUSCREW_WEBHOOK_PORT` to choose another port. A webhook secret is shown once when the trigger is created
 or rotated. Bearer authentication is recommended so the secret stays out of request URLs and most access
 logs; a single capability URL remains available for senders that cannot configure headers. The receiver
 exposes only `/health` and secret `/hooks/...` endpoints; it never exposes the app's broader API.
-OpenMausBot must remain running to accept a delivery. For public internet delivery, proxy only this
+MausCrew must remain running to accept a delivery. For public internet delivery, proxy only this
 dedicated receiver through a hosted relay or a tool such as Tailscale Funnel.
 
 ## Status
 
 Early but real — the loop works end to end: message → agent → streamed reply → tools → approvals →
-computer use. macOS and Windows have released builds; Ubuntu 24.04 x64 packages are in beta with the
-capability limits above. Rough edges to expect: hosted/mobile connectivity is still being built, and webhook
+computer use. Desktop packaging is configured for macOS, Windows, and Ubuntu 24.04 x64 with the capability
+limits above. Rough edges to expect: hosted/mobile connectivity is still being built, and webhook
 triggers currently use the local receiver rather than an always-on hosted relay.
 Voice needs an ElevenLabs key, and calls are macOS-only for now (they ride the same on-device dictation as
 the composer mic) — see [`docs/voice-mode.md`](docs/voice-mode.md) for the design and the known gaps.
@@ -299,8 +308,13 @@ small; adding a provider is one file in [`server/drivers/`](server/drivers/) plu
 
 ## License
 
-[MIT](LICENSE) © 2026 Milind Soni and contributors.
+[MIT](LICENSE) © 2026 Umut Çelik and MausCrew contributors. The original OpenMausBot copyright and MIT
+notice are preserved in the license.
 
-OpenMausBot is an independent, open-source project inspired by Grok Bot. It is
+Product Owner: [Umut Çelik on X](https://x.com/palamut62) · [GitHub](https://github.com/palamut62)
+
+MausCrew is an independent, open-source project inspired by Grok Bot. It is
 not affiliated with, endorsed by, or associated with xAI; "Grok" is a trademark
 of its respective owner.
+
+MausCrew began as a fork of [OpenMausBot](https://github.com/milind-soni/OpenMausBot).

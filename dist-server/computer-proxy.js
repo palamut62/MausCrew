@@ -28,19 +28,19 @@
 // stdout is the MCP channel — never console.log here.
 import { normalizeBrowserUrl, normalizeCrop, ObservationCoordinator, parseBrowserTargets, safeBrowserUrl, } from "./computer-observation.js";
 import { ensureRemoteCuaCommand, REMOTE_CUA_EXECUTABLE, REMOTE_CUA_SESSION, REMOTE_CUA_SOCKET, REMOTE_CUA_VERSION, semanticBrowserCommand, } from "./remote-computer.js";
-const BOX_API = process.env.OGB_BOX_API ?? "https://ascii.dev/api/box/v1";
-const boxId = process.env.OGB_BOX_ID ?? "";
-const token = process.env.OGB_BOX_TOKEN ?? "";
+const BOX_API = process.env.MAUSCREW_REMOTE_BOX_API ?? "https://ascii.dev/api/box/v1";
+const boxId = process.env.MAUSCREW_REMOTE_BOX_ID ?? "";
+const token = process.env.MAUSCREW_REMOTE_BOX_TOKEN ?? "";
 /** The coordinate space the model sees: frames are downscaled to this
  * width, and clicks are scaled back up to the real display box-side. */
 const SHOT_WIDTH = 1280;
 const JPEG_QUALITY = 75;
-const SHOT_PATH = "/tmp/ogb-shot.jpg";
+const SHOT_PATH = "/tmp/mauscrew-shot.jpg";
 /** How long the desktop gets to repaint before the fused capture. */
 const SETTLE_MS = 350;
 /** Gap between batched actions so focus changes land before typing. */
 const ACTION_GAP_MS = 120;
-const CHROME_PROFILE = "$HOME/.openmausbot/chrome-profile";
+const CHROME_PROFILE = "$HOME/.mauscrew/chrome-profile";
 const CHROME_DEBUG_FLAGS = `--user-data-dir="${CHROME_PROFILE}" --password-store=basic --disable-session-crashed-bubble --no-first-run --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222`;
 // Keep one durable browser identity regardless of which Chromium binary an
 // image supplies. Existing profiles are merged without overwriting files and
@@ -55,7 +55,7 @@ const CHROME_PROFILE_SETUP = [
     '      echo "failed to copy browser profile: $browser_dir" >&2',
     "      exit 1",
     "    fi",
-    '    mv "$browser_dir" "$browser_dir.pre-openmausbot-$(date +%s)-$$"',
+    '    mv "$browser_dir" "$browser_dir.pre-mauscrew-$(date +%s)-$$"',
     "  fi",
     '  if [ -L "$browser_dir" ]; then rm -f "$browser_dir"; fi',
     '  ln -s "$profile" "$browser_dir"',
@@ -181,7 +181,7 @@ function scaled(varName, value) {
 function cuaOrX11(tool, argumentsShell, fallback) {
     return [
         `if [ -x ${REMOTE_CUA_EXECUTABLE} ] && ${REMOTE_CUA_EXECUTABLE} status --socket ${REMOTE_CUA_SOCKET} >/dev/null 2>&1;`,
-        `then if CUA_OUT=$(env ${CUA_ENV} ${REMOTE_CUA_EXECUTABLE} call ${tool} ${argumentsShell} --socket ${REMOTE_CUA_SOCKET} 2>/tmp/ogb-cua-call.error);`,
+        `then if CUA_OUT=$(env ${CUA_ENV} ${REMOTE_CUA_EXECUTABLE} call ${tool} ${argumentsShell} --socket ${REMOTE_CUA_SOCKET} 2>/tmp/mauscrew-cua-call.error);`,
         `then echo "BACKEND CUA"; echo "CUA_RESULT $(printf %s "$CUA_OUT" | base64 -w0 2>/dev/null || printf %s "$CUA_OUT" | base64 | tr -d '\\n')"`,
         `else ${fallback}; X11_RC=$?; echo "BACKEND X11"; [ "$X11_RC" -eq 0 ]; fi`,
         `else ${fallback}; X11_RC=$?; echo "BACKEND X11"; [ "$X11_RC" -eq 0 ]; fi`,
@@ -203,7 +203,7 @@ function captureBlock(settleMs = SETTLE_MS, crop = null) {
     return [
         settleMs > 0 ? `sleep ${(settleMs / 1000).toFixed(2)}` : "true",
         `f=${SHOT_PATH}`,
-        'raw=/tmp/ogb-shot.png',
+        'raw=/tmp/mauscrew-shot.png',
         `rm -f "$f" 2>/dev/null || true`,
         `rm -f "$raw" 2>/dev/null || true`,
         `if [ -x ${REMOTE_CUA_EXECUTABLE} ] && ${REMOTE_CUA_EXECUTABLE} status --socket ${REMOTE_CUA_SOCKET} >/dev/null 2>&1 && env ${CUA_ENV} ${REMOTE_CUA_EXECUTABLE} call get_desktop_state ${shellQuote(JSON.stringify({ scope: "desktop", session: REMOTE_CUA_SESSION }))} --socket ${REMOTE_CUA_SOCKET} --screenshot-out-file "$raw" >/dev/null 2>&1 && command -v convert >/dev/null 2>&1 && convert "$raw" -quality ${JPEG_QUALITY} "$f" 2>/dev/null; then echo "CAPTURE CUA"; else scrot -o -q ${JPEG_QUALITY} "$f" 2>/dev/null || import -window root -quality ${JPEG_QUALITY} "$f" 2>/dev/null || ffmpeg -y -f x11grab -i "$DISPLAY" -frames:v 1 -q:v 6 "$f" >/dev/null 2>&1; echo "CAPTURE X11"; fi`,
@@ -874,7 +874,7 @@ async function handle(msg) {
             result: {
                 protocolVersion: msg.params?.protocolVersion ?? "2024-11-05",
                 capabilities: { tools: {} },
-                serverInfo: { name: "openmausbot-computer", version: "3" },
+                serverInfo: { name: "mauscrew-computer", version: "3" },
             },
         });
     }

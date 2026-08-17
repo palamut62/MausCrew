@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""OpenMausBot ↔ DeepSeek Harness bridge.
+"""MausCrew ↔ DeepSeek Harness bridge.
 
 One long-lived process per provider instance (spec §13). The DeepSeekHarness
 runtime is created lazily on the first turn and reused for every turn after
@@ -184,18 +184,26 @@ def forward_notification(request_id: str, session_id: str, descendants: set[str]
             return
         if method == "subagent.started":
             descendants.add(child)
-            emit({"type": "subagent.started", "requestId": request_id, "childSessionId": child})
+            emit({
+                "type": "subagent.started",
+                "requestId": request_id,
+                "childSessionId": child,
+                "parentSessionId": parent,
+            })
             return
         emit({
             "type": "subagent.finished",
             "requestId": request_id,
             "childSessionId": child,
+            "parentSessionId": parent,
             "provider": str(payload.get("provider") or "subagent"),
+            "agentId": str(payload.get("agentId") or ""),
             # 'ok' | 'error' is the deployment-mapped outcome; anything that is
             # not an explicit ok is reported as a failed chip rather than
             # guessed at, so a child that errored never renders as finished.
             "ok": payload.get("status") == "ok",
             "stopReason": str(payload.get("stopReason") or "completed"),
+            "lastAssistantMessage": str(payload.get("lastAssistantMessage") or "")[:4000],
         })
         return
 

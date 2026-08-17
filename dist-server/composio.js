@@ -4,10 +4,10 @@ import { saveConfig } from "./config.js";
 import { randomUUID } from "node:crypto";
 const DEFAULT_BACKEND_ORIGIN = "https://backend.composio.dev";
 function apiBase() {
-    return (process.env.OMB_COMPOSIO_API ?? `${DEFAULT_BACKEND_ORIGIN}/api/v3.1`).replace(/\/$/, "");
+    return (process.env.MAUSCREW_COMPOSIO_API ?? `${DEFAULT_BACKEND_ORIGIN}/api/v3.1`).replace(/\/$/, "");
 }
 function toolkitBase() {
-    return (process.env.OMB_COMPOSIO_TOOLKITS_API ?? `${DEFAULT_BACKEND_ORIGIN}/api/v3`).replace(/\/$/, "");
+    return (process.env.MAUSCREW_COMPOSIO_TOOLKITS_API ?? `${DEFAULT_BACKEND_ORIGIN}/api/v3`).replace(/\/$/, "");
 }
 function projectHeaders(apiKey, json = false) {
     return {
@@ -48,12 +48,12 @@ export async function prepareProjectSession(apiKey, current) {
         if (existing) {
             return {
                 apiKey: trimmed,
-                userId: existing.config?.user_id ?? current.userId ?? `openmausbot_${randomUUID()}`,
+                userId: existing.config?.user_id ?? current.userId ?? `mauscrew_${randomUUID()}`,
                 sessionId: existing.session_id,
             };
         }
     }
-    const userId = current?.userId ?? `openmausbot_${randomUUID()}`;
+    const userId = current?.userId ?? `mauscrew_${randomUUID()}`;
     const res = await fetch(`${apiBase()}/tool_router/session`, {
         method: "POST",
         headers: projectHeaders(trimmed, true),

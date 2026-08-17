@@ -1,4 +1,4 @@
-import { ChevronLeft, Crown, X } from "lucide-react";
+import { BookOpen, ChevronLeft, Crown, FolderOpen, Puzzle, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, useStore, type Bot } from "@/state/store";
 import { MausAvatar } from "./Avatar";
@@ -11,6 +11,7 @@ import {
 import { ModelPicker } from "./ModelPicker";
 import { cn } from "@/lib/cn";
 import { requestNotificationPermission } from "@/lib/notify";
+import { SkillManager } from "./SkillManager";
 
 function Field({
   label,
@@ -32,6 +33,8 @@ const inputCls =
 
 export function SettingsPanel({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
+  const [workspaceDraft, setWorkspaceDraft] = useState(bot.workspacePath ?? "");
+  const [skillsOpen, setSkillsOpen] = useState(false);
   const [voices, setVoices] = useState<Array<{ id: string; label: string; description?: string }>>([]);
   const [voicesLoading, setVoicesLoading] = useState(false);
   const patch = (
@@ -51,6 +54,8 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
         | "chiefOfStaff"
         | "approvePeerComms"
         | "modelSelection"
+        | "workspacePath"
+        | "dynamicCordis"
       >
     >,
   ) => dispatch({ type: "updateBot", botId: bot.id, patch: p });
@@ -59,6 +64,23 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
   const engine = state.instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId);
   const canCoordinate = engine?.capabilities?.agentsMcp === true;
   const currentChief = state.bots.find((candidate) => candidate.chiefOfStaff);
+
+  useEffect(() => {
+    setWorkspaceDraft(bot.workspacePath ?? "");
+  }, [bot.id, bot.workspacePath]);
+
+  const saveWorkspace = () => {
+    const workspacePath = workspaceDraft.trim();
+    setWorkspaceDraft(workspacePath);
+    if (workspacePath !== (bot.workspacePath ?? "")) patch({ workspacePath });
+  };
+
+  const chooseWorkspace = async () => {
+    const workspacePath = await window.mauscrew?.chooseWorkspace?.();
+    if (!workspacePath) return;
+    setWorkspaceDraft(workspacePath);
+    patch({ workspacePath });
+  };
 
   useEffect(() => {
     if (!state.config?.tts?.configured) {
@@ -76,8 +98,10 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
     };
   }, [state.config?.tts?.configured]);
 
+  if (skillsOpen) return <SkillManager bot={bot} onClose={() => setSkillsOpen(false)} />;
+
   return (
-    <aside className="animate-panel-in flex h-full w-[400px] shrink-0 flex-col border-l border-hairline/40 bg-panel">
+    <aside className="animate-panel-in flex h-full w-[400px] shrink-0 flex-col border-l border-hairline/40 bg-panel max-md:absolute max-md:inset-0 max-md:z-50 max-md:w-full max-md:border-l-0">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3">
         <button
@@ -186,6 +210,36 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
             />
           </Field>
 
+          <div className="block">
+            <div className="mb-1.5 text-[13px] text-ink-secondary">Workspace directory</div>
+            <div className="flex gap-2">
+              <input
+                aria-label="Workspace directory"
+                className={inputCls}
+                placeholder="Private bot workspace (default)"
+                value={workspaceDraft}
+                onChange={(event) => setWorkspaceDraft(event.target.value)}
+                onBlur={saveWorkspace}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") event.currentTarget.blur();
+                }}
+              />
+              <button
+                type="button"
+                onClick={chooseWorkspace}
+                disabled={!window.mauscrew?.chooseWorkspace}
+                className="flex shrink-0 items-center gap-1.5 rounded-lg border border-hairline/40 bg-card px-3 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+                title={window.mauscrew?.chooseWorkspace ? "Choose a folder" : "Enter an absolute path in the browser"}
+              >
+                <FolderOpen size={15} />
+                Choose
+              </button>
+            </div>
+            <div className="mt-1.5 text-[11.5px] leading-relaxed text-ink-secondary">
+              Coding engines work in this absolute host folder. Leave blank to use a private workspace scoped to this bot.
+            </div>
+          </div>
+
           <div className={cn(
             "rounded-xl border p-4",
             bot.chiefOfStaff ? "border-accent/40 bg-accent/10" : "border-hairline/40 bg-card",
@@ -275,6 +329,72 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
             </div>
             <ModelPicker bot={bot} />
           </div>
+
+          {engine?.driverKind === "deepseek-harness" && (
+            <>
+              <div className="rounded-xl border border-hairline/40 bg-card p-4">
+                <div className="flex items-center gap-3">
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-raised text-ink-secondary">
+                    <BookOpen size={17} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[15px] font-medium text-ink">Skills</div>
+                    <div className="text-[11.5px] text-ink-secondary">Reusable workspace instructions</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSkillsOpen(true)}
+                    className="rounded-lg border border-hairline/40 bg-raised px-3 py-1.5 text-[12.5px] font-medium text-ink hover:bg-raised-hover"
+                  >
+                    Manage
+                  </button>
+                </div>
+                <div className="mt-3 text-[13px] leading-relaxed text-ink-secondary">
+                  Create and edit SKILL.md workflows this bot can discover automatically or invoke by name.
+                </div>
+              </div>
+
+              <div className={cn(
+                "rounded-xl border p-4",
+                bot.dynamicCordis ? "border-accent/40 bg-accent/10" : "border-hairline/40 bg-card",
+              )}>
+                <div className="flex items-center gap-3">
+                <span className={cn(
+                  "flex size-8 shrink-0 items-center justify-center rounded-lg",
+                  bot.dynamicCordis ? "bg-accent text-white" : "bg-raised text-ink-secondary",
+                )}>
+                  <Puzzle size={17} />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[15px] font-medium text-ink">Dynamic Cordis plugins</div>
+                  <div className="text-[11.5px] text-ink-secondary">Experimental · DeepSeek only</div>
+                </div>
+                <button
+                  role="switch"
+                  aria-checked={Boolean(bot.dynamicCordis)}
+                  aria-label="Dynamic Cordis plugins"
+                  onClick={() => patch({ dynamicCordis: !bot.dynamicCordis })}
+                  className={cn(
+                    "relative h-[26px] w-[44px] shrink-0 rounded-full transition-colors",
+                    bot.dynamicCordis ? "bg-accent" : "bg-raised",
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "absolute top-[3px] size-5 rounded-full bg-white transition-all",
+                      bot.dynamicCordis ? "left-[21px]" : "left-[3px]",
+                    )}
+                  />
+                </button>
+                </div>
+                <div className="mt-3 text-[13px] leading-relaxed text-ink-secondary">
+                  Lets this bot inspect and define temporary host-side Cordis plugins. Running plugin code always asks
+                  for one-time approval, even in Auto mode. Browser UI plugins are blocked, and every temporary plugin
+                  disappears when the DeepSeek runtime restarts.
+                </div>
+              </div>
+            </>
+          )}
 
           {!!engine?.capabilities?.effortLevels?.length && (
             <div className="rounded-xl bg-card p-4">

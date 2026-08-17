@@ -1,6 +1,6 @@
 // Cua-backed Local VM lifecycle and health checks.
 //
-// OpenMausBot owns only the sandbox boundary: image preparation, container
+// MausCrew owns only the sandbox boundary: image preparation, container
 // lifecycle, resource limits, loopback viewer, and the single-bot lease in the
 // harness. Desktop automation itself is Cua Driver. Agents connect directly to
 // `cua-driver mcp` inside the container; this module never reimplements clicks,
@@ -24,20 +24,20 @@ export const BASE_IMAGE_DIGEST = "sha256:274eb636f5cf3fc58f705916ee72b7a701270b3
 export const BASE_IMAGE = `${BASE_IMAGE_REPOSITORY}@${BASE_IMAGE_DIGEST}`;
 // This tag is built locally from the pinned Cua base. Image and container
 // labels below are the authoritative compatibility check, not the mutable tag.
-export const IMAGE_REPOSITORY = "openmausbot/cua-local-vm";
+export const IMAGE_REPOSITORY = "mauscrew/cua-local-vm";
 export const IMAGE_LAYER_VERSION = "3";
-export const IMAGE_LAYER_LABEL = "com.openmausbot.image-layer";
+export const IMAGE_LAYER_LABEL = "com.mauscrew.image-layer";
 export const IMAGE = `${IMAGE_REPOSITORY}:driver-${CUA_DRIVER_VERSION}-v${IMAGE_LAYER_VERSION}`;
-export const CONTAINER = "openmausbot-computer";
-export const MANAGED_LABEL = "com.openmausbot.local-vm";
-export const DRIVER_LABEL = "com.openmausbot.cua-driver";
-export const BASE_IMAGE_LABEL = "com.openmausbot.cua-base";
-export const WORKSPACE_LABEL = "com.openmausbot.workspace";
+export const CONTAINER = "mauscrew-computer";
+export const MANAGED_LABEL = "com.mauscrew.local-vm";
+export const DRIVER_LABEL = "com.mauscrew.cua-driver";
+export const BASE_IMAGE_LABEL = "com.mauscrew.cua-base";
+export const WORKSPACE_LABEL = "com.mauscrew.workspace";
 export const VM_WORKSPACE_DIR = join(DATA_DIR, "vm-home");
 export const VM_WORKSPACE_GUEST = "/home/cua/workspace";
 export const DISPLAY = ":1";
-export const CUA_SOCKET = "/run/user/1000/openmausbot-cua.sock";
-export const CUA_EXECUTABLE = "/usr/local/libexec/openmausbot/cua-driver";
+export const CUA_SOCKET = "/run/user/1000/mauscrew-cua.sock";
+export const CUA_EXECUTABLE = "/usr/local/libexec/mauscrew/cua-driver";
 const RUNTIMES = ["docker", "podman", "container"];
 const INTERNAL_VIEWER_PORT = 6901;
 const HOST_VIEWER_PORT = 6080;
@@ -96,11 +96,11 @@ RUN printf '%s\\n' \\
       'migrate_profile google-chrome' \\
       'migrate_profile chromium' \\
       'find "$profiles" \\( -name SingletonLock -o -name SingletonSocket -o -name SingletonCookie -o -name .parentlock \\) -delete' \\
-      > /usr/local/bin/prepare-openmausbot-workspace.sh \\
-    && chmod 0755 /usr/local/bin/prepare-openmausbot-workspace.sh
+      > /usr/local/bin/prepare-mauscrew-workspace.sh \\
+    && chmod 0755 /usr/local/bin/prepare-mauscrew-workspace.sh
 RUN printf '%s\\n' \\
       '#!/bin/sh' \\
-      '/usr/local/bin/prepare-openmausbot-workspace.sh' \\
+      '/usr/local/bin/prepare-mauscrew-workspace.sh' \\
       'attempt=0' \\
       'until DISPLAY=:1 xset q >/dev/null 2>&1; do' \\
       '  attempt=$((attempt + 1))' \\
@@ -108,12 +108,12 @@ RUN printf '%s\\n' \\
       '  sleep 1' \\
       'done' \\
       'exec env CUA_DRIVER_INSTALL_CHANNEL=python_package CUA_DRIVER_RS_TELEMETRY_ENABLED=0 ${CUA_EXECUTABLE} serve --socket ${CUA_SOCKET} --permission-mode standard' \\
-      > /usr/local/bin/start-openmausbot-cua-driver.sh \\
-    && chmod 0755 /usr/local/bin/start-openmausbot-cua-driver.sh
+      > /usr/local/bin/start-mauscrew-cua-driver.sh \\
+    && chmod 0755 /usr/local/bin/start-mauscrew-cua-driver.sh
 RUN printf '%s\\n' \\
       '' \\
-      '[program:openmausbot-cua-driver]' \\
-      'command=/usr/local/bin/start-openmausbot-cua-driver.sh' \\
+      '[program:mauscrew-cua-driver]' \\
+      'command=/usr/local/bin/start-mauscrew-cua-driver.sh' \\
       'user=cua' \\
       'environment=HOME="/home/cua",USER="cua",DISPLAY=":1"' \\
       'autorestart=true' \\
@@ -185,7 +185,7 @@ function statusProblem(status) {
     if (!status.imageMatches)
         return "The existing Local VM uses an older desktop or Cua Driver; recreate it";
     if (!status.managed)
-        return "The existing container was not created by OpenMausBot; recreate it";
+        return "The existing container was not created by MausCrew; recreate it";
     if (status.network === "unsafe")
         return "The existing Local VM exposes its viewer publicly; recreate it";
     if (status.security === "unsafe")
@@ -282,7 +282,7 @@ export async function containerComputerStatus(runner = sh, platform = process.pl
         status.image_id = image.id;
     }
     catch {
-        // The prepared OpenMausBot derivative has not been built yet.
+        // The prepared MausCrew derivative has not been built yet.
     }
     try {
         const { stdout } = await runner(status.runtime, ["inspect", CONTAINER]);
@@ -347,7 +347,7 @@ export async function containerComputerStatus(runner = sh, platform = process.pl
                 (report.overall !== "ok" && report.overall !== "degraded")) {
                 throw new Error(`Cua health report is ${report.overall ?? "invalid"}`);
             }
-            const readinessShot = "/tmp/openmausbot-readiness.png";
+            const readinessShot = "/tmp/mauscrew-readiness.png";
             await runner(status.runtime, cuaExecArgs([
                 "call",
                 "get_desktop_state",
@@ -454,7 +454,7 @@ async function ensureVmWorkspace(platform) {
 }
 async function prepareManagedImage(runtime, runner) {
     await runner(runtime, ["pull", BASE_IMAGE], 10 * 60_000);
-    const context = await mkdtemp(join(tmpdir(), "openmausbot-cua-image-"));
+    const context = await mkdtemp(join(tmpdir(), "mauscrew-cua-image-"));
     try {
         await writeFile(join(context, "Dockerfile"), managedImageDockerfile(), { mode: 0o600 });
         await runner(runtime, ["build", "-t", IMAGE, context], 10 * 60_000);
@@ -533,7 +533,7 @@ export async function containerComputerScreenshot(runner = sh, platform = proces
     if (cacheable)
         screenshotStatusCache = { status, expiresAt: now + SCREENSHOT_STATUS_TTL_MS };
     try {
-        const screenshot = "/tmp/openmausbot-preview.png";
+        const screenshot = "/tmp/mauscrew-preview.png";
         await runner(status.runtime, cuaExecArgs([
             "call",
             "get_desktop_state",
@@ -615,9 +615,9 @@ export function setupCommands(runtime, platform = process.platform) {
         view: `http://127.0.0.1:${HOST_VIEWER_PORT}/vnc.html`,
     };
 }
-/** Cloud boxes still use OpenMausBot's high-latency REST adapter. Local VMs
+/** Cloud boxes still use MausCrew's high-latency REST adapter. Local VMs
  * bypass it and mount Cua Driver's official MCP server through
  * containerComputerMcp(). */
 export function computerProxyEnv(computer) {
-    return { OGB_BOX_ID: computer.boxId ?? "", OGB_BOX_TOKEN: computer.token ?? "" };
+    return { MAUSCREW_REMOTE_BOX_ID: computer.boxId ?? "", MAUSCREW_REMOTE_BOX_TOKEN: computer.token ?? "" };
 }

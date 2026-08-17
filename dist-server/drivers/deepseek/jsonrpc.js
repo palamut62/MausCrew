@@ -89,7 +89,7 @@ export class JsonRpcConnection {
         if (this.closed) {
             return Promise.reject(new Error("the DeepSeek runtime connection is closed"));
         }
-        const id = `omb_${randomUUID().replaceAll("-", "")}`;
+        const id = `mauscrew_${randomUUID().replaceAll("-", "")}`;
         return new Promise((resolve, reject) => {
             let detach = () => { };
             if (signal) {

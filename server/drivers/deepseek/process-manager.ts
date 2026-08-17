@@ -15,6 +15,7 @@
 //     DATABASE_URL because they happened to be in scope is how a coding
 //     agent becomes a credential exfiltration path (spec §12).
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ChildProcessByStdio } from "node:child_process";
@@ -39,14 +40,69 @@ export function pythonCandidates(config: DeepSeekHarnessConfig): string[][] {
   if (config.runtime.mode === "wsl") {
     const distro = config.runtime.distribution;
     const prefix = distro ? ["wsl.exe", "-d", distro, "--"] : ["wsl.exe", "--"];
+    if (config.runtime.strategy === "managed" || config.runtime.strategy === "bundled") {
+      // WSL resolves `~` for --cd before exec, so the distro user's home does
+      // not have to be guessed on Windows. Running the venv interpreter as a
+      // direct executable also preserves every following argv item verbatim.
+      return [[
+        ...(distro ? ["wsl.exe", "-d", distro] : ["wsl.exe"]),
+        "--cd",
+        "~",
+        "--exec",
+        "./.mauscrew/runtimes/deepseek/venv/bin/python",
+      ]];
+    }
     const interpreter = config.pythonPath || config.runtime.executable || "python3";
     return [[...prefix, interpreter]];
   }
   if (config.pythonPath) return [[config.pythonPath]];
   if (config.runtime.executable) return [[config.runtime.executable]];
+  if (config.runtime.strategy === "managed" || config.runtime.strategy === "bundled") {
+    return [[
+      process.platform === "win32"
+        ? join(homedir(), ".mauscrew", "runtimes", "deepseek", "venv", "Scripts", "python.exe")
+        : join(homedir(), ".mauscrew", "runtimes", "deepseek", "venv", "bin", "python3"),
+    ]];
+  }
   return process.platform === "win32"
     ? [["py", "-3"], ["python"], ["python3"]]
     : [["python3"], ["python"]];
+}
+
+/** Resolve the single-file executable carried by the pinned runtime wheel.
+ * Python is used only as the package lookup here; once resolved, the native
+ * transport execs the returned argv and Python is not in the data path. */
+export function resolveBundledRuntime(
+  config: DeepSeekHarnessConfig,
+  timeoutMs = 15_000,
+): Promise<{ launchArgs: string[]; reason?: string }> {
+  if (config.runtime.executable) return Promise.resolve({ launchArgs: [config.runtime.executable] });
+  const candidate = pythonCandidates(config)[0];
+  if (!candidate?.length) return Promise.resolve({ launchArgs: [], reason: "no runtime lookup interpreter configured" });
+  const [command, ...prefixArgs] = candidate;
+  const probe =
+    "import json\n" +
+    "try:\n" +
+    " from deepseek_harness_runtime import resolve_bundled_launch_args\n" +
+    " print(json.dumps({'ok': True, 'argv': list(resolve_bundled_launch_args())}))\n" +
+    "except Exception as e:\n" +
+    " print(json.dumps({'ok': False, 'error': type(e).__name__ + ': ' + str(e)}))\n";
+  return new Promise((resolve) => {
+    execCli(command, [...prefixArgs, "-c", probe], { timeout: timeoutMs, env: { PATH: augmentedPath() } }, (err, stdout) => {
+      if (err) return resolve({ launchArgs: [], reason: err.message });
+      try {
+        const parsed = JSON.parse(stdout.trim().split("\n").pop() ?? "{}");
+        const launchArgs = Array.isArray(parsed.argv)
+          ? parsed.argv.filter((value: unknown): value is string => typeof value === "string" && value.length > 0)
+          : [];
+        return parsed.ok && launchArgs.length
+          ? resolve({ launchArgs })
+          : resolve({ launchArgs: [], reason: String(parsed.error ?? "bundled runtime was not found") });
+      } catch {
+        return resolve({ launchArgs: [], reason: "could not read the bundled runtime location" });
+      }
+    });
+  });
 }
 
 /** Windows paths mean nothing to a Linux interpreter, so a workspace handed
@@ -60,12 +116,23 @@ export function toWslPath(windowsPath: string): string {
   return `/mnt/${drive.toLowerCase()}/${rest.replace(/\\/g, "/")}`;
 }
 
+/** Every path crossing into the runtime uses the same platform mapping.
+ * Keeping turn cwd on this seam prevents a Windows path from being treated
+ * as a relative Linux name by the SDK. */
+export function runtimePath(config: DeepSeekHarnessConfig, path: string): string {
+  return config.runtime.mode === "wsl" ? toWslPath(path) : path;
+}
+
 export interface BridgeEnvInput {
   config: DeepSeekHarnessConfig;
   apiKey: string;
   sessionRoot: string;
   /** Instance environment overrides, already resolved by the driver. */
   instanceEnv: Record<string, string>;
+  /** The configured composition contains the MausCrew approval gate. This is
+   * carried separately because an integration turn uses a generated copy of
+   * that composition, whose temporary pathname is not the bundled pathname. */
+  approvalChannelActive?: boolean;
 }
 
 /** The child's entire environment. Built from nothing, not filtered from
@@ -83,7 +150,7 @@ export function buildBridgeEnv(input: BridgeEnvInput): Record<string, string> {
   // the plugin refuses without a round trip, so handing it a directory would
   // suggest a channel that nothing is listening on.
   const approvalDir =
-    sessionRoot && approvalsActive(config) && config.approval.policy === "ask"
+    sessionRoot && (input.approvalChannelActive ?? approvalsActive(config)) && config.approval.policy === "ask"
       ? join(sessionRoot, MAILBOX_DIRNAME)
       : "";
   const env: Record<string, string> = {
@@ -107,6 +174,13 @@ export function buildBridgeEnv(input: BridgeEnvInput): Record<string, string> {
   env.DSH_BRIDGE_MODEL = config.defaultModel;
   if (sessionRoot) env.DSH_SESSION_ROOT = p(sessionRoot);
   if (config.cordis.configPath) env.DSH_CORDIS_CONFIG = p(config.cordis.configPath);
+  // The bundled composition mounts the fail-closed local sandbox provider
+  // and reads this policy. It is process-global, so changing it reloads the
+  // provider instance just like changing the composition itself.
+  env.DSH_SANDBOX_MODE = config.sandbox.mode;
+  // Generated integration compositions live under the session root, not
+  // beside the two MausCrew plugins. Absolute, runtime-native paths keep
+  // those plugins resolvable after the composition is copied there.
 
   // The approval mailbox (spec §37). Same translation as the session root
   // and for the same reason: the plugin writing these files is a Linux
@@ -114,8 +188,8 @@ export function buildBridgeEnv(input: BridgeEnvInput): Record<string, string> {
   // two do not agree on is an approval nobody ever sees — which the plugin
   // resolves as a denial, so the failure is loud rather than permissive.
   if (approvalDir) {
-    env.DSH_OPENMAUS_APPROVAL_DIR = p(approvalDir);
-    env.DSH_OPENMAUS_APPROVAL_TIMEOUT_MS = String(config.approval.timeoutMs);
+    env.DSH_MAUSCREW_APPROVAL_DIR = p(approvalDir);
+    env.DSH_MAUSCREW_APPROVAL_TIMEOUT_MS = String(config.approval.timeoutMs);
   }
 
   // Session Log sharing (spec §57). Off is the default and is enforced with
@@ -137,11 +211,36 @@ export function buildBridgeEnv(input: BridgeEnvInput): Record<string, string> {
     if (key === "DSH_TELEMETRY_DISABLED" || key === "DSH_TELEMETRY_MODE") continue;
     // Redirecting the approval channel is redirecting who gets to say yes.
     // The driver owns both of these (spec §95).
-    if (key === "DSH_OPENMAUS_APPROVAL_DIR" || key === "DSH_OPENMAUS_APPROVAL_TIMEOUT_MS") continue;
+    if (key === "DSH_MAUSCREW_APPROVAL_DIR" || key === "DSH_MAUSCREW_APPROVAL_TIMEOUT_MS") continue;
+    // A per-instance free-form env entry must not widen the explicit sandbox
+    // choice made in Settings/config.json.
+    if (key === "DSH_SANDBOX_MODE") continue;
     if (typeof value === "string" && !/[\0\r\n]/.test(value)) env[key] = value;
   }
 
   return env;
+}
+
+/** WSL does not inherit arbitrary Windows environment variables unless their
+ * names are listed in WSLENV. Pass only the already-allowlisted bridge
+ * environment and leave host bootstrap variables (especially Windows PATH
+ * and HOME) to WSL's own Linux environment. Values — including credentials —
+ * remain in the child environment and never appear in argv/process listings. */
+export function withWslForwarding(env: Record<string, string>): Record<string, string> {
+  const hostOnly = new Set([
+    "PATH",
+    "SystemRoot",
+    "SYSTEMROOT",
+    "TEMP",
+    "TMP",
+    "COMSPEC",
+    "HOME",
+    "USERPROFILE",
+  ]);
+  const names = Object.keys(env).filter(
+    (key) => !hostOnly.has(key) && key !== "WSLENV" && /^[A-Za-z_][A-Za-z0-9_]*$/.test(key),
+  );
+  return { ...env, WSLENV: names.join(":") };
 }
 
 export interface SpawnBridgeInput extends BridgeEnvInput {
@@ -175,12 +274,13 @@ export function spawnBridge(input: SpawnBridgeInput): SpawnedBridge {
   const cwd = wsl ? toWslPath(input.cwd) : input.cwd;
   const env = buildBridgeEnv({ ...input, sessionRoot: input.sessionRoot });
 
+  const childEnv = { ...env, DSH_CWD: cwd };
   const child = spawnCli(command, [...prefixArgs, scriptArg], {
     // WSL cannot chdir to a Windows path; the bridge receives its workspace
     // through DSH_CWD/turn cwd instead, so the host process just starts
     // somewhere valid.
     ...(wsl ? {} : { cwd: input.cwd }),
-    env: { ...env, ...(wsl ? { DSH_CWD: cwd } : { DSH_CWD: cwd }) },
+    env: wsl ? withWslForwarding(childEnv) : childEnv,
     stdio: ["pipe", "pipe", "pipe"],
   });
 
@@ -217,11 +317,12 @@ export function spawnRuntime(input: SpawnBridgeInput): SpawnedBridge {
   const cwd = wsl ? toWslPath(input.cwd) : input.cwd;
   const env = buildBridgeEnv(input);
 
+  const childEnv = { ...env, DSH_CWD: cwd };
   const child = spawnCli(command, args, {
     // WSL cannot chdir to a Windows path; the runtime receives its workspace
     // through DSH_CWD instead.
     ...(wsl ? {} : { cwd: input.cwd }),
-    env: { ...env, DSH_CWD: cwd },
+    env: wsl ? withWslForwarding(childEnv) : childEnv,
     stdio: ["pipe", "pipe", "pipe"],
   });
 

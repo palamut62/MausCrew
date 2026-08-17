@@ -59,7 +59,7 @@ function header(req, name) {
 function bearerSecret(req) {
     const authorization = header(req, "authorization") ?? "";
     const match = authorization.match(/^Bearer\s+(.+)$/i);
-    return match?.[1]?.trim() || header(req, "x-openmaus-secret")?.trim() || "";
+    return match?.[1]?.trim() || header(req, "x-mauscrew-secret")?.trim() || "";
 }
 function deliveryId(req) {
     return (header(req, "idempotency-key") ??
@@ -77,7 +77,7 @@ export function createWebhookIngressHandler(manager) {
     return async (req, res) => {
         const url = new URL(req.url ?? "/", "http://localhost");
         if (req.method === "GET" && url.pathname === "/health") {
-            return json(res, 200, { app: "openmausbot-webhooks", ready: true });
+            return json(res, 200, { app: "mauscrew-webhooks", ready: true });
         }
         const match = url.pathname.match(/^\/hooks\/(wh_[A-Za-z0-9_-]+)(?:\/([^/]+))?$/);
         if (!match)
