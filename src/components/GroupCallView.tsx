@@ -4,7 +4,7 @@
 // native recognizer has no acoustic echo cancellation. Bot replies are
 // explicitly queued so a fast second member never cuts off the first.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, PhoneOff, X } from "lucide-react";
+import { PhoneSlash, Spinner, X } from "@phosphor-icons/react";
 
 import { currentCall, deferCallCleanup, endCall, useOnCall } from "@/lib/call";
 import { routeSpokenGroupMessage } from "@/lib/group-call";
@@ -12,7 +12,7 @@ import { track } from "@/lib/analytics";
 import { normalizeState } from "@/lib/mascot";
 import { speaker } from "@/lib/tts";
 import { useSpeech } from "@/lib/tts/useSpeech";
-import { usePushToTalk } from "@/lib/push-to-talk";
+import { usePushToTalk, PUSH_TO_TALK_LABEL } from "@/lib/push-to-talk";
 import { useStore, type Bot, type Group, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { MausAvatar } from "./Avatar";
@@ -401,7 +401,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
         aria-label="Hang up"
         className="absolute right-5 top-5 rounded-md p-2 text-ink-secondary hover:bg-raised hover:text-ink"
       >
-        <X size={18} />
+        <X size={18} weight="bold" />
       </button>
 
       <div className="max-w-full overflow-x-auto px-4 py-3">
@@ -420,12 +420,13 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
               <div
                 key={member.id}
                 className={cn(
-                  "flex w-[124px] flex-col items-center gap-2 rounded-3xl px-2 py-3 transition-all duration-200",
-                  focused ? "scale-105 bg-raised/70 shadow-lg" : "opacity-75",
+                  "flex w-[124px] flex-col items-center gap-2 rounded-xl px-2 py-3 transition-all duration-200",
+                  focused ? "scale-105 border border-hairline bg-raised/70" : "opacity-75",
                 )}
               >
                 <MausAvatar
                   color={member.color}
+                  name={member.name}
                   state={state}
                   size={94}
                   animated
@@ -444,7 +445,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
       <div className="flex flex-col items-center gap-1.5 text-center">
         <div className="text-[20px] font-medium text-ink">{group.name}</div>
         <div className="flex items-center gap-2 text-[13.5px] text-ink-secondary">
-          {(phase === "working" || phase === "sending") && <Loader2 size={13} className="animate-spin" />}
+          {(phase === "working" || phase === "sending") && <Spinner size={13} weight="fill" className="animate-spin" />}
           {status}
         </div>
       </div>
@@ -454,7 +455,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
           heard || (
             <span className="text-ink-secondary">
               {pushToTalk
-                ? "Release Control + Option to send…"
+                ? `Release ${PUSH_TO_TALK_LABEL} to send…`
                 : "Say a name, say “everyone,” or just talk to the room…"}
             </span>
           )
@@ -470,7 +471,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
           <span>{note}</span>
           <button
             onClick={listen}
-            className="rounded-full border border-warning/40 px-3 py-1.5 text-[12px] hover:bg-warning/10"
+            className="rounded-md border border-warning/40 px-3 py-1.5 text-[12px] hover:bg-warning/10"
           >
             Try microphone again
           </button>
@@ -482,21 +483,21 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
         {speaker.isSpeaking() && (
           <button
             onClick={interruptSpeech}
-            className="rounded-full border border-hairline/50 px-4 py-2 text-[13.5px] text-ink hover:bg-raised"
+            className="rounded-md border border-hairline px-4 py-2 text-[13.5px] text-ink hover:bg-raised"
           >
             Interrupt
           </button>
         )}
         <button
           onClick={() => endCall(group.id)}
-          className="flex items-center gap-2 rounded-full bg-danger px-5 py-2.5 text-[14px] font-medium text-white hover:brightness-110"
+          className="flex items-center gap-2 rounded-md bg-danger px-5 py-2.5 text-[14px] font-medium text-white hover:brightness-110"
         >
-          <PhoneOff size={16} /> Hang up
+          <PhoneSlash size={16} weight="bold" /> Hang up
         </button>
       </div>
 
-      <div className="text-[11.5px] text-ink-secondary/70">
-        Hold Control + Option to talk · Say a member’s name to direct the turn · Space interrupts · Esc hangs up
+      <div className="font-mono text-[11.5px] tracking-tight text-ink-secondary/70">
+        Hold {PUSH_TO_TALK_LABEL} to talk · Say a member’s name to direct the turn · Space interrupts · Esc hangs up
       </div>
     </div>
   );

@@ -4,7 +4,7 @@
 // approval is a decision about one concrete action, so it shows the tool
 // and the actual command/path in monospace, and the choices carry their
 // own behavior instead of being matched by their label text.
-import { Check, ShieldCheck, X } from "lucide-react";
+import { Check, ShieldCheck, X } from "@phosphor-icons/react";
 import { type Bot, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 
@@ -40,8 +40,8 @@ export function ApprovalCard({
   return (
     <div
       className={cn(
-        "w-full max-w-[840px] rounded-2xl border bg-card p-4",
-        settled ? "border-hairline/30 opacity-70" : "border-accent/40",
+        "w-full max-w-[840px] rounded-xl border bg-card p-4",
+        settled ? "border-hairline opacity-70" : "border-accent/40",
       )}
     >
       <div className="flex items-baseline justify-between gap-3">
@@ -68,15 +68,15 @@ export function ApprovalCard({
       <div className="mt-3 flex items-center gap-1.5 text-[13px] text-ink-secondary">
         {settled === "allow" ? (
           <>
-            <Check size={14} className="text-success" /> Allowed
+            <Check size={14} weight="fill" className="text-success" /> Allowed
           </>
         ) : settled ? (
           <>
-            <X size={14} /> Denied
+            <X size={14} weight="bold" /> Denied
           </>
         ) : (
           <>
-            <ShieldCheck size={14} className="text-accent" /> Waiting for your answer below
+            <ShieldCheck size={14} weight="bold" className="text-accent" /> Waiting for your answer below
           </>
         )}
       </div>

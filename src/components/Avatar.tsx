@@ -1,36 +1,15 @@
-// Bot avatar — the Blob Studio "Cursor" mascot (CursorAvatar.tsx), wrapped
-// in the app's historical MausAvatar API so no call site changes: per-bot
-// color becomes a body gradient, the app's one-shot motion beats borrow the
-// face/state for a moment, and the eyes follow the pointer. The previous
-// hand-built Maus body + face engine (maus-engine/face/driver) is gone;
-// CursorAvatar owns morphing, blinking, drift, body motion and effects.
-import {
-  forwardRef,
-  memo,
-  useEffect,
-  useImperativeHandle,
-  useRef,
-  useState,
-  type PointerEvent as ReactPointerEvent,
-} from "react";
+// Bot avatar — a mono monogram tile. Bot identity is carried by one thing
+// only: a fully opaque hairline border in the bot's own color. No mascot, no
+// gradient, no face. The Blob Studio cursor mascot (CursorAvatar.tsx) and the
+// mascot engine (@/lib/mascot) are left in the tree on purpose so switching
+// back is a one-line change, but nothing renders them any more.
+import { forwardRef, memo, useImperativeHandle } from "react";
 import { MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
-import { CursorAvatar, SHAPE, type CursorAvatarHandle, type CursorShape } from "./CursorAvatar";
 
 /**
- * The pack's baked-in silhouette was exported with the body fill hardcoded
- * to black instead of the {{GRADIENT}} placeholder the component
- * substitutes, which painted every bot the same. Restore the slot so the
- * per-bot gradient actually lands on the body.
- */
-const GRADIENT_SHAPE: CursorShape = {
-  ...SHAPE,
-  body: SHAPE.body.replace(/fill="#000000"/g, 'fill="{{GRADIENT}}"'),
-};
-
-/**
- * Legacy face-placement knobs from the Maus body era. The cursor mascot
- * places its own face; these remain only so the preview harness's sliders
- * keep compiling — the matching props are accepted and ignored.
+ * Legacy face-placement knobs from the Maus body era. Kept so the preview
+ * harness's sliders keep compiling — the matching props are accepted and
+ * ignored by the monogram tile.
  */
 export const FACE_X = 80;
 export const FACE_Y = 102;
@@ -38,89 +17,49 @@ export const FACE_SCALE = 0.47;
 export const EYE_SCALE = 1.12;
 export const MOUTH_WEIGHT = 11;
 
-/**
- * How far the pointer may pull the eyes. Facing forward the full range is
- * safe; with the expressions' authored gaze they already start off-centre.
- */
-const POINTER_GAZE = { forward: 1, authored: 0.25 };
+/** Tile metrics, proportional to the box so 16px and 220px both read right. */
+const GLYPH_RATIO = 0.4;
+const MIN_GLYPH = 9;
 
 /**
- * What a one-shot motion does while it plays: CursorAvatar animates the body
- * per state, so borrowing the state for a beat moves body and face together.
+ * Initials from a bot or group name: two words give one letter each
+ * ("Deep Seek" -> DS), one word gives its first two ("DeepSeek" -> DE),
+ * nothing gives "?".
  */
-const MOTION_FACE: Partial<
-  Record<Exclude<MausMotion, "none">, { state?: MausState; blink?: boolean; spin?: number }>
-> = {
-  arrive: { state: "spawning", spin: 900 },
-  switch: { state: "waking", spin: 620 },
-  customize: { state: "proud", blink: true },
-  alert: { state: "alerting" },
-  thinking: { state: "thinking" },
-  working: { state: "working" },
-  launch: { state: "loading" },
-  success: { state: "happy", blink: true },
-  celebrate: { state: "celebrate", spin: 700 },
-  blink: { blink: true },
-  surprise: { state: "surprised", blink: true },
-  failure: { state: "sad" },
-};
-
-/** How long a one-shot motion holds its state before the bot's own returns. */
-const MOTION_FACE_MS = 1400;
-
-/** Channel-wise mix of a hex color toward another, t in 0..1. */
-function mix(hex: string, toward: string, t: number): string {
-  const a = Number.parseInt(hex.slice(1), 16);
-  const b = Number.parseInt(toward.slice(1), 16);
-  const channel = (shift: number) => {
-    const va = (a >> shift) & 0xff;
-    const vb = (b >> shift) & 0xff;
-    return Math.round(va + (vb - va) * t);
-  };
-  return `#${[channel(16), channel(8), channel(0)]
-    .map((part) => part.toString(16).padStart(2, "0"))
-    .join("")}`;
+export function monogramFor(name: string | null | undefined): string {
+  const words = (name ?? "").trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return "?";
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return (words[0][0] + words[1][0]).toUpperCase();
 }
 
-/**
- * Bot color -> the mascot's three-stop body gradient (highlight, base,
- * shadow), with the same light/dark spread as the pack's default green
- * ["#9FE6B5", "#3FAE6E", "#1C7A4C"].
- */
-const gradientFor = (color: MausColor): [string, string, string] => {
-  const fill = MAUS_COLORS[color] ?? MAUS_COLORS.green;
-  return [mix(fill, "#ffffff", 0.55), fill, mix(fill, "#000000", 0.42)];
+/** Imperative handle from the mascot era — accepted, no-op. */
+export type MausAvatarHandle = {
+  blink: () => void;
+  spin: (durationMs?: number) => void;
+  setExpression: (index: number) => void;
 };
-
-export type MausAvatarHandle = CursorAvatarHandle;
 
 export type MausAvatarProps = {
   color: MausColor;
-  /** Named behaviour — drives the expression pool, its cadence and blinking. */
-  state?: MausState;
-  /** Pin one of the 25 faces and stop the state's own drift. */
-  expression?: number;
+  /** Bot or group name the monogram is derived from; falls back to `label`. */
+  name?: string;
   size?: number;
   label?: string;
+  /** Mascot-era knobs — accepted, ignored. */
+  state?: MausState;
+  expression?: number;
   motion?: MausMotion;
   motionKey?: number;
-  /** Head turn in degrees. */
   turn?: number;
   gaze?: { x?: number; y?: number };
   spring?: number;
   eyeScale?: number;
   showMouth?: boolean;
   mouthStroke?: number;
-  /**
-   * Face the viewer at turn 0, cancelling each expression's authored gaze
-   * direction. Off restores the engine's own drawn-in directions.
-   */
   forward?: boolean;
-  /** Let the eyes follow the pointer across this avatar. */
   trackPointer?: boolean;
-  /** Run the animation. Off renders the state's resting face. */
   animated?: boolean;
-  /** Legacy Maus face-placement knobs — accepted, ignored. */
   eyeSpacing?: number;
   faceX?: number;
   faceY?: number;
@@ -128,83 +67,31 @@ export type MausAvatarProps = {
 };
 
 function MausAvatarComponent(
-  {
-    color,
-    state = "idle",
-    expression,
-    size = 44,
-    label,
-    motion = "none",
-    motionKey = 0,
-    turn,
-    gaze,
-    spring,
-    eyeScale,
-    showMouth,
-    mouthStroke,
-    forward = true,
-    trackPointer = true,
-    animated = true,
-  }: MausAvatarProps,
+  { color, name, size = 44, label }: MausAvatarProps,
   ref: React.Ref<MausAvatarHandle>,
 ) {
-  const inner = useRef<CursorAvatarHandle>(null);
   useImperativeHandle(ref, () => ({
-    blink: () => inner.current?.blink(),
-    spin: (durationMs?: number) => inner.current?.spin(durationMs),
-    setExpression: (index: number) => inner.current?.setExpression(index),
+    blink: () => {},
+    spin: () => {},
+    setExpression: () => {},
   }));
 
-  // A one-shot motion borrows the state for a moment, then hands it back.
-  const [motionState, setMotionState] = useState<MausState | null>(null);
-  useEffect(() => {
-    if (motion === "none" || !animated) return;
-    const beat = MOTION_FACE[motion];
-    if (!beat) return;
-    if (beat.blink) inner.current?.blink();
-    if (beat.spin) inner.current?.spin(beat.spin);
-    if (!beat.state) return;
-    setMotionState(beat.state);
-    const timer = setTimeout(() => setMotionState(null), MOTION_FACE_MS);
-    return () => clearTimeout(timer);
-  }, [motion, motionKey, animated]);
-
-  // Pointer-follow gaze, composed with any gaze the caller pins.
-  const [pointer, setPointer] = useState({ x: 0, y: 0 });
-  const range = forward ? POINTER_GAZE.forward : POINTER_GAZE.authored;
-  const onPointerMove = (event: ReactPointerEvent<HTMLSpanElement>) => {
-    if (!trackPointer || !animated) return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    setPointer({
-      x: Math.max(-1, Math.min(1, ((event.clientX - rect.left) / rect.width) * 2 - 1)) * range,
-      y: Math.max(-1, Math.min(1, ((event.clientY - rect.top) / rect.height) * 2 - 1)) * range,
-    });
-  };
-  const onPointerLeave = () => setPointer({ x: 0, y: 0 });
+  const accent = MAUS_COLORS[color] ?? MAUS_COLORS.green;
+  const title = label ?? name ?? undefined;
 
   return (
     <span
-      className="inline-flex shrink-0"
-      onPointerMove={trackPointer && animated ? onPointerMove : undefined}
-      onPointerLeave={trackPointer && animated ? onPointerLeave : undefined}
+      className="inline-flex shrink-0 items-center justify-center rounded-md border bg-inset font-mono uppercase tracking-tight text-ink leading-none select-none"
+      style={{
+        width: size,
+        height: size,
+        borderColor: accent,
+        fontSize: Math.max(MIN_GLYPH, Math.round(size * GLYPH_RATIO)),
+      }}
+      title={title}
+      aria-label={title}
     >
-      <CursorAvatar
-        ref={inner}
-        state={motionState ?? state}
-        expression={expression}
-        size={size}
-        shape={GRADIENT_SHAPE}
-        gradient={gradientFor(color)}
-        title={label ?? null}
-        lookAround={forward ? 0 : 1}
-        gaze={{ x: (gaze?.x ?? 0) + pointer.x, y: (gaze?.y ?? 0) + pointer.y }}
-        turn={turn}
-        spring={spring}
-        eyeScale={eyeScale}
-        showMouth={showMouth}
-        mouthStroke={mouthStroke}
-        paused={!animated}
-      />
+      {monogramFor(name ?? label)}
     </span>
   );
 }
@@ -220,10 +107,14 @@ export function InitialsAvatar({
 }) {
   return (
     <div
-      className="flex shrink-0 items-center justify-center rounded-full bg-raised text-ink-secondary font-medium"
-      style={{ width: size, height: size, fontSize: size * 0.38 }}
+      className="flex shrink-0 items-center justify-center rounded-md border border-hairline bg-inset font-mono uppercase tracking-tight text-ink-secondary leading-none"
+      style={{
+        width: size,
+        height: size,
+        fontSize: Math.max(MIN_GLYPH, Math.round(size * GLYPH_RATIO)),
+      }}
     >
-      {initials}
+      {initials || "?"}
     </div>
   );
 }

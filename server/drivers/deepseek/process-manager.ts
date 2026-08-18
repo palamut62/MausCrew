@@ -32,6 +32,14 @@ export const BRIDGE_SCRIPT = join(dirname(fileURLToPath(import.meta.url)), "..",
 
 export type BridgeChild = ChildProcessByStdio<Writable, Readable, Readable>;
 
+/** Data directory names the managed runtime may live under, current name
+ * first. The app was renamed twice and a runtime provisioned before a rename
+ * still sits in the old directory, so the old names stay probeable rather
+ * than turning into "interpreter not found". Kept in step with
+ * LEGACY_DATA_DIRS in server/config.ts — same names, same order — but
+ * declared locally so this module does not pull in the config module. */
+const RUNTIME_HOME_DIRNAMES = [".mauscrew", ".openmausbot", ".opengrokbot"];
+
 /** Interpreter probe order (spec §25). A configured path wins outright —
  * if the user pointed us at an interpreter and it does not work, falling
  * back to a different one silently would install the SDK checks against a
@@ -44,13 +52,13 @@ export function pythonCandidates(config: DeepSeekHarnessConfig): string[][] {
       // WSL resolves `~` for --cd before exec, so the distro user's home does
       // not have to be guessed on Windows. Running the venv interpreter as a
       // direct executable also preserves every following argv item verbatim.
-      return [[
+      return RUNTIME_HOME_DIRNAMES.map((dirname) => [
         ...(distro ? ["wsl.exe", "-d", distro] : ["wsl.exe"]),
         "--cd",
         "~",
         "--exec",
-        "./.mauscrew/runtimes/deepseek/venv/bin/python",
-      ]];
+        `./${dirname}/runtimes/deepseek/venv/bin/python`,
+      ]);
     }
     const interpreter = config.pythonPath || config.runtime.executable || "python3";
     return [[...prefix, interpreter]];
@@ -58,15 +66,48 @@ export function pythonCandidates(config: DeepSeekHarnessConfig): string[][] {
   if (config.pythonPath) return [[config.pythonPath]];
   if (config.runtime.executable) return [[config.runtime.executable]];
   if (config.runtime.strategy === "managed" || config.runtime.strategy === "bundled") {
-    return [[
+    return RUNTIME_HOME_DIRNAMES.map((dirname) => [
       process.platform === "win32"
-        ? join(homedir(), ".mauscrew", "runtimes", "deepseek", "venv", "Scripts", "python.exe")
-        : join(homedir(), ".mauscrew", "runtimes", "deepseek", "venv", "bin", "python3"),
-    ]];
+        ? join(homedir(), dirname, "runtimes", "deepseek", "venv", "Scripts", "python.exe")
+        : join(homedir(), dirname, "runtimes", "deepseek", "venv", "bin", "python3"),
+    ]);
   }
   return process.platform === "win32"
     ? [["py", "-3"], ["python"], ["python3"]]
     : [["python3"], ["python"]];
+}
+
+/** The candidates worth actually spawning, in order.
+ *
+ * Off WSL a missing file is a spawn failure with a worse error message, so
+ * candidates that are plainly not there are dropped first — but never all of
+ * them: an empty list would turn "no runtime installed" into "nothing
+ * configured". Under WSL the host cannot stat the distribution's filesystem,
+ * so every candidate stays and the probe learns which one works by trying it. */
+export function runnableCandidates(config: DeepSeekHarnessConfig): string[][] {
+  const candidates = pythonCandidates(config);
+  if (config.runtime.mode === "wsl" || candidates.length < 2) return candidates;
+  const present = candidates.filter((argv) => argv.length === 1 && existsSync(argv[0]));
+  return present.length ? present : [candidates[0]];
+}
+
+/** Candidate argv that last answered a probe, keyed by the first candidate of
+ * its list. Under WSL nothing can be stat'ed, so the only way to know which
+ * home directory holds the runtime is that a probe already ran one — and
+ * probeSdk/resolveBundledRuntime run before any turn does. Absent that
+ * knowledge the first (current-name) candidate is used, so a normally
+ * installed runtime behaves exactly as before. */
+const workingCandidates = new Map<string, string[]>();
+
+function rememberCandidate(candidates: string[][], chosen: string[]): void {
+  const key = candidates[0]?.join("\u0000");
+  if (key) workingCandidates.set(key, chosen);
+}
+
+function preferredCandidate(candidates: string[][]): string[] | undefined {
+  const key = candidates[0]?.join("\u0000");
+  const remembered = key ? workingCandidates.get(key) : undefined;
+  return remembered ?? candidates[0];
 }
 
 /** Resolve the single-file executable carried by the pinned runtime wheel.
@@ -77,9 +118,8 @@ export function resolveBundledRuntime(
   timeoutMs = 15_000,
 ): Promise<{ launchArgs: string[]; reason?: string }> {
   if (config.runtime.executable) return Promise.resolve({ launchArgs: [config.runtime.executable] });
-  const candidate = pythonCandidates(config)[0];
-  if (!candidate?.length) return Promise.resolve({ launchArgs: [], reason: "no runtime lookup interpreter configured" });
-  const [command, ...prefixArgs] = candidate;
+  const candidates = runnableCandidates(config);
+  if (!candidates.length) return Promise.resolve({ launchArgs: [], reason: "no runtime lookup interpreter configured" });
   const probe =
     "import json\n" +
     "try:\n" +
@@ -87,22 +127,36 @@ export function resolveBundledRuntime(
     " print(json.dumps({'ok': True, 'argv': list(resolve_bundled_launch_args())}))\n" +
     "except Exception as e:\n" +
     " print(json.dumps({'ok': False, 'error': type(e).__name__ + ': ' + str(e)}))\n";
-  return new Promise((resolve) => {
-    execCli(command, [...prefixArgs, "-c", probe], { timeout: timeoutMs, env: { PATH: augmentedPath() } }, (err, stdout) => {
-      if (err) return resolve({ launchArgs: [], reason: err.message });
-      try {
-        const parsed = JSON.parse(stdout.trim().split("\n").pop() ?? "{}");
-        const launchArgs = Array.isArray(parsed.argv)
-          ? parsed.argv.filter((value: unknown): value is string => typeof value === "string" && value.length > 0)
-          : [];
-        return parsed.ok && launchArgs.length
-          ? resolve({ launchArgs })
-          : resolve({ launchArgs: [], reason: String(parsed.error ?? "bundled runtime was not found") });
-      } catch {
-        return resolve({ launchArgs: [], reason: "could not read the bundled runtime location" });
-      }
+  // Candidates are tried in order and the first that answers wins. The reason
+  // reported on total failure is the first one's, because that is the path a
+  // correctly installed runtime would be at.
+  const attempt = (index: number, firstReason?: string): Promise<{ launchArgs: string[]; reason?: string }> => {
+    const candidate = candidates[index];
+    if (!candidate?.length) {
+      return Promise.resolve({ launchArgs: [], reason: firstReason ?? "bundled runtime was not found" });
+    }
+    const [command, ...prefixArgs] = candidate;
+    return new Promise((resolve) => {
+      execCli(command, [...prefixArgs, "-c", probe], { timeout: timeoutMs, env: { PATH: augmentedPath() } }, (err, stdout) => {
+        const next = (reason: string) => resolve(attempt(index + 1, firstReason ?? reason));
+        if (err) return next(err.message);
+        try {
+          const parsed = JSON.parse(stdout.trim().split("\n").pop() ?? "{}");
+          const launchArgs = Array.isArray(parsed.argv)
+            ? parsed.argv.filter((value: unknown): value is string => typeof value === "string" && value.length > 0)
+            : [];
+          if (parsed.ok && launchArgs.length) {
+            rememberCandidate(candidates, candidate);
+            return resolve({ launchArgs });
+          }
+          return next(String(parsed.error ?? "bundled runtime was not found"));
+        } catch {
+          return next("could not read the bundled runtime location");
+        }
+      });
     });
-  });
+  };
+  return attempt(0);
 }
 
 /** Windows paths mean nothing to a Linux interpreter, so a workspace handed
@@ -262,7 +316,10 @@ export function spawnBridge(input: SpawnBridgeInput): SpawnedBridge {
     throw new DeepSeekBridgeError("bridge_crashed", `bridge script missing at ${script}`);
   }
 
-  const candidate = pythonCandidates(config)[0];
+  // One process, so one candidate: the interpreter a probe already reached if
+  // there is one, otherwise the first that exists (off WSL) or simply the
+  // first (under WSL, where nothing here can be stat'ed).
+  const candidate = preferredCandidate(runnableCandidates(config));
   if (!candidate || candidate.length === 0) {
     throw new DeepSeekBridgeError("python_missing", "no Python interpreter configured");
   }
@@ -359,11 +416,10 @@ export function probeSdk(
   config: DeepSeekHarnessConfig,
   timeoutMs = 5000,
 ): Promise<{ version: string | null; reason?: string }> {
-  const candidate = pythonCandidates(config)[0];
-  if (!candidate || candidate.length === 0) {
+  const candidates = runnableCandidates(config);
+  if (!candidates.length) {
     return Promise.resolve({ version: null, reason: "no Python interpreter configured" });
   }
-  const [command, ...prefixArgs] = candidate;
   // A single -c argument, passed as argv. Nothing user-controlled goes in it.
   const probe =
     "import json;\n" +
@@ -374,21 +430,32 @@ export function probeSdk(
     "except Exception as e:\n" +
     "    print(json.dumps({'ok': False, 'error': type(e).__name__ + ': ' + str(e)}))\n";
 
-  return new Promise((resolve) => {
-    execCli(
-      command,
-      [...prefixArgs, "-c", probe],
-      { timeout: timeoutMs, env: { PATH: augmentedPath(), ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}) } },
-      (err, stdout) => {
-        if (err) return resolve({ version: null, reason: err.message });
-        try {
-          const parsed = JSON.parse(stdout.trim().split("\n").pop() ?? "{}");
-          if (parsed.ok) return resolve({ version: typeof parsed.version === "string" ? parsed.version : null });
-          return resolve({ version: null, reason: String(parsed.error ?? "import failed") });
-        } catch {
-          return resolve({ version: null, reason: "could not read the interpreter's response" });
-        }
-      },
-    );
-  });
+  // Same order-and-stop-at-the-first-answer walk as resolveBundledRuntime.
+  const attempt = (index: number, firstReason?: string): Promise<{ version: string | null; reason?: string }> => {
+    const candidate = candidates[index];
+    if (!candidate?.length) return Promise.resolve({ version: null, reason: firstReason ?? "import failed" });
+    const [command, ...prefixArgs] = candidate;
+    return new Promise((resolve) => {
+      execCli(
+        command,
+        [...prefixArgs, "-c", probe],
+        { timeout: timeoutMs, env: { PATH: augmentedPath(), ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}) } },
+        (err, stdout) => {
+          const next = (reason: string) => resolve(attempt(index + 1, firstReason ?? reason));
+          if (err) return next(err.message);
+          try {
+            const parsed = JSON.parse(stdout.trim().split("\n").pop() ?? "{}");
+            if (parsed.ok) {
+              rememberCandidate(candidates, candidate);
+              return resolve({ version: typeof parsed.version === "string" ? parsed.version : null });
+            }
+            return next(String(parsed.error ?? "import failed"));
+          } catch {
+            return next("could not read the interpreter's response");
+          }
+        },
+      );
+    });
+  };
+  return attempt(0);
 }

@@ -2,9 +2,21 @@
 // the wire protocol, session id mapping, the event mapping table, and the
 // environment allowlist. None of these need a process, which is exactly why
 // they were kept free of one.
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+/** Which paths exist, for the interpreter-resolution tests. Null means "ask
+ * the real filesystem", so every other test in this file keeps seeing it. */
+const fsPresence = vi.hoisted(() => ({ paths: null as Set<string> | null }));
+vi.mock("node:fs", async () => {
+  const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
+  return {
+    ...actual,
+    existsSync: (path: Parameters<typeof actual.existsSync>[0]) =>
+      fsPresence.paths ? fsPresence.paths.has(String(path)) : actual.existsSync(path),
+  };
+});
 
 import {
   DEFAULT_TURN_TIMEOUT_MS,
@@ -23,6 +35,7 @@ import {
   checkCordisConfig,
   pythonCandidates,
   resolveBundledRuntime,
+  runnableCandidates,
   runtimePath,
   toWslPath,
   withWslForwarding,
@@ -474,6 +487,58 @@ describe("interpreter resolution", () => {
     const argv = pythonCandidates(config)[0];
     expect(argv.slice(0, 7)).toEqual(["wsl.exe", "-d", "Ubuntu", "--cd", "~", "--exec", "./.mauscrew/runtimes/deepseek/venv/bin/python"]);
     expect(argv.join(" ")).toContain(".mauscrew/runtimes/deepseek/venv/bin/python");
+  });
+
+  const managedVenv = (dirname: string) =>
+    process.platform === "win32"
+      ? join(homedir(), dirname, "runtimes", "deepseek", "venv", "Scripts", "python.exe")
+      : join(homedir(), dirname, "runtimes", "deepseek", "venv", "bin", "python3");
+
+  it("keeps a runtime provisioned under a pre-rename home directory reachable", () => {
+    const candidates = pythonCandidates(decodeConfig({ runtime: { mode: "external-python", strategy: "bundled" } }));
+    expect(candidates).toEqual([
+      [managedVenv(".mauscrew")],
+      [managedVenv(".openmausbot")],
+      [managedVenv(".opengrokbot")],
+    ]);
+  });
+
+  it("offers the same fallbacks under WSL, current name first", () => {
+    const candidates = pythonCandidates(decodeConfig({ runtime: { mode: "wsl", strategy: "bundled", distribution: "Ubuntu" } }));
+    expect(candidates.map((argv) => argv[argv.length - 1])).toEqual([
+      "./.mauscrew/runtimes/deepseek/venv/bin/python",
+      "./.openmausbot/runtimes/deepseek/venv/bin/python",
+      "./.opengrokbot/runtimes/deepseek/venv/bin/python",
+    ]);
+    // and every one of them is still a plain argv array
+    for (const argv of candidates) expect(argv.slice(0, 3)).toEqual(["wsl.exe", "-d", "Ubuntu"]);
+  });
+
+  it("runs the legacy interpreter when only the legacy one is installed", () => {
+    const config = decodeConfig({ runtime: { mode: "external-python", strategy: "bundled" } });
+    fsPresence.paths = new Set([managedVenv(".openmausbot")]);
+    try {
+      expect(runnableCandidates(config)).toEqual([[managedVenv(".openmausbot")]]);
+      // the current name still wins whenever it is there
+      fsPresence.paths = new Set([managedVenv(".mauscrew"), managedVenv(".openmausbot")]);
+      expect(runnableCandidates(config)[0]).toEqual([managedVenv(".mauscrew")]);
+      // and with nothing installed the list never empties out into
+      // "no interpreter configured"
+      fsPresence.paths = new Set();
+      expect(runnableCandidates(config)).toEqual([[managedVenv(".mauscrew")]]);
+    } finally {
+      fsPresence.paths = null;
+    }
+  });
+
+  it("cannot stat a WSL guest, so it keeps every candidate for the probe to try", () => {
+    const config = decodeConfig({ runtime: { mode: "wsl", strategy: "bundled" } });
+    fsPresence.paths = new Set();
+    try {
+      expect(runnableCandidates(config)).toHaveLength(3);
+    } finally {
+      fsPresence.paths = null;
+    }
   });
 
   it("uses the runtime executable directly when bundled strategy names one", async () => {

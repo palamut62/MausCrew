@@ -241,6 +241,12 @@ export interface EngineInstall {
 export interface ModelCatalog {
   default: string;
   options: Array<{ id: string; label: string }>;
+  /** The options are a convenience menu, not an enumeration: an id that is
+   * not listed may still be served (custom endpoints, private builds), so a
+   * selection outside the list must be left alone. Omitted means closed —
+   * a CLI engine ships a fixed set and anything else is a typo the user
+   * would only meet as a raw CLI error. */
+  extensible?: boolean;
 }
 
 export interface DriverCreateInput<Config> {

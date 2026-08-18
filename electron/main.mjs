@@ -208,7 +208,7 @@ function createWindow() {
     minWidth: 900,
     minHeight: 600,
     icon: APP_ICON,
-    backgroundColor: "#070707",
+    backgroundColor: "#060708",
     autoHideMenuBar: process.platform !== "darwin",
     // macOS keeps inset traffic lights, Windows keeps its custom overlay,
     // and Linux uses the native desktop title bar and window controls.
@@ -221,7 +221,7 @@ function createWindow() {
             // around a 36px control row = 60). Windows draws the caption buttons
             // to fill the overlay, so anything shorter leaves a dead band under
             // them and anything taller overhangs the header.
-            titleBarOverlay: { color: "#070707", symbolColor: "#b5b5b5", height: 60 },
+            titleBarOverlay: { color: "#060708", symbolColor: "#9AA5B1", height: 60 },
           }
         : {}),
     webPreferences: {

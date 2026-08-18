@@ -24,7 +24,7 @@ import {
 import { ensureDirs, instanceConfigs, loadConfig, saveConfig, EVENTS_DIR, NATIVE_DIR, type AppConfig } from "./config.ts";
 import { resetPathCache } from "./env-path.ts";
 import { buildNotification, type Notification } from "./notify.ts";
-import { isEffortLevel, type RuntimeEvent, type SubagentActivity } from "./contracts.ts";
+import { isEffortLevel, type ModelSelection, type RuntimeEvent, type SubagentActivity } from "./contracts.ts";
 
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { describeBaseUrl } from "./drivers/deepseek/config.ts";
@@ -32,6 +32,7 @@ import { defaultWorkspaceFor } from "./drivers/deepseek/session-manager.ts";
 import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type CommsBus } from "./comms-visibility.ts";
 import { discardDelegations, drainDelegations, queueDelegation, type QueueResult } from "./delegations.ts";
 import { EventBus } from "./harness/bus.ts";
+import { normalizeModelSelection } from "./model-selection.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
 import { cancelPeerApprovalsFor, dismissStalePeerCards, requestPeerApproval, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
 import {
@@ -802,7 +803,18 @@ async function startTurn(
     );
   }
   const instanceId = instance.instanceId;
-  const model = opts?.runOn === "cloud" ? instance.models.default : bot.modelSelection.model;
+  // Last line of defence for selections that were written before this check
+  // existed, or by something other than the picker: a model this engine
+  // does not serve becomes a raw CLI error the moment it ships as a flag.
+  // Repair the record too, so the fix outlives this turn.
+  const normalized = opts?.runOn === "cloud" ? null : normalizeModelSelection(bot.modelSelection, instance);
+  if (normalized?.changed && normalized.reason) {
+    store.patchBot(bot.id, { modelSelection: normalized.selection });
+    noteModelNormalized(threadId, normalized.reason);
+    const patched = store.bot(bot.id);
+    if (patched) broadcast({ kind: "bot", bot: wireBot(patched) });
+  }
+  const model = normalized ? normalized.selection.model : instance.models.default;
   // a cloud routine borrows the instance default model, so it borrows no
   // per-bot effort either
   const effort = opts?.runOn === "cloud" ? undefined : bot.modelSelection.effort;
@@ -1304,6 +1316,18 @@ function configStatus() {
     // not a secret — the sidebar shows it
     profile: { name: cfg.profile?.name ?? "", email: cfg.profile?.email ?? "" },
   };
+}
+
+/** Say out loud that a bot's model moved. Same channel as any other
+ * turn-level problem — an activity chip in the thread — because a silent
+ * switch is exactly what makes a wrong answer hard to explain later. */
+function noteModelNormalized(threadId: string, reason: string) {
+  const note = store.appendMessage(threadId, {
+    role: "bot",
+    kind: "activity",
+    tool: { name: reason.slice(0, 160), ok: false },
+  });
+  broadcast({ kind: "message", threadId, message: note });
 }
 
 /** Rebuild the provider fleet after a config change so new keys take
@@ -2000,6 +2024,20 @@ const server = createServer(async (req, res) => {
           });
         }
       }
+      // The picker only ever emits pairings its engine offers; this endpoint
+      // is also reachable by hand and by import, and a model the engine never
+      // served would sit on disk until a turn turned it into a raw CLI error.
+      // Clamp it here so nothing broken is stored and the UI redraws with the
+      // model that will actually run.
+      let modelNotice: string | undefined;
+      const candidate = body.modelSelection as ModelSelection | undefined;
+      if (candidate && typeof candidate.instanceId === "string" && typeof candidate.model === "string") {
+        const normalized = normalizeModelSelection(candidate, registry.get(candidate.instanceId));
+        if (normalized.changed) {
+          body.modelSelection = normalized.selection;
+          modelNotice = normalized.reason;
+        }
+      }
       const patch: Record<string, unknown> = {};
       for (const key of ["name", "title", "description", "notifications", "modelSelection", "unread", "computer", "color", "mascotExpression", "pinned", "hidden", "speakReplies", "voice"] as const) {
         if (body[key] !== undefined) patch[key] = body[key];
@@ -2059,6 +2097,7 @@ const server = createServer(async (req, res) => {
       }
       const bot = store.patchBot(m[1], patch);
       if (!bot) return json(res, 404, { error: "no such bot" });
+      if (modelNotice) noteModelNormalized(bot.threadId, modelNotice);
       const chiefChanges =
         body.chiefOfStaff === true
           ? store.setChiefOfStaff(bot.id)

@@ -5,18 +5,7 @@
 // bridge — box endpoints are never touched); off → parked. Auto (unset)
 // prefers the cloud box when one exists, else local inside the app.
 import { useEffect, useRef, useState } from "react";
-import {
-  CalendarDays,
-  CalendarClock,
-  ExternalLink,
-  Loader2,
-  Monitor,
-  Moon,
-  Plus,
-  Power,
-  Settings,
-  X,
-} from "lucide-react";
+import { ArrowSquareOut, CalendarDot, CalendarDots, Gear, Monitor, Moon, Plus, Power, Spinner, X } from "@phosphor-icons/react";
 import { useStore, type Bot } from "@/state/store";
 import type { Routine } from "@/lib/routines";
 import { ApiKeyRow } from "./ApiKeys";
@@ -147,7 +136,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
           if (!alive) return;
           if (status.ready) setPhase("vm");
           else {
-            setError(`${status.problem ?? "The Local VM is not ready"}. Open App Settings → Local VM.`);
+            setError(`${status.problem ?? "The Local VM is not ready"}. Open App Gear → Local VM.`);
             setPhase("vm-unavailable");
           }
         })
@@ -252,7 +241,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
   // local preview: frames from the Electron main process. The FIRST capture
   // attempt is what makes macOS show the Screen Recording prompt (there is
   // no reliable pre-grant flow on macOS 15+), so repeated empty frames mean
-  // the user denied — surface the Settings repair path instead of spinning.
+  // the user denied — surface the Gear repair path instead of spinning.
   const [localMisses, setLocalMisses] = useState(0);
   useEffect(() => {
     if (phase !== "local" || !window.mauscrew) return;
@@ -323,7 +312,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
   };
 
   return (
-    <aside className="animate-panel-in flex h-full w-[400px] shrink-0 flex-col border-l border-hairline/40 bg-panel">
+    <aside className="animate-panel-in flex h-full w-[400px] shrink-0 flex-col border-l border-hairline bg-panel">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3">
         <button
@@ -331,14 +320,14 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
           className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
           title="Bot settings"
         >
-          <Settings size={18} />
+          <Gear size={18} weight="bold" />
         </button>
         <span className="text-[15px] font-semibold text-ink">Computer</span>
         <button
           onClick={() => dispatch({ type: "toggleComputer", open: false })}
           className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
         >
-          <X size={18} />
+          <X size={18} weight="bold" />
         </button>
       </div>
 
@@ -346,8 +335,8 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
           {/* Screen preview */}
           <div className="mb-1.5 mt-2 flex items-center justify-between text-[13px] text-ink-secondary">
             <span>{bot.name}'s screen</span>
-            {phase === "local" && <span className="text-[11px]">this computer</span>}
-            {phase === "vm" && <span className="text-[11px]">Local VM</span>}
+            {phase === "local" && <span className="font-mono text-[11px] tracking-tight">this computer</span>}
+            {phase === "vm" && <span className="font-mono text-[11px] tracking-tight">Local VM</span>}
         </div>
         <div className="flex aspect-[16/10] w-full items-center justify-center overflow-hidden rounded-xl bg-card">
           {frameSrc ? (
@@ -355,7 +344,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
           ) : (
             <div className="flex flex-col items-center gap-2 px-6 text-center text-ink-secondary">
               {phase === "checking" || phase === "starting" || phase === "local" || phase === "vm" ? (
-                <Loader2 size={18} className="animate-spin" />
+                <Spinner size={18} weight="fill" className="animate-spin" />
               ) : phase === "off" ? (
                 <Power size={22} />
               ) : (
@@ -377,7 +366,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
                   onClick={() => window.mauscrew?.permOpenSettings?.("screen")}
                   className="mt-1 rounded-lg bg-raised px-3 py-1.5 text-[12px] text-ink hover:bg-raised-hover"
                 >
-                  Open Settings
+                  Open Gear
                 </button>
               )}
               {phase === "vm-unavailable" && (
@@ -417,7 +406,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
               disabled={pending === "join"}
               className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-raised py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
             >
-              {pending === "join" ? <Loader2 size={14} className="animate-spin" /> : <ExternalLink size={14} />}
+              {pending === "join" ? <Spinner size={14} weight="fill" className="animate-spin" /> : <ArrowSquareOut size={14} weight="bold" />}
               Open desktop
             </button>
             {boxState !== "archived" && (
@@ -427,7 +416,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
                 className="flex items-center justify-center gap-2 rounded-lg bg-raised px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
                 title="Put the computer to sleep"
               >
-                {pending === "sleep" ? <Loader2 size={14} className="animate-spin" /> : <Moon size={14} />}
+                {pending === "sleep" ? <Spinner size={14} weight="fill" className="animate-spin" /> : <Moon size={14} weight="bold" />}
                 Sleep
               </button>
             )}
@@ -444,9 +433,9 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
                   : "Auto uses a cloud box when one is configured; otherwise computer use stays off. ")}
               Pick where this bot's computer lives. <b className="text-ink">Local VM</b> is a Cua-controlled Linux desktop
               in a container on this machine — free and separate from your own desktop. Set it up in App
-              Settings → Local VM.
+              Gear → Local VM.
           </div>
-          <div className="mt-3 flex overflow-hidden rounded-lg border border-hairline/40">
+          <div className="mt-3 flex overflow-hidden rounded-lg border border-hairline">
             {(
               [
                 ["cloud", "Cloud box"],
@@ -482,7 +471,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
                 onClick={() => dispatch({ type: "updateBot", botId: bot.id, patch: { computer: mode } })}
                 className={cn(
                   "flex-1 py-1.5 text-[13px]",
-                  i > 0 && "border-l border-hairline/40",
+                  i > 0 && "border-l border-hairline",
                   disabled && "cursor-not-allowed opacity-40",
                   bot.computer === mode
                     ? "bg-raised text-ink"
@@ -501,11 +490,11 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
         <div className="mt-4 rounded-xl bg-card p-4">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 text-[15px] font-medium text-ink">
-              <CalendarClock size={16} className="text-accent" />
+              <CalendarDot size={16} weight="fill" className="text-accent" />
               Scheduled tasks
             </div>
             {botRoutines.length > 0 && (
-              <span className="rounded-full bg-raised px-2 py-0.5 text-[10px] font-medium text-ink-secondary">
+              <span className="rounded-md bg-raised px-2 py-0.5 font-mono text-[10px] font-medium tracking-tight text-ink-secondary">
                 {botRoutines.length}
               </span>
             )}
@@ -515,7 +504,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
           </div>
           {!computerDestination && (
             <div className="mt-3 flex items-start gap-2 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-[11.5px] leading-relaxed text-warning">
-              <Power size={13} className="mt-0.5 shrink-0" />
+              <Power size={13} weight="bold" className="mt-0.5 shrink-0" />
               Scheduled tasks on this computer will not have desktop access while this is Off. Choose Cloud VM in the schedule editor to run the whole job there.
             </div>
           )}
@@ -524,8 +513,8 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
               onClick={() => dispatch({ type: "showRoutines" })}
               className="mt-3 flex w-full items-center gap-2 rounded-lg border border-accent/25 bg-accent/10 px-3 py-2 text-left text-[12px] text-accent hover:bg-accent/15"
             >
-              <Loader2 size={13} className={activeRoutineRun.status === "queued" ? "" : "animate-spin"} />
-              <span className="min-w-0 flex-1 truncate">
+              <Spinner size={13} weight="fill" className={activeRoutineRun.status === "queued" ? "" : "animate-spin"} />
+              <span className="min-w-0 flex-1 truncate font-mono tracking-tight">
                 {activeRoutineRun.routineName} · {activeRoutineRun.status === "waiting" ? "needs you" : activeRoutineRun.status}
               </span>
             </button>
@@ -553,9 +542,9 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
           <div className="mt-3 flex gap-2">
             <button
               onClick={() => setCreatingRoutine(true)}
-              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-accent py-2 text-[13px] font-medium text-white hover:brightness-110"
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-accent py-2 text-[13px] font-medium text-app hover:brightness-110"
             >
-              <Plus size={14} />
+              <Plus size={14} weight="bold" />
               Create schedule
             </button>
             <button
@@ -563,7 +552,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
               className="flex items-center justify-center gap-1.5 rounded-lg bg-raised px-3 py-2 text-[13px] text-ink hover:bg-raised-hover"
               title="Open schedules"
             >
-              <CalendarDays size={14} />
+              <CalendarDots size={14} weight="bold" />
               Schedules
             </button>
           </div>

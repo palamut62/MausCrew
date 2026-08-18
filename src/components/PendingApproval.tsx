@@ -58,11 +58,11 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
   index: number;
 }) {
   return (
-    <div className="rounded-t-2xl border-b border-hairline/50 bg-raised/40 px-4 py-3">
+    <div className="rounded-t-2xl border-b border-hairline bg-raised/40 px-4 py-3">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[11px] uppercase tracking-[0.18em] text-ink-secondary">Pending approval</span>
+        <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-ink-secondary">Pending approval</span>
         {count > 1 && (
-          <span className="rounded-full bg-raised px-1.5 py-0.5 text-[11px] tabular-nums text-ink-secondary">
+          <span className="rounded-md bg-raised px-1.5 py-0.5 font-mono text-[11px] tabular-nums tracking-tight text-ink-secondary">
             {index + 1} of {count}
           </span>
         )}
@@ -101,7 +101,7 @@ export function PendingApprovalActions({
       alwaysAllow: always && bot && pending.allowKey ? { botId: bot.id, key: pending.allowKey } : undefined,
     });
 
-  const base = "rounded-full px-3.5 py-1.5 text-[13.5px] transition-colors";
+  const base = "rounded-md px-3.5 py-1.5 text-[13.5px] transition-colors";
   return (
     <div className="flex flex-wrap items-center justify-end gap-2 px-2 py-2">
       <button onClick={onCancelTurn} className={cn(base, "text-ink-secondary hover:bg-raised hover:text-ink")}>
@@ -117,14 +117,14 @@ export function PendingApprovalActions({
         <button
           onClick={() => decide("allow", true)}
           title={`Stop asking ${bot.name} about ${pending.allowKey}`}
-          className={cn(base, "border border-hairline/50 text-ink hover:bg-raised")}
+          className={cn(base, "border border-hairline text-ink hover:bg-raised")}
         >
           Always allow
         </button>
       )}
       <button
         onClick={() => decide("allow")}
-        className={cn(base, "bg-accent font-medium text-white hover:brightness-110")}
+        className={cn(base, "bg-accent font-medium text-app hover:brightness-110")}
       >
         Allow once
       </button>

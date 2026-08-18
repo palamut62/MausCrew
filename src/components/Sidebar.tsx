@@ -1,30 +1,7 @@
 import { track } from "@/lib/analytics";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import {
-  ArrowDownToLine,
-  BellDot,
-  Bot as BotIcon,
-  CalendarDays,
-  Check,
-  ClipboardCopy,
-  Copy,
-  Crown,
-  EyeOff,
-  FileUp,
-  FolderPlus,
-  Loader2,
-  Pencil,
-  Pin,
-  PinOff,
-  Plus,
-  RefreshCw,
-  Search,
-  Settings,
-  Puzzle,
-  Trash2,
-  Users,
-} from "lucide-react";
+import { ArrowClockwise, ArrowLineDown, BellRinging, CalendarDots, Check, ClipboardText, Copy, Crown, EyeSlash, FileArrowUp, FolderPlus, Gear, MagnifyingGlass, Pencil, Plus, PushPin, PushPinSlash, PuzzlePiece, Robot as BotIcon, Spinner, Trash, Users } from "@phosphor-icons/react";
 import { api, useStore, formatTime, visibleMessages, type Bot, type Group } from "@/state/store";
 import { MausAvatar, InitialsAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot";
@@ -108,13 +85,13 @@ function UpdateButton() {
       className="relative rounded-md p-2 text-accent hover:bg-raised disabled:opacity-60"
     >
       {working ? (
-        <Loader2 size={18} className="animate-spin" />
+        <Spinner size={18} weight="fill" className="animate-spin" />
       ) : upToDate ? (
-        <Check size={18} />
+        <Check size={18} weight="fill" />
       ) : status === "available" ? (
-        <ArrowDownToLine size={18} />
+        <ArrowLineDown size={18} weight="bold" />
       ) : (
-        <RefreshCw size={18} />
+        <ArrowClockwise size={18} weight="bold" />
       )}
       {status === "downloaded" && (
         <span className="absolute right-1.5 top-1.5 size-2 rounded-full bg-accent" />
@@ -152,26 +129,26 @@ function groupPreview(group: Group, bots: Bot[]): string {
   return last.from ? `${last.from.name}: ${text}` : text;
 }
 
-/** Room avatar: 2–3 overlapping mauses in the same 56px slot a bot gets. */
+/** Room avatar: 2–3 overlapping mauses in the same 36px slot a bot gets. */
 function StackedMauses({ members }: { members: Bot[] }) {
   if (members.length <= 1) {
     const b = members[0];
     return (
-      <div className="flex size-14 shrink-0 items-center justify-center">
-        {b ? <MausAvatar color={b.color} state="happy" size={56} /> : <Users size={24} className="text-ink-secondary" />}
+      <div className="flex size-9 shrink-0 items-center justify-center">
+        {b ? <MausAvatar color={b.color} name={b.name} state="happy" size={36} /> : <Users size={18} className="text-ink-secondary" />}
       </div>
     );
   }
   const shown = members.slice(0, 3);
   const extra = members.length - shown.length;
   return (
-    <div className="flex size-14 shrink-0 items-center justify-center">
-      <div className="flex items-center -space-x-3">
+    <div className="flex size-9 shrink-0 items-center justify-center">
+      <div className="flex items-center -space-x-2">
         {shown.map((b) => (
-          <MausAvatar key={b.id} color={b.color} state="happy" size={30} />
+          <MausAvatar key={b.id} color={b.color} name={b.name} state="happy" size={20} />
         ))}
         {extra > 0 && (
-          <span className="z-10 flex size-[22px] items-center justify-center rounded-full border border-hairline/40 bg-raised text-[10px] font-medium text-ink-secondary">
+          <span className="z-10 flex size-[15px] items-center justify-center rounded-full border border-hairline bg-raised font-mono text-[9px] font-medium tracking-tight text-ink-secondary">
             +{extra}
           </span>
         )}
@@ -195,15 +172,15 @@ function GroupListItem({ group, onMenu }: { group: Group; onMenu: (menu: { group
         onMenu({ groupId: group.id, x: e.clientX, y: e.clientY });
       }}
       className={cn(
-        "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left",
-        selected ? "bg-raised" : "hover:bg-raised/50",
+        "flex w-full items-center gap-3 rounded-lg border-l-2 px-3 py-2 text-left",
+        selected ? "border-l-accent bg-raised" : "border-l-transparent hover:bg-raised/60",
       )}
     >
       <StackedMauses members={members} />
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2">
           <span className="truncate text-[15px] font-semibold text-ink">{group.name}</span>
-          {selected && last && <span className="shrink-0 text-xs text-ink-secondary">{formatTime(last.at)}</span>}
+          {selected && last && <span className="shrink-0 font-mono text-xs tracking-tight text-ink-secondary">{formatTime(last.at)}</span>}
         </div>
         <div className="flex items-center justify-between gap-2">
           <span className="truncate text-[13px] text-ink-secondary">{groupPreview(group, state.bots)}</span>
@@ -246,7 +223,7 @@ function RoomContextMenu({
     <div
       data-room-menu
       style={{ top, left }}
-      className="fixed z-40 w-[228px] overflow-hidden rounded-xl border border-hairline/50 bg-card py-1.5 shadow-2xl shadow-black/60"
+      className="fixed z-40 w-[228px] overflow-hidden rounded-xl border border-hairline bg-card py-1.5"
     >
       <button
         onClick={() => {
@@ -255,7 +232,7 @@ function RoomContextMenu({
         }}
         className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
       >
-        <ClipboardCopy size={16} className="text-ink-secondary" />
+        <ClipboardText size={16} weight="bold" className="text-ink-secondary" />
         Copy conversation ID
       </button>
       <button
@@ -265,7 +242,7 @@ function RoomContextMenu({
         }}
         className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-danger hover:bg-raised/70"
       >
-        <Trash2 size={16} />
+        <Trash size={16} weight="bold" />
         Delete Room
       </button>
     </div>,
@@ -403,7 +380,7 @@ function ImportTeamPanel({
         aria-modal="true"
         aria-labelledby="import-team-title"
         tabIndex={-1}
-        className="w-[420px] max-w-[calc(100vw-32px)] rounded-2xl border border-hairline/50 bg-card p-5 shadow-2xl"
+        className="w-[420px] max-w-[calc(100vw-32px)] rounded-xl border border-hairline bg-card p-5"
       >
         <div id="import-team-title" className="text-[17px] font-semibold text-ink">Import {pending.name}?</div>
         <div className="mt-1 text-[13px] text-ink-secondary">
@@ -435,9 +412,9 @@ function ImportTeamPanel({
             ref={confirmRef}
             onClick={() => void importTeam()}
             disabled={working}
-            className="flex items-center gap-2 rounded-lg bg-accent px-3.5 py-2 text-[13.5px] font-medium text-white hover:bg-accent/90 disabled:opacity-60"
+            className="flex items-center gap-2 rounded-lg bg-accent px-3.5 py-2 text-[13.5px] font-medium text-app hover:bg-accent/90 disabled:opacity-60"
           >
-            {working ? <Loader2 size={15} className="animate-spin" /> : <FileUp size={15} />}
+            {working ? <Spinner size={15} weight="fill" className="animate-spin" /> : <FileArrowUp size={15} weight="bold" />}
             {working ? "Importing…" : "Import Team"}
           </button>
         </div>
@@ -540,7 +517,7 @@ function ExportTeamPanel({
         aria-modal="true"
         aria-labelledby="export-team-title"
         tabIndex={-1}
-        className="w-[380px] max-w-[calc(100vw-32px)] rounded-2xl border border-hairline/50 bg-card p-5 shadow-2xl"
+        className="w-[380px] max-w-[calc(100vw-32px)] rounded-xl border border-hairline bg-card p-5"
       >
         <div id="export-team-title" className="text-[17px] font-semibold text-ink">Export Team</div>
         <div className="mt-1 text-[13px] text-ink-secondary">
@@ -577,18 +554,18 @@ function ExportTeamPanel({
                 onClick={() => toggle(bot.id)}
                 className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-raised/70 disabled:opacity-40"
               >
-                <MausAvatar color={bot.color} state="happy" size={28} />
+                <MausAvatar color={bot.color} name={bot.name} state="happy" size={28} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[14px] text-ink">{bot.name}</span>
                   {bot.title && <span className="block truncate text-[11.5px] text-ink-secondary">{bot.title}</span>}
                 </span>
                 <span
                   className={cn(
-                    "flex size-[18px] shrink-0 items-center justify-center rounded-full border",
-                    selected ? "border-accent bg-accent text-white" : "border-hairline/60",
+                    "flex size-[18px] shrink-0 items-center justify-center rounded-md border",
+                    selected ? "border-accent bg-accent text-app" : "border-hairline",
                   )}
                 >
-                  {selected && <Check size={12} />}
+                  {selected && <Check size={12} weight="fill" />}
                 </span>
               </button>
             );
@@ -619,9 +596,9 @@ function ExportTeamPanel({
               type="button"
               onClick={() => void exportTeam()}
               disabled={working || !name.trim() || picked.size === 0}
-              className="flex items-center gap-2 rounded-lg bg-accent px-3.5 py-2 text-[13.5px] font-medium text-white hover:bg-accent/90 disabled:opacity-40"
+              className="flex items-center gap-2 rounded-lg bg-accent px-3.5 py-2 text-[13.5px] font-medium text-app hover:bg-accent/90 disabled:opacity-40"
             >
-              {working ? <Loader2 size={15} className="animate-spin" /> : <ArrowDownToLine size={15} />}
+              {working ? <Spinner size={15} weight="fill" className="animate-spin" /> : <ArrowLineDown size={15} weight="bold" />}
               {working ? "Exporting…" : "Export"}
             </button>
           </div>
@@ -656,7 +633,7 @@ function NewRoomPanel({ onClose }: { onClose: () => void }) {
       className="fixed inset-0 z-40 flex items-center justify-center bg-black/40"
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="w-[340px] rounded-2xl border border-hairline/50 bg-card p-4 shadow-2xl">
+      <div className="w-[340px] rounded-xl border border-hairline bg-card p-4">
         <div className="mb-3 text-[15px] font-semibold text-ink">New Room</div>
         <input
           autoFocus
@@ -679,15 +656,15 @@ function NewRoomPanel({ onClose }: { onClose: () => void }) {
               onClick={() => toggle(b.id)}
               className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-raised/50"
             >
-              <MausAvatar color={b.color} state="happy" size={28} />
+              <MausAvatar color={b.color} name={b.name} state="happy" size={28} />
               <span className="min-w-0 flex-1 truncate text-[14px] text-ink">{b.name}</span>
               <span
                 className={cn(
-                  "flex size-[18px] shrink-0 items-center justify-center rounded-full border",
-                  picked.has(b.id) ? "border-accent bg-accent text-white" : "border-hairline/60",
+                  "flex size-[18px] shrink-0 items-center justify-center rounded-md border",
+                  picked.has(b.id) ? "border-accent bg-accent text-app" : "border-hairline",
                 )}
               >
-                {picked.has(b.id) && <Check size={12} />}
+                {picked.has(b.id) && <Check size={12} weight="fill" />}
               </span>
             </button>
           ))}
@@ -695,7 +672,7 @@ function NewRoomPanel({ onClose }: { onClose: () => void }) {
         <button
           onClick={create}
           disabled={!picked.size}
-          className="mt-3 w-full rounded-lg bg-accent py-2 text-[14px] font-medium text-white hover:brightness-110 disabled:opacity-40"
+          className="mt-3 w-full rounded-lg bg-accent py-2 text-[14px] font-medium text-app hover:brightness-110 disabled:opacity-40"
         >
           Create Room{picked.size ? ` · ${picked.size} ${picked.size === 1 ? "bot" : "bots"}` : ""}
         </button>
@@ -754,22 +731,22 @@ function BotContextMenu({ menu, onClose }: { menu: MenuState; onClose: () => voi
       {label}
     </button>
   );
-  const divider = (key: string) => <div key={key} className="mx-2 my-1 border-t border-hairline/40" />;
+  const divider = (key: string) => <div key={key} className="mx-2 my-1 border-t border-hairline" />;
 
   return (
     <div
       data-bot-menu
       style={{ top, left }}
-      className="fixed z-40 w-[228px] overflow-hidden rounded-xl border border-hairline/50 bg-card py-1.5 shadow-2xl shadow-black/60"
+      className="fixed z-40 w-[228px] overflow-hidden rounded-xl border border-hairline bg-card py-1.5"
     >
       {[
         item(
-          bot.pinned ? <PinOff size={16} className="text-ink-secondary" /> : <Pin size={16} className="text-ink-secondary" />,
+          bot.pinned ? <PushPinSlash size={16} weight="bold" className="text-ink-secondary" /> : <PushPin size={16} weight="bold" className="text-ink-secondary" />,
           bot.pinned ? "Unpin" : "Pin",
           () => dispatch({ type: "updateBot", botId: bot.id, patch: { pinned: !bot.pinned } }),
         ),
         item(
-          <Crown size={16} className={bot.chiefOfStaff ? "text-accent" : "text-ink-secondary"} />,
+          <Crown size={16} weight={bot.chiefOfStaff ? "fill" : "bold"} className={bot.chiefOfStaff ? "text-accent" : "text-ink-secondary"} />,
           bot.chiefOfStaff ? "Remove Chief of Staff" : "Make Chief of Staff",
           () => dispatch({ type: "updateBot", botId: bot.id, patch: { chiefOfStaff: !bot.chiefOfStaff } }),
           {
@@ -777,28 +754,28 @@ function BotContextMenu({ menu, onClose }: { menu: MenuState; onClose: () => voi
             hint: !bot.chiefOfStaff && !canCoordinate ? "Choose a Claude or ACP engine first" : undefined,
           },
         ),
-        item(<FolderPlus size={16} className="text-ink-secondary" />, "Move to new section", undefined, {
+        item(<FolderPlus size={16} weight="bold" className="text-ink-secondary" />, "Move to new section", undefined, {
           disabled: true,
           hint: "Coming soon",
         }),
-        item(<BellDot size={16} className="text-ink-secondary" />, "Mark as Unread", () =>
+        item(<BellRinging size={16} weight="bold" className="text-ink-secondary" />, "Mark as Unread", () =>
           dispatch({ type: "markUnread", botId: bot.id }),
         ),
         divider("d1"),
-        item(<Pencil size={16} className="text-ink-secondary" />, "Edit Profile", () => {
+        item(<Pencil size={16} weight="bold" className="text-ink-secondary" />, "Edit Profile", () => {
           dispatch({ type: "select", id: bot.id });
           dispatch({ type: "toggleSettings", open: true });
         }),
-        item(<Copy size={16} className="text-ink-secondary" />, "Duplicate", () =>
+        item(<Copy size={16} weight="bold" className="text-ink-secondary" />, "Duplicate", () =>
           dispatch({ type: "duplicateBot", botId: bot.id }),
         ),
         divider("d2"),
-        item(<ClipboardCopy size={16} className="text-ink-secondary" />, "Copy conversation ID", () => {
+        item(<ClipboardText size={16} weight="bold" className="text-ink-secondary" />, "Copy conversation ID", () => {
           void navigator.clipboard?.writeText(bot.threadId);
         }),
         divider("d3"),
         item(
-          <EyeOff size={16} className="text-ink-secondary" />,
+          <EyeSlash size={16} weight="bold" className="text-ink-secondary" />,
           "Hide from sidebar",
           () => dispatch({ type: "updateBot", botId: bot.id, patch: { hidden: true } }),
           {
@@ -806,7 +783,7 @@ function BotContextMenu({ menu, onClose }: { menu: MenuState; onClose: () => voi
             hint: bot.chiefOfStaff ? "Choose another Chief of Staff first" : undefined,
           },
         ),
-        item(<Trash2 size={16} />, "Delete", () => dispatch({ type: "deleteBot", botId: bot.id }), {
+        item(<Trash size={16} weight="bold" />, "Delete", () => dispatch({ type: "deleteBot", botId: bot.id }), {
           danger: true,
         }),
       ]}
@@ -829,31 +806,36 @@ function BotListItem({ bot, onMenu }: { bot: Bot; onMenu: (menu: MenuState) => v
         onMenu({ botId: bot.id, x: e.clientX, y: e.clientY });
       }}
       className={cn(
-        "flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left",
+        // The selected row is marked by a 2px accent rule on its leading edge —
+        // structure, not fill, carries state in the industrial language.
+        "flex w-full items-center gap-3 rounded-lg border-l-2 px-3 py-2 text-left",
         bot.chiefOfStaff
           ? selected
-            ? "border-accent/40 bg-accent/15"
-            : "border-accent/25 bg-accent/5 hover:bg-accent/10"
+            ? "border-l-accent bg-raised"
+            : "border-l-accent/40 hover:bg-raised/60"
           : selected
-            ? "border-transparent bg-raised"
-            : "border-transparent hover:bg-raised/50",
+            ? "border-l-accent bg-raised"
+            : "border-l-transparent hover:bg-raised/60",
       )}
     >
       <MausAvatar
         color={bot.color}
+        name={bot.name}
         state={stateForBot({ ...bot, messages: visible })}
-        size={56}
+        size={36}
         motion={mascotMotion?.kind ?? "none"}
         motionKey={mascotMotion?.nonce ?? 0}
       />
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2">
           <span className="flex min-w-0 items-center gap-1.5 truncate text-[15px] font-semibold text-ink">
-            {bot.pinned && <Pin size={12} className="shrink-0 text-ink-secondary" />}
+            {bot.pinned && (
+              <PushPin size={12} weight={selected ? "fill" : "bold"} className="shrink-0 text-ink-secondary" />
+            )}
             <span className="truncate">{bot.name}</span>
           </span>
           {selected && last && (
-            <span className="shrink-0 text-xs text-ink-secondary">
+            <span className="shrink-0 font-mono text-xs tracking-tight text-ink-secondary">
               {formatTime(last.at)}
             </span>
           )}
@@ -861,8 +843,8 @@ function BotListItem({ bot, onMenu }: { bot: Bot; onMenu: (menu: MenuState) => v
         <div className="flex items-center justify-between gap-2">
           <span className="flex min-w-0 items-center gap-1.5 truncate text-[13px] text-ink-secondary">
             {bot.chiefOfStaff && (
-              <span className="flex shrink-0 items-center gap-1 text-[11.5px] font-medium text-accent">
-                <Crown size={11} /> Chief of Staff
+              <span className="flex shrink-0 items-center gap-1 font-mono text-[11.5px] font-medium tracking-tight text-accent">
+                <Crown size={11} weight="fill" /> Chief of Staff
               </span>
             )}
             {bot.chiefOfStaff && preview(bot) && <span className="shrink-0 text-ink-secondary/60">·</span>}
@@ -931,7 +913,6 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   };
 
   const macInset = capabilities.windowChrome === "mac-inset";
-  const browser = capabilities.host.label === "Browser";
 
   const q = query.trim().toLowerCase();
   const matchingBots = state.bots
@@ -952,7 +933,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   return (
     <aside
       className={cn(
-        "flex h-full w-[320px] shrink-0 flex-col border-r border-hairline/40 bg-panel",
+        "flex h-full w-[320px] shrink-0 flex-col border-r border-hairline bg-panel",
         // Below md only: the sidebar leaves the flow and slides in over the chat.
         // Scoped with max-md: rather than cancelled with md: on purpose — Tailwind
         // v4 emits the native `translate` property, and any value other than
@@ -965,20 +946,15 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         open ? "max-md:translate-x-0" : "max-md:-translate-x-full",
       )}
     >
-      {/* macOS owns inset traffic lights; Linux/Windows use native chrome. */}
+      {/* macOS owns inset traffic lights, so reserve the space they occupy;
+          Linux/Windows use native chrome. In a browser tab there is no window
+          to control, and this used to paint imitation macOS traffic lights —
+          three dead dots in another OS's colours, on every platform. */}
       <div
         className="flex items-center justify-between px-4 pt-3.5 pb-1"
         style={macInset ? ({ WebkitAppRegion: "drag" } as React.CSSProperties) : undefined}
       >
-        {macInset ? (
-          <div className="w-14" />
-        ) : browser ? (
-          <div className="flex items-center gap-2">
-            <span className="size-3 rounded-full bg-[#ff5f57]" />
-            <span className="size-3 rounded-full bg-[#febc2e]" />
-            <span className="size-3 rounded-full bg-[#28c840]" />
-          </div>
-        ) : <div />}
+        {macInset ? <div className="w-14" /> : <div />}
         <div
           className="relative"
           style={macInset ? ({ WebkitAppRegion: "no-drag" } as React.CSSProperties) : undefined}
@@ -989,12 +965,12 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
             className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
             title="New or share"
           >
-            <Plus size={20} strokeWidth={2} />
+            <Plus size={20} weight="bold" strokeWidth={2} />
           </button>
           {plusOpen && (
             <>
               <div className="fixed inset-0 z-30" onMouseDown={() => setPlusOpen(false)} />
-              <div className="absolute right-0 top-full z-40 mt-1 w-44 overflow-hidden rounded-xl border border-hairline/50 bg-card py-1.5 shadow-2xl shadow-black/60">
+              <div className="absolute right-0 top-full z-40 mt-1 w-44 overflow-hidden rounded-xl border border-hairline bg-card py-1.5">
                 <button
                   onClick={() => {
                     setPlusOpen(false);
@@ -1003,7 +979,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                   }}
                   className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
                 >
-                  <BotIcon size={16} className="text-ink-secondary" />
+                  <BotIcon size={16} weight="bold" className="text-ink-secondary" />
                   New Bot
                 </button>
                 <button
@@ -1013,7 +989,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                   }}
                   className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
                 >
-                  <Users size={16} className="text-ink-secondary" />
+                  <Users size={16} weight="bold" className="text-ink-secondary" />
                   New Room
                 </button>
                 <button
@@ -1023,7 +999,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                   }}
                   className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
                 >
-                  <ArrowDownToLine size={16} className="text-ink-secondary" />
+                  <ArrowLineDown size={16} weight="bold" className="text-ink-secondary" />
                   Export Team
                 </button>
                 <button
@@ -1033,7 +1009,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                   }}
                   className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
                 >
-                  <FileUp size={16} className="text-ink-secondary" />
+                  <FileArrowUp size={16} weight="bold" className="text-ink-secondary" />
                   Import Team
                 </button>
               </div>
@@ -1051,10 +1027,10 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         aria-label="Choose a MausCrew team file"
       />
 
-      {/* Search */}
+      {/* MagnifyingGlass */}
       <div className="px-3 pt-2 pb-3">
         <div className="flex items-center gap-2 rounded-lg bg-raised/70 px-3 py-2">
-          <Search size={16} className="text-ink-secondary" />
+          <MagnifyingGlass size={16} weight="bold" className="text-ink-secondary" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -1095,7 +1071,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
             state.activeView === "routines" ? "bg-raised text-ink" : "text-ink hover:bg-raised/50",
           )}
         >
-          <CalendarDays size={20} className={state.activeView === "routines" ? "text-accent" : "text-ink-secondary"} />
+          <CalendarDots size={20} weight={state.activeView === "routines" ? "fill" : "bold"} className={state.activeView === "routines" ? "text-accent" : "text-ink-secondary"} />
           <span className="flex-1 text-[14px]">Automations</span>
           {state.routineRuns.some((run) => ["failed", "missed"].includes(run.status) && !run.seenAt) && (
             <span className="size-2 rounded-full bg-danger" />
@@ -1105,7 +1081,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           onClick={() => dispatch({ type: "togglePlugins", open: true })}
           className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left hover:bg-raised/50"
         >
-          <Puzzle size={20} className="text-ink-secondary" />
+          <PuzzlePiece size={20} weight="bold" className="text-ink-secondary" />
           <span className="text-[14px] text-ink">Plugins</span>
         </button>
         <div className="flex items-center">
@@ -1124,7 +1100,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
             className="rounded-md p-2 text-ink-secondary hover:bg-raised hover:text-ink"
             title="App settings"
           >
-            <Settings size={18} />
+            <Gear size={18} weight="bold" />
           </button>
         </div>
       </div>
@@ -1163,10 +1139,10 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           <div
             role="status"
             className={cn(
-              "fixed bottom-4 left-4 z-[60] max-w-[300px] rounded-xl border px-3.5 py-2.5 text-[13px] shadow-xl",
+              "fixed bottom-4 left-4 z-[60] max-w-[300px] rounded-xl border px-3.5 py-2.5 text-[13px]",
               teamFeedback.error
                 ? "border-danger/30 bg-card text-danger"
-                : "border-hairline/50 bg-card text-ink",
+                : "border-hairline bg-card text-ink",
             )}
           >
             {teamFeedback.text}

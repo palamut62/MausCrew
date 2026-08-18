@@ -161,6 +161,15 @@ export function createAcpDriver(support) {
                 let sessionId = null;
                 let interruptTimer = null;
                 const rpcPending = new Map();
+                // Writing to a dead agent surfaces EPIPE asynchronously, as an 'error'
+                // event on the pipe — the try/catch around write() below cannot see it,
+                // and an unhandled 'error' event takes the whole server down with it.
+                // The race is normal, not exceptional: settle() kills the process while
+                // a cancel or a reply may still be in flight, and a provider reload
+                // disposes every agent under running turns. Swallow it here, exactly as
+                // the DeepSeek native bridge does; the turn is settled by the child's
+                // own exit path either way.
+                child.stdin.on("error", () => { });
                 const send = (obj) => {
                     try {
                         child.stdin.write(JSON.stringify(obj) + "\n");

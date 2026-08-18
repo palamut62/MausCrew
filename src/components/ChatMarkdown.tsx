@@ -7,7 +7,7 @@
 import { memo, useEffect, useState, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Check, Copy } from "lucide-react";
+import { Check, Copy } from "@phosphor-icons/react";
 
 // tiny highlight cache so revisiting a thread doesn't re-tokenize settled
 // blocks; keys are content-hashed, capped, never written while streaming
@@ -63,15 +63,15 @@ function CodeBlock({ code, lang, streaming }: { code: string; lang: string; stre
   };
 
   return (
-    <div className="my-2 overflow-hidden rounded-lg border border-hairline/40 bg-inset">
-      <div className="flex items-center justify-between border-b border-hairline/30 px-3 py-1">
-        <span className="text-[11px] uppercase tracking-wide text-ink-secondary">{lang || "code"}</span>
+    <div className="my-2 overflow-hidden rounded-lg border border-hairline bg-inset">
+      <div className="flex items-center justify-between border-b border-hairline px-3 py-1">
+        <span className="font-mono text-[11px] uppercase tracking-wide text-ink-secondary">{lang || "code"}</span>
         <button
           onClick={copy}
           className="rounded p-1 text-ink-secondary hover:bg-raised hover:text-ink"
           title="Copy code"
         >
-          {copied ? <Check size={13} className="text-success" /> : <Copy size={13} />}
+          {copied ? <Check size={13} weight="fill" className="text-success" /> : <Copy size={13} weight="bold" />}
         </button>
       </div>
       {html ? (
@@ -110,7 +110,7 @@ function ChatMarkdownComponent({ text, streaming = false }: { text: string; stre
                 src={src}
                 alt={alt ?? ""}
                 loading="lazy"
-                className="max-h-96 max-w-full rounded-lg border border-hairline/30"
+                className="max-h-96 max-w-full rounded-lg border border-hairline"
               />
             );
           },
@@ -140,11 +140,11 @@ function ChatMarkdownComponent({ text, streaming = false }: { text: string; stre
           },
           th({ children }: { children?: ReactNode }) {
             return (
-              <th className="border-b border-hairline/40 px-2 py-1.5 text-left font-semibold">{children}</th>
+              <th className="border-b border-hairline px-2 py-1.5 text-left font-semibold">{children}</th>
             );
           },
           td({ children }: { children?: ReactNode }) {
-            return <td className="border-b border-hairline/20 px-2 py-1.5 align-top">{children}</td>;
+            return <td className="border-b border-hairline px-2 py-1.5 align-top">{children}</td>;
           },
           ul({ children }: { children?: ReactNode }) {
             return <ul className="list-disc space-y-1 pl-5">{children}</ul>;
@@ -176,7 +176,7 @@ function ChatMarkdownComponent({ text, streaming = false }: { text: string; stre
             );
           },
           hr() {
-            return <hr className="border-hairline/40" />;
+            return <hr className="border-hairline" />;
           },
         }}
       >

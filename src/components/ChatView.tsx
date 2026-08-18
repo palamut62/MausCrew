@@ -1,23 +1,5 @@
 import { Component, memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import {
-  AlertTriangle,
-  ArrowDown,
-  Brain,
-  Check,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  Copy,
-  Crown,
-  GitFork,
-  Loader2,
-  Monitor,
-  Pencil,
-  RefreshCw,
-  Square,
-  Webhook,
-  X,
-} from "lucide-react";
+import { ArrowClockwise, ArrowDown, Brain, CaretDown, CaretLeft, CaretRight, Check, Copy, Crown, GitFork, Monitor, Pencil, Spinner, Square, Warning, WebhooksLogo, X } from "@phosphor-icons/react";
 import {
   useStore,
   useStreaming,
@@ -61,8 +43,18 @@ function dayLabel(at: number): string {
 
 function DaySeparator({ at }: { at: number }) {
   return (
-    <div className="py-3 text-center text-[13px] text-ink-secondary">
+    <div className="py-3 text-center font-mono text-[13px] tracking-tight text-ink-secondary">
       {dayLabel(at)} {formatTime(at)}
+    </div>
+  );
+}
+
+/** The bot-side header line: "DEEPSEEK · 10:34". Mono, uppercase, small —
+ * the only label the bubble-less assistant column gets. */
+function RoleStamp({ name, at }: { name: string; at: number }) {
+  return (
+    <div className="mb-1 pl-3 font-mono text-[10.5px] tracking-tight text-ink-secondary uppercase">
+      {name} · {formatTime(at)}
     </div>
   );
 }
@@ -84,7 +76,7 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
         className,
       )}
     >
-      {copied ? <Check size={14} className="text-success" /> : <Copy size={14} />}
+      {copied ? <Check size={14} weight="fill" className="text-success" /> : <Copy size={14} weight="bold" />}
     </button>
   );
 }
@@ -105,16 +97,16 @@ function ThinkingStrip({ text, active }: { text: string; active: boolean }) {
           aria-expanded={open}
           className="flex items-center gap-1.5 rounded-md px-1 py-0.5 text-[12.5px] hover:bg-raised/40"
         >
-          <Brain size={13} className="text-ink-secondary" />
-          <span className={cn(active ? "thinking-shimmer animate-shimmer" : "text-ink-secondary")}>
+          <Brain size={13} weight={active ? "fill" : "bold"} className="text-ink-secondary" />
+          <span className={cn("font-mono tracking-tight", active ? "thinking-shimmer animate-shimmer" : "text-ink-secondary")}>
             {active ? "Thinking…" : "Thought process"}
           </span>
-          <ChevronDown size={12} className={cn("text-ink-secondary transition-transform", open && "rotate-180")} />
+          <CaretDown size={12} weight="bold" className={cn("text-ink-secondary transition-transform", open && "rotate-180")} />
         </button>
         {open ? (
           <div
             ref={tailRef}
-            className="mt-1 max-h-48 overflow-y-auto rounded-lg border border-hairline/30 bg-panel px-3 py-2 text-[12.5px] leading-relaxed whitespace-pre-wrap text-ink-secondary"
+            className="mt-1 max-h-48 overflow-y-auto rounded-lg border border-hairline bg-panel px-3 py-2 text-[12.5px] leading-relaxed whitespace-pre-wrap text-ink-secondary"
           >
             {text}
           </div>
@@ -150,7 +142,7 @@ function ErrorRow({
     <div className="flex justify-start">
       <div className="max-w-[70%] rounded-xl border border-danger/30 bg-danger/10 px-3.5 py-2.5 text-[13.5px] text-danger">
         <div className="flex items-start gap-2">
-          <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+          <Warning size={15} weight="bold" className="mt-0.5 shrink-0" />
           <span className="min-w-0 break-words">{message}</span>
         </div>
         {setupInstance &&
@@ -160,9 +152,9 @@ function ErrorRow({
           onRetry && (
             <button
               onClick={onRetry}
-              className="mt-1.5 flex items-center gap-1.5 rounded-full border border-danger/30 px-2.5 py-1 text-[12.5px] hover:bg-danger/15"
+              className="mt-1.5 flex items-center gap-1.5 rounded-md border border-danger/30 px-2.5 py-1 text-[12.5px] hover:bg-danger/15"
             >
-              <RefreshCw size={12} /> Retry
+              <ArrowClockwise size={12} weight="bold" /> Retry
             </button>
           )
         )}
@@ -181,7 +173,7 @@ class MessageBoundary extends Component<{ children: ReactNode; fallbackText: str
   render() {
     if (this.state.failed) {
       return (
-        <div className="max-w-[70%] rounded-2xl bg-card px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap text-ink">
+        <div className="max-w-[760px] text-[14px] leading-snug whitespace-pre-wrap text-ink">
           {this.props.fallbackText}
         </div>
       );
@@ -213,7 +205,7 @@ function BubbleEditor({
     if (draft.trim()) onSubmit(draft.trim());
   };
   return (
-    <div className="w-full max-w-[70%] rounded-2xl border border-hairline/40 bg-bubble-user px-4 py-3">
+    <div className="w-full max-w-[70%] rounded-xl border border-hairline bg-bubble-user px-4 py-3">
       <textarea
         ref={ref}
         value={draft}
@@ -232,14 +224,14 @@ function BubbleEditor({
       <div className="mt-2 flex items-center justify-end gap-2">
         <button
           onClick={onCancel}
-          className="rounded-full px-3 py-1 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
+          className="rounded-md px-3 py-1 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
         >
           Cancel
         </button>
         <button
           onClick={submit}
           disabled={!draft.trim()}
-          className="rounded-full bg-accent px-3 py-1 text-[13px] font-medium text-white disabled:opacity-40"
+          className="rounded-md bg-accent px-3 py-1 text-[13px] font-medium text-app disabled:opacity-40"
         >
           Send
         </button>
@@ -293,6 +285,9 @@ function Bubble({
 
   return (
     <div className={cn("group animate-msg-in flex w-full flex-col", user ? "items-end" : "items-start")}>
+      {/* The bot side has no bubble — a mono role stamp plus an accent rule
+          does the framing, so the transcript reads as a log, not chat. */}
+      {!user && <RoleStamp name={bot.name} at={message.at} />}
       <div className={cn("flex w-full items-center gap-1.5", user ? "justify-end" : "justify-start")}>
         {/* editing rewinds the thread, so it waits for the turn to end —
             same rule as the version switcher below */}
@@ -303,33 +298,33 @@ function Bubble({
             className="rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
             title="Edit message"
           >
-            <Pencil size={14} />
+            <Pencil size={14} weight="bold" />
           </button>
         )}
         {user && message.kind === "text" && <ReactionBar threadId={bot.threadId} message={message} />}
         {user && <CopyButton text={visibleText} />}
         <div
           className={cn(
-            "max-w-[70%] rounded-2xl text-[15px] leading-relaxed",
+            "text-[14px] leading-snug",
             user && webhookView
-              ? "overflow-hidden border border-accent/25 bg-card text-ink shadow-[0_10px_30px_rgba(0,0,0,0.18)]"
+              ? "max-w-[70%] overflow-hidden rounded-xl border border-accent bg-card text-ink shadow-[0_10px_30px_rgba(0,0,0,0.18)]"
               : user
-                ? "bg-bubble-user px-4 py-2.5 whitespace-pre-wrap text-ink"
-                : "bg-card px-4 py-2.5 text-ink",
+                ? "max-w-[70%] rounded-xl bg-bubble-user px-4 py-2.5 whitespace-pre-wrap text-ink"
+                : "max-w-[760px] border-l border-l-accent/60 pl-3 text-ink",
           )}
           title={new Date(message.at).toLocaleString()}
         >
           {user && webhookView ? (
             <div className="min-w-[300px] max-w-[520px]">
-              <div className="flex items-center gap-2 border-b border-accent/15 bg-accent/[0.055] px-4 py-2.5 text-[11.5px] font-medium text-accent">
-                <Webhook size={13} />
+              <div className="flex items-center gap-2 border-b border-accent/15 bg-accent/[0.055] px-4 py-2.5 font-mono text-[11.5px] font-medium tracking-tight text-accent">
+                <WebhooksLogo size={13} weight="bold" />
                 <span>Webhook task</span>
               </div>
               <div className="px-4 py-3 whitespace-pre-wrap">{webhookView.task}</div>
               {webhookView.payload && (
-                <details className="border-t border-hairline/30 bg-inset/25 px-4 py-2.5 text-[11.5px] text-ink-secondary">
+                <details className="border-t border-hairline bg-inset/25 px-4 py-2.5 text-[11.5px] text-ink-secondary">
                   <summary className="cursor-pointer select-none hover:text-ink">View event payload</summary>
-                  <pre className="mt-2 max-h-48 overflow-auto rounded-lg border border-hairline/25 bg-black/25 p-3 font-mono text-[10.5px] leading-relaxed whitespace-pre-wrap text-ink-secondary">{webhookView.payload}</pre>
+                  <pre className="mt-2 max-h-48 overflow-auto rounded-lg border border-hairline bg-black/25 p-3 font-mono text-[10.5px] leading-relaxed whitespace-pre-wrap text-ink-secondary">{webhookView.payload}</pre>
                 </details>
               )}
             </div>
@@ -370,20 +365,18 @@ function Bubble({
                 title="Regenerate response"
                 className="rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
               >
-                <RefreshCw size={14} />
+                <ArrowClockwise size={14} weight="bold" />
               </button>
             )}
           </div>
         )}
         {!user && message.kind === "text" && <ReactionBar threadId={bot.threadId} message={message} />}
-        <span
-          className={cn(
-            "self-end pb-1 text-[11px] tabular-nums text-ink-secondary/70 opacity-0 transition-opacity group-hover:opacity-100",
-            user ? "order-first mr-1" : "ml-1",
-          )}
-        >
-          {formatTime(message.at)}
-        </span>
+        {/* bot rows carry their time in the role stamp already */}
+        {user && (
+          <span className="order-first mr-1 self-end pb-1 font-mono text-[11px] tabular-nums tracking-tight text-ink-secondary/70 opacity-0 transition-opacity group-hover:opacity-100">
+            {formatTime(message.at)}
+          </span>
+        )}
       </div>
       <ReactionChips threadId={bot.threadId} message={message} align={user ? "right" : "left"} />
       {versions.length > 1 && (
@@ -394,9 +387,9 @@ function Bubble({
             className="rounded p-0.5 hover:bg-raised hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent"
             title="Previous version"
           >
-            <ChevronLeft size={14} />
+            <CaretLeft size={14} weight="bold" />
           </button>
-          <span className="tabular-nums">
+          <span className="font-mono tabular-nums tracking-tight">
             {versionIndex + 1}/{versions.length}
           </span>
           <button
@@ -405,7 +398,7 @@ function Bubble({
             className="rounded p-0.5 hover:bg-raised hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent"
             title="Next version"
           >
-            <ChevronRight size={14} />
+            <CaretRight size={14} weight="bold" />
           </button>
         </div>
       )}
@@ -426,11 +419,11 @@ function ActivityChip({ message }: { message: Message }) {
         <button
           onClick={() => dispatch({ type: "select", id: comm.groupId })}
           title={`Open the conversation with ${comm.withName}`}
-          className="flex items-center gap-2 rounded-full border border-hairline/40 bg-panel px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
+          className="flex items-center gap-2 rounded-md border border-hairline bg-panel px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
         >
-          <MausAvatar color={comm.withColor} state="happy" size={16} />
-          <span className="max-w-[480px] truncate">{tool.name}</span>
-          <ChevronRight size={13} />
+          <MausAvatar color={comm.withColor} name={comm.withName} state="happy" size={16} />
+          <span className="max-w-[480px] truncate font-mono tracking-tight">{tool.name}</span>
+          <CaretRight size={13} weight="bold" />
         </button>
       </div>
     );
@@ -441,18 +434,18 @@ function ActivityChip({ message }: { message: Message }) {
     <div className="flex justify-start">
       <div
         className={cn(
-          "flex items-center gap-2 rounded-full border border-hairline/40 bg-panel px-3 py-1.5 text-[13px]",
+          "flex items-center gap-2 rounded-md border border-hairline bg-panel px-3 py-1.5 text-[13px]",
           failed ? "text-danger" : "text-ink-secondary",
         )}
       >
         {tool.ok === undefined ? (
-          <Loader2 size={13} className="animate-spin" />
+          <Spinner size={13} weight="fill" className="animate-spin" />
         ) : failed ? (
-          <X size={13} />
+          <X size={13} weight="bold" />
         ) : (
-          <Check size={13} className="text-success" />
+          <Check size={13} weight="fill" className="text-success" />
         )}
-        <span className="max-w-[480px] truncate font-mono">{tool.name}</span>
+        <span className="max-w-[480px] truncate font-mono tracking-tight">{tool.name}</span>
       </div>
     </div>
   );
@@ -475,7 +468,7 @@ function SubagentActivityCard({ message }: { message: Message }) {
       <div
         className={cn(
           "w-full max-w-[560px] rounded-xl border bg-panel text-[13px]",
-          failed ? "border-danger/30" : "border-hairline/40",
+          failed ? "border-danger/30" : "border-hairline",
         )}
       >
         <button
@@ -484,24 +477,24 @@ function SubagentActivityCard({ message }: { message: Message }) {
           className="flex w-full items-center gap-2 px-3 py-2 text-left"
         >
           {running ? (
-            <Loader2 size={14} className="shrink-0 animate-spin text-accent" />
+            <Spinner size={14} weight="fill" className="shrink-0 animate-spin text-accent" />
           ) : failed ? (
-            <X size={14} className="shrink-0 text-danger" />
+            <X size={14} weight="bold" className="shrink-0 text-danger" />
           ) : (
-            <Check size={14} className="shrink-0 text-success" />
+            <Check size={14} weight="fill" className="shrink-0 text-success" />
           )}
-          <GitFork size={14} className="shrink-0 text-ink-secondary" />
+          <GitFork size={14} weight="bold" className="shrink-0 text-ink-secondary" />
           <span className="min-w-0 flex-1">
             <span className="font-medium text-ink">Delegated agent</span>
-            <span className="ml-2 font-mono text-[11.5px] text-ink-secondary">{shortId}</span>
+            <span className="ml-2 font-mono text-[11.5px] tracking-tight text-ink-secondary">{shortId}</span>
           </span>
-          <span className={cn("text-[11.5px]", failed ? "text-danger" : "text-ink-secondary")}>
+          <span className={cn("font-mono text-[11.5px] tracking-tight", failed ? "text-danger" : "text-ink-secondary")}>
             {running ? "Running" : failed ? "Failed" : "Completed"}
           </span>
-          <ChevronDown size={13} className={cn("text-ink-secondary transition-transform", open && "rotate-180")} />
+          <CaretDown size={13} weight="bold" className={cn("text-ink-secondary transition-transform", open && "rotate-180")} />
         </button>
         {open && (
-          <div className="border-t border-hairline/30 px-3 py-2.5 text-[12px] text-ink-secondary">
+          <div className="border-t border-hairline px-3 py-2.5 text-[12px] text-ink-secondary">
             <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
               <dt>Provider</dt>
               <dd className="font-mono text-ink">{detail.provider || "DeepSeek Harness"}</dd>
@@ -521,7 +514,7 @@ function SubagentActivityCard({ message }: { message: Message }) {
               )}
             </dl>
             {detail.lastAssistantMessage && (
-              <div className="mt-2 rounded-lg border border-hairline/25 bg-inset px-3 py-2 whitespace-pre-wrap text-ink">
+              <div className="mt-2 rounded-lg border border-hairline bg-inset px-3 py-2 whitespace-pre-wrap text-ink">
                 {detail.lastAssistantMessage}
               </div>
             )}
@@ -538,19 +531,20 @@ function ScreenFrame({ png, mime }: { png: string; mime?: string }) {
       <img
         src={`data:${mime ?? "image/png"};base64,${png}`}
         alt="Bot's screen"
-        className="max-w-[70%] rounded-2xl border border-hairline/40"
+        className="max-w-[70%] rounded-xl border border-hairline"
       />
     </div>
   );
 }
 
-function StreamingBubble({ text }: { text: string }) {
+function StreamingBubble({ botName, text }: { botName: string; text: string }) {
   // markdown re-parses on a deferred value: when tokens arrive faster than
   // the parser keeps up, React lags the parse instead of janking the frame
   const deferred = useDeferredValue(text);
   return (
-    <div className="flex w-full justify-start">
-      <div className="max-w-[70%] rounded-2xl bg-card px-4 py-2.5 text-[15px] leading-relaxed text-ink">
+    <div className="flex w-full flex-col items-start">
+      <RoleStamp name={botName} at={Date.now()} />
+      <div className="max-w-[760px] border-l border-l-accent/60 pl-3 text-[14px] leading-snug text-ink">
         <MessageBoundary fallbackText={deferred}>
           <ChatMarkdown text={deferred} streaming />
         </MessageBoundary>
@@ -572,7 +566,7 @@ function WorkingTimer({ since }: { since: number }) {
     const timer = setInterval(tick, 1000);
     return () => clearInterval(timer);
   }, [since]);
-  return <span ref={ref} className="text-[12.5px] text-ink-secondary" />;
+  return <span ref={ref} className="font-mono text-[12.5px] tracking-tight text-ink-secondary" />;
 }
 
 /** The settled transcript, memoized as one unit: during streaming every
@@ -609,7 +603,7 @@ const MessagesList = memo(function MessagesList({
     <>
       {messages.length === 0 && !bot.busy && (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 py-24 text-center">
-          <MausAvatar color={bot.color} state="idle" size={64} motion="none" motionKey={0} />
+          <MausAvatar color={bot.color} name={bot.name} state="idle" size={64} motion="none" motionKey={0} />
           <div className="text-[17px] font-semibold text-ink">{bot.name}</div>
           <div className="max-w-[360px] text-[14px] text-ink-secondary">
             {bot.description || "Send a message to start the conversation."}
@@ -771,6 +765,7 @@ export function ChatView({ bot }: { bot: Bot }) {
         >
           <MausAvatar
             color={bot.color}
+            name={bot.name}
             state={stateForBot({ ...bot, messages })}
             size={28}
             motion={mascotMotion?.kind ?? "none"}
@@ -778,20 +773,20 @@ export function ChatView({ bot }: { bot: Bot }) {
           />
           <span className="text-[15px] font-semibold text-ink">{bot.name}</span>
           {bot.chiefOfStaff && (
-            <span className="flex items-center gap-1 rounded-full bg-accent/12 px-2 py-0.5 text-[11px] font-medium text-accent">
-              <Crown size={11} /> Chief of Staff
+            <span className="flex items-center gap-1 rounded-md bg-accent/12 px-2 py-0.5 font-mono text-[11px] font-medium tracking-tight text-accent">
+              <Crown size={11} weight="fill" /> Chief of Staff
             </span>
           )}
-          {bot.busy && <Loader2 size={14} className="animate-spin text-ink-secondary" />}
+          {bot.busy && <Spinner size={14} weight="fill" className="animate-spin text-accent" />}
         </button>
         <div className="flex items-center gap-2" style={noDrag}>
           {bot.busy && (
             <button
               onClick={() => dispatch({ type: "interrupt", botId: bot.id })}
-              className="flex items-center gap-1.5 rounded-full border border-hairline/40 bg-raised/60 px-2.5 py-1 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
+              className="flex items-center gap-1.5 rounded-md border border-hairline bg-raised/60 px-2.5 py-1 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
               title="Stop this turn"
             >
-              <Square size={12} className="fill-current" />
+              <Square size={12} weight="fill" />
               Stop
             </button>
           )}
@@ -806,7 +801,7 @@ export function ChatView({ bot }: { bot: Bot }) {
             )}
             title="Bot's computer"
           >
-            <Monitor size={18} />
+            <Monitor size={18} weight={state.computerOpen ? "fill" : "bold"} />
           </button>
         </div>
       </div>
@@ -839,7 +834,7 @@ export function ChatView({ bot }: { bot: Bot }) {
         }}
       >
         <div
-          className="mx-auto flex max-w-[900px] flex-col gap-3 pb-4"
+          className="mx-auto flex max-w-[900px] flex-col gap-2 pb-4"
           role="log"
           aria-live="polite"
           aria-label={`Conversation with ${bot.name}`}
@@ -858,19 +853,19 @@ export function ChatView({ bot }: { bot: Bot }) {
           />
           {provisioning && (
             <div className="flex justify-start">
-              <div className="flex items-center gap-2 rounded-full border border-hairline/40 bg-panel px-3 py-1.5 text-[13px] text-ink-secondary">
-                <Loader2 size={13} className="animate-spin" />
+              <div className="flex items-center gap-2 rounded-md border border-hairline bg-panel px-3 py-1.5 text-[13px] text-ink-secondary">
+                <Spinner size={13} weight="fill" className="animate-spin" />
                 Setting up this bot's computer…
               </div>
             </div>
           )}
           {reasoning && bot.busy && <ThinkingStrip text={reasoning} active={!streaming} />}
           {streaming ? (
-            <StreamingBubble text={streaming} />
+            <StreamingBubble botName={bot.name} text={streaming} />
           ) : (
             bot.busy && (
               <div className="flex justify-start">
-                <div className="flex items-center gap-2.5 rounded-2xl bg-raised px-4 py-3">
+                <div className="flex items-center gap-2.5 rounded-xl bg-raised px-4 py-3">
                   <span className="flex items-center gap-1.5">
                     <span className="size-1.5 animate-bounce rounded-full bg-ink-secondary [animation-delay:0ms]" />
                     <span className="size-1.5 animate-bounce rounded-full bg-ink-secondary [animation-delay:150ms]" />
@@ -889,9 +884,9 @@ export function ChatView({ bot }: { bot: Bot }) {
         <button
           onClick={jumpToLatest}
           aria-label="Jump to latest messages"
-          className="animate-pop-in absolute bottom-24 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-hairline/40 bg-raised px-3 py-1.5 text-[12.5px] text-ink shadow-lg hover:bg-raised-hover"
+          className="animate-pop-in absolute bottom-24 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-md border border-hairline bg-raised px-3 py-1.5 text-[12.5px] text-ink hover:bg-raised-hover"
         >
-          <ArrowDown size={13} /> Jump to latest
+          <ArrowDown size={13} weight="bold" /> Jump to latest
         </button>
       )}
 
