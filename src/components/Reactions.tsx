@@ -9,13 +9,13 @@ export const REACTION_SET = ["👍", "❤️", "😂", "🎉", "👀"] as const;
 export function ReactionBar({ threadId, message }: { threadId: string; message: Message }) {
   const { dispatch } = useStore();
   return (
-    <div className="flex items-center gap-0.5 rounded-full border border-hairline/40 bg-panel px-1 py-0.5 opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+    <div className="flex items-center gap-0.5 rounded-md border border-hairline bg-panel px-1 py-0.5 opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
       {REACTION_SET.map((emoji) => (
         <button
           key={emoji}
           onClick={() => dispatch({ type: "toggleReaction", threadId, messageId: message.id, emoji })}
           aria-label={`React ${emoji}`}
-          className="rounded-full px-1 py-0.5 text-[13px] leading-none hover:bg-raised"
+          className="rounded-md px-1 py-0.5 text-[13px] leading-none hover:bg-raised"
         >
           {emoji}
         </button>
@@ -51,10 +51,10 @@ export function ReactionChips({
           onClick={() => dispatch({ type: "toggleReaction", threadId, messageId: message.id, emoji })}
           title={bys.map(nameOf).join(", ")}
           className={cn(
-            "flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[12px] leading-none",
+            "flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[12px] leading-none",
             bys.includes("user")
               ? "border-accent/50 bg-accent/15"
-              : "border-hairline/40 bg-panel hover:bg-raised",
+              : "border-hairline bg-panel hover:bg-raised",
           )}
         >
           <span>{emoji}</span>

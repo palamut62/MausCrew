@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, ChevronLeft, FileText, Loader2, Plus, RefreshCw, Save, Search, Trash2, X } from "lucide-react";
+import { ArrowClockwise, CaretLeft, Check, FileText, FloppyDisk, MagnifyingGlass, Plus, Spinner, Trash, Warning, X } from "@phosphor-icons/react";
 import { useCallback, useEffect, useState } from "react";
 
 import { cn } from "@/lib/cn";
@@ -35,7 +35,7 @@ const EMPTY_DRAFT: SkillDraft = {
 };
 
 const inputClass =
-  "w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none";
+  "w-full rounded-lg border border-hairline bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none";
 
 function draftFor(skill: ManagedSkill): SkillDraft {
   return {
@@ -71,11 +71,11 @@ function Toggle({
         aria-checked={checked}
         aria-label={label}
         onClick={() => onChange(!checked)}
-        className={cn("relative h-[24px] w-[40px] shrink-0 rounded-full transition-colors", checked ? "bg-accent" : "bg-raised")}
+        className={cn("relative h-[24px] w-[40px] shrink-0 rounded-md transition-colors", checked ? "bg-accent" : "bg-raised")}
       >
         <span
           className={cn(
-            "absolute top-[3px] size-[18px] rounded-full bg-white transition-all",
+            "absolute top-[3px] size-[18px] rounded-sm bg-white transition-all",
             checked ? "left-[19px]" : "left-[3px]",
           )}
         />
@@ -200,18 +200,18 @@ export function SkillManager({ bot, onClose }: { bot: Bot; onClose: () => void }
   const canSave = Boolean(draft.name.trim() && draft.description.trim() && draft.instructions.trim()) && !busy;
 
   return (
-    <aside className="animate-panel-in flex h-full w-[400px] max-w-full shrink-0 flex-col border-l border-hairline/40 bg-panel max-md:absolute max-md:inset-0 max-md:z-50 max-md:w-full max-md:border-l-0">
-      <div className="flex items-center justify-between border-b border-hairline/40 px-4 py-3">
+    <aside className="animate-panel-in flex h-full w-[400px] max-w-full shrink-0 flex-col border-l border-hairline bg-panel max-md:absolute max-md:inset-0 max-md:z-50 max-md:w-full max-md:border-l-0">
+      <div className="flex items-center justify-between border-b border-hairline px-4 py-3">
         <button
           onClick={editorOpen ? closeEditor : onClose}
           aria-label={editorOpen ? "Back to skills" : "Back to bot settings"}
           className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
         >
-          <ChevronLeft size={18} />
+          <CaretLeft size={18} weight="bold" />
         </button>
         <span className="text-[15px] font-semibold text-ink">{editorOpen ? (editingId ? "Edit skill" : "New skill") : "Skill Center"}</span>
         <button onClick={onClose} aria-label="Close Skill Center" className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink">
-          <X size={18} />
+          <X size={18} weight="bold" />
         </button>
       </div>
 
@@ -279,7 +279,7 @@ export function SkillManager({ bot, onClose }: { bot: Bot; onClose: () => void }
 
             {error ? <div className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[12px] text-danger">{error}</div> : null}
 
-            <div className="flex items-center justify-between gap-2 border-t border-hairline/40 pt-4">
+            <div className="flex items-center justify-between gap-2 border-t border-hairline pt-4">
               {editingId ? (
                 <button
                   type="button"
@@ -290,7 +290,7 @@ export function SkillManager({ bot, onClose }: { bot: Bot; onClose: () => void }
                     deleteId === editingId ? "bg-danger text-white" : "text-danger hover:bg-danger/10",
                   )}
                 >
-                  <Trash2 size={14} /> {deleteId === editingId ? "Delete permanently" : "Delete"}
+                  <Trash size={14} weight="bold" /> {deleteId === editingId ? "Delete permanently" : "Delete"}
                 </button>
               ) : <span />}
               <div className="flex gap-2">
@@ -301,9 +301,9 @@ export function SkillManager({ bot, onClose }: { bot: Bot; onClose: () => void }
                   type="button"
                   disabled={!canSave}
                   onClick={() => void save()}
-                  className="flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-[12.5px] font-medium text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-[12.5px] font-medium text-app hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {busy ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Save skill
+                  {busy ? <Spinner size={14} weight="fill" className="animate-spin" /> : <FloppyDisk size={14} weight="bold" />} FloppyDisk skill
                 </button>
               </div>
             </div>
@@ -319,7 +319,7 @@ export function SkillManager({ bot, onClose }: { bot: Bot; onClose: () => void }
             {error ? <div className="mt-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[12px] text-danger">{error}</div> : null}
             <div className="mt-4 flex gap-2">
               <label className="relative min-w-0 flex-1">
-                <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-secondary" />
+                <MagnifyingGlass size={14} weight="bold" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-secondary" />
                 <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search skills" className={cn(inputClass, "pl-9")} />
               </label>
               <button
@@ -327,36 +327,36 @@ export function SkillManager({ bot, onClose }: { bot: Bot; onClose: () => void }
                 onClick={() => void load(true)}
                 disabled={refreshing}
                 title="Refresh skills"
-                className="rounded-lg border border-hairline/40 bg-card px-2.5 text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-50"
+                className="rounded-lg border border-hairline bg-card px-2.5 text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-50"
               >
-                <RefreshCw size={15} className={cn(refreshing && "animate-spin")} />
+                <ArrowClockwise size={15} weight="bold" className={cn(refreshing && "animate-spin")} />
               </button>
-              <button type="button" onClick={openNew} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 text-[12.5px] font-medium text-white hover:brightness-110">
-                <Plus size={15} /> New
+              <button type="button" onClick={openNew} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 text-[12.5px] font-medium text-app hover:brightness-110">
+                <Plus size={15} weight="bold" /> New
               </button>
             </div>
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
             {skills === null ? (
-              <div className="flex items-center justify-center gap-2 py-12 text-[13px] text-ink-secondary"><Loader2 size={15} className="animate-spin" /> Loading skills…</div>
+              <div className="flex items-center justify-center gap-2 py-12 text-[13px] text-ink-secondary"><Spinner size={15} weight="fill" className="animate-spin" /> Loading skills…</div>
             ) : visible.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-hairline/50 px-5 py-10 text-center">
+              <div className="rounded-xl border border-dashed border-hairline px-5 py-10 text-center">
                 <FileText size={24} className="mx-auto text-ink-secondary" />
                 <div className="mt-3 text-[14px] font-medium text-ink">{search ? "No matching skills" : "No skills yet"}</div>
                 <div className="mt-1 text-[12px] leading-relaxed text-ink-secondary">{search ? "Try a different search." : "Create reusable instructions for this workspace."}</div>
               </div>
             ) : (
-              <div className="overflow-hidden rounded-xl border border-hairline/40 bg-card">
+              <div className="overflow-hidden rounded-xl border border-hairline bg-card">
                 {visible.map((skill, index) => (
                   <button
                     key={skill.id}
                     type="button"
                     onClick={() => openEdit(skill)}
-                    className={cn("flex w-full items-start gap-3 px-3.5 py-3 text-left hover:bg-raised/60", index > 0 && "border-t border-hairline/40")}
+                    className={cn("flex w-full items-start gap-3 px-3.5 py-3 text-left hover:bg-raised/60", index > 0 && "border-t border-hairline")}
                   >
                     <span className={cn("mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg", skill.valid ? "bg-accent/10 text-accent" : "bg-warning/10 text-warning")}>
-                      {skill.valid ? <FileText size={14} /> : <AlertTriangle size={14} />}
+                      {skill.valid ? <FileText size={14} weight="bold" /> : <Warning size={14} weight="bold" />}
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="flex items-center gap-2">
@@ -370,7 +370,7 @@ export function SkillManager({ bot, onClose }: { bot: Bot; onClose: () => void }
               </div>
             )}
           </div>
-          {saved ? <div className="flex items-center justify-center gap-1.5 border-t border-hairline/40 px-4 py-2 text-[12px] text-success"><Check size={13} /> Skill changes saved</div> : null}
+          {saved ? <div className="flex items-center justify-center gap-1.5 border-t border-hairline px-4 py-2 text-[12px] text-success"><Check size={13} weight="fill" /> Skill changes saved</div> : null}
         </>
       )}
     </aside>

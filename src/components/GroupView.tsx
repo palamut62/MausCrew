@@ -3,7 +3,7 @@
 // does not become a wall of competing motion. Plain messages go to the room's
 // default responder; @mentions override that routing.
 import { memo, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, ChevronDown, Pin } from "lucide-react";
+import { ArrowDown, CaretDown, PushPin } from "@phosphor-icons/react";
 import {
   useStore,
   useStreaming,
@@ -32,19 +32,24 @@ function dayLabel(at: number): string {
   return d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
 }
 
-/** 16px maus + name, shown once per sender cluster. */
-function ClusterLabel({ bot, name, color }: { bot?: Bot; name: string; color: string }) {
+/** 16px maus + mono role stamp ("ADA · 10:34"), once per sender cluster —
+ * the group counterpart of ChatView's RoleStamp. */
+function ClusterLabel({ bot, name, color, at }: { bot?: Bot; name: string; color: string; at?: number }) {
   return (
-    <div className="mt-1 flex items-center gap-1.5 pl-0.5">
+    <div className="mt-1 mb-1 flex items-center gap-1.5 pl-0.5">
       <MausAvatar
         color={(bot?.color ?? color) as Bot["color"]}
+        name={name}
         state={normalizeState(bot?.mascotExpression) ?? "happy"}
         size={16}
         motion="none"
         motionKey={0}
         animated={false}
       />
-      <span className="text-[11px] font-medium text-ink-secondary">{name}</span>
+      <span className="font-mono text-[10.5px] tracking-tight text-ink-secondary uppercase">
+        {name}
+        {at !== undefined && ` · ${formatTime(at)}`}
+      </span>
     </div>
   );
 }
@@ -79,7 +84,7 @@ const Transcript = memo(function Transcript({
             <div className="flex justify-start">
               <div
                 className={cn(
-                  "flex items-center gap-2 rounded-full border border-hairline/40 bg-panel px-3 py-1.5 text-[13px]",
+                  "flex items-center gap-2 rounded-md border border-hairline bg-panel px-3 py-1.5 text-[13px]",
                   m.tool.ok === false ? "text-danger" : "text-ink-secondary",
                 )}
               >
@@ -92,17 +97,22 @@ const Transcript = memo(function Transcript({
                 {user && <ReactionBar threadId={group.threadId} message={m} />}
                 <div
                   className={cn(
-                    "max-w-[70%] rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed",
-                    user ? "whitespace-pre-wrap bg-bubble-user text-ink" : "bg-card text-ink",
+                    "text-[14px] leading-snug",
+                    user
+                      ? "max-w-[70%] rounded-xl bg-bubble-user px-4 py-2.5 whitespace-pre-wrap text-ink"
+                      : "max-w-[760px] border-l border-l-accent/60 pl-3 text-ink",
                   )}
                   title={new Date(m.at).toLocaleString()}
                 >
                   {user ? m.text : <ChatMarkdown text={m.text} />}
                 </div>
                 {!user && <ReactionBar threadId={group.threadId} message={m} />}
-                <span className="self-end pb-1 text-[11px] tabular-nums text-ink-secondary/70 opacity-0 transition-opacity group-hover:opacity-100">
-                  {formatTime(m.at)}
-                </span>
+                {/* bot rows carry their time in the cluster stamp already */}
+                {user && (
+                  <span className="self-end pb-1 font-mono text-[11px] tabular-nums tracking-tight text-ink-secondary/70 opacity-0 transition-opacity group-hover:opacity-100">
+                    {formatTime(m.at)}
+                  </span>
+                )}
               </div>
               <ReactionChips threadId={group.threadId} message={m} members={members} align={user ? "right" : "left"} />
             </div>
@@ -111,12 +121,12 @@ const Transcript = memo(function Transcript({
         return (
           <div key={m.id} className="contents">
             {newDay && (
-              <div className="py-3 text-center text-[13px] text-ink-secondary">
+              <div className="py-3 text-center font-mono text-[13px] tracking-tight text-ink-secondary">
                 {dayLabel(m.at)} {formatTime(m.at)}
               </div>
             )}
             {!user && m.from && newCluster && (
-              <ClusterLabel bot={memberOf(m.from.botId)} name={m.from.name} color={m.from.color} />
+              <ClusterLabel bot={memberOf(m.from.botId)} name={m.from.name} color={m.from.color} at={m.at} />
             )}
             {row}
           </div>
@@ -130,7 +140,7 @@ function StreamingBubble({ text }: { text: string }) {
   const deferred = useDeferredValue(text);
   return (
     <div className="flex w-full justify-start">
-      <div className="max-w-[70%] rounded-2xl bg-card px-4 py-2.5 text-[15px] leading-relaxed text-ink">
+      <div className="max-w-[760px] border-l border-l-accent/60 pl-3 text-[14px] leading-snug text-ink">
         <ChatMarkdown text={deferred} streaming />
         <span className="animate-caret ml-0.5 inline-block h-[14px] w-[2px] bg-ink align-middle" />
       </div>
@@ -164,7 +174,7 @@ function DefaultResponderSelect({ group, members }: { group: Group; members: Bot
         aria-label="Default responder"
         value={value}
         onChange={(event) => change(event.target.value)}
-        className="h-8 max-w-[190px] appearance-none truncate rounded-full border border-hairline/40 bg-raised/60 py-1 pl-3 pr-7 text-[12.5px] font-medium text-ink outline-none hover:bg-raised focus:border-accent"
+        className="h-8 max-w-[190px] appearance-none truncate rounded-md border border-hairline bg-raised/60 py-1 pl-3 pr-7 text-[12.5px] font-medium text-ink outline-none hover:bg-raised focus:border-accent"
       >
         <optgroup label="Room lead">
           {members.map((member) => (
@@ -178,8 +188,8 @@ function DefaultResponderSelect({ group, members }: { group: Group; members: Bot
           <option value="mentions">Mentions only</option>
         </optgroup>
       </select>
-      <ChevronDown
-        size={13}
+      <CaretDown
+        size={13} weight="bold"
         aria-hidden="true"
         className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-secondary"
       />
@@ -253,6 +263,7 @@ export function GroupView({ group }: { group: Group }) {
             >
               <MausAvatar
                 color={b.color}
+                name={b.name}
                 state={normalizeState(b.mascotExpression) ?? "happy"}
                 size={24}
                 animated={false}
@@ -268,7 +279,7 @@ export function GroupView({ group }: { group: Group }) {
       {/* Bulletin: one pinned line; click to edit */}
       <div className="mx-auto w-full max-w-[900px] px-5">
         {bulletinOpen ? (
-          <div className="mb-1 rounded-lg border border-hairline/40 bg-panel p-2">
+          <div className="mb-1 rounded-lg border border-hairline bg-panel p-2">
             <textarea
               autoFocus
               value={bulletinDraft}
@@ -292,7 +303,7 @@ export function GroupView({ group }: { group: Group }) {
             className="mb-1 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-raised/40"
             title="Room bulletin — shared instructions for every bot here"
           >
-            <Pin size={12} className="shrink-0 text-ink-secondary" />
+            <PushPin size={12} weight="bold" className="shrink-0 text-ink-secondary" />
             <span className={cn("truncate text-[12.5px]", group.bulletin ? "text-ink-secondary" : "text-ink-secondary/60")}>
               {group.bulletin.split("\n")[0] || "Add room instructions…"}
             </span>
@@ -319,7 +330,7 @@ export function GroupView({ group }: { group: Group }) {
         }}
       >
         <div
-          className="mx-auto flex max-w-[900px] flex-col gap-3 pb-4"
+          className="mx-auto flex max-w-[900px] flex-col gap-2 pb-4"
           role="log"
           aria-live="polite"
           aria-label={`Room ${group.name}`}
@@ -331,6 +342,7 @@ export function GroupView({ group }: { group: Group }) {
                   <MausAvatar
                     key={b.id}
                     color={b.color}
+                    name={b.name}
                     state="happy"
                     size={44}
                     motion="none"
@@ -350,7 +362,7 @@ export function GroupView({ group }: { group: Group }) {
             <>
               <ClusterLabel bot={speaker} name={speaker.name} color={speaker.color} />
               <div className="flex justify-start">
-                <div className="flex items-center gap-1.5 rounded-2xl bg-raised px-4 py-3">
+                <div className="flex items-center gap-1.5 rounded-xl bg-raised px-4 py-3">
                   <span className="size-1.5 animate-bounce rounded-full bg-ink-secondary [animation-delay:0ms]" />
                   <span className="size-1.5 animate-bounce rounded-full bg-ink-secondary [animation-delay:150ms]" />
                   <span className="size-1.5 animate-bounce rounded-full bg-ink-secondary [animation-delay:300ms]" />
@@ -374,9 +386,9 @@ export function GroupView({ group }: { group: Group }) {
             scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
           }}
           aria-label="Jump to latest messages"
-          className="animate-pop-in absolute bottom-24 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-hairline/40 bg-raised px-3 py-1.5 text-[12.5px] text-ink shadow-lg hover:bg-raised-hover"
+          className="animate-pop-in absolute bottom-24 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-md border border-hairline bg-raised px-3 py-1.5 text-[12.5px] text-ink hover:bg-raised-hover"
         >
-          <ArrowDown size={13} /> Jump to latest
+          <ArrowDown size={13} weight="bold" /> Jump to latest
         </button>
       )}
 

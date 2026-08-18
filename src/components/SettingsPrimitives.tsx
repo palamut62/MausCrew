@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, Copy } from "lucide-react";
+import { Check, Copy } from "@phosphor-icons/react";
 
 export function Card({
   title,
@@ -52,7 +52,7 @@ export function CommandLine({ command }: { command: string }) {
         aria-label="Copy command"
         className="shrink-0 rounded p-1 text-ink-secondary hover:bg-raised hover:text-ink"
       >
-        {copied ? <Check size={13} className="text-success" /> : <Copy size={13} />}
+        {copied ? <Check size={13} weight="fill" className="text-success" /> : <Copy size={13} weight="bold" />}
       </button>
     </div>
   );

@@ -1,16 +1,6 @@
 // One-place setup and lifecycle for the shared, isolated Local VM.
 import { useCallback, useEffect, useState } from "react";
-import {
-  AlertTriangle,
-  Check,
-  Circle,
-  ExternalLink,
-  Loader2,
-  RefreshCw,
-  RotateCcw,
-  Square,
-  Trash2,
-} from "lucide-react";
+import { ArrowClockwise, ArrowCounterClockwise, ArrowSquareOut, Check, Circle, Spinner, Square, Trash, Warning } from "@phosphor-icons/react";
 import { Card, CommandLine } from "./SettingsPrimitives";
 import { cn } from "@/lib/cn";
 
@@ -56,11 +46,11 @@ function Step({ n, title, done, children }: { n: number; title: string; done: bo
     <div className="flex gap-3">
       <div
         className={cn(
-          "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full text-[11px]",
-          done ? "bg-success/20 text-success" : "border border-hairline/50 text-ink-secondary",
+          "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md text-[11px]",
+          done ? "bg-success/20 text-success" : "border border-hairline text-ink-secondary",
         )}
       >
-        {done ? <Check size={12} /> : n}
+        {done ? <Check size={12} weight="fill" /> : n}
       </div>
       <div className="min-w-0 flex-1">
         <div className={cn("text-[14px]", done ? "text-ink-secondary line-through" : "text-ink")}>{title}</div>
@@ -89,10 +79,10 @@ function ActionButton({
       disabled={pending !== null}
       className={cn(
         "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12.5px] font-medium disabled:opacity-50",
-        danger ? "bg-danger/15 text-danger hover:bg-danger/20" : "bg-accent text-white hover:brightness-110",
+        danger ? "bg-danger/15 text-danger hover:bg-danger/20" : "bg-accent text-app hover:brightness-110",
       )}
     >
-      {pending === action && <Loader2 size={13} className="animate-spin" />}
+      {pending === action && <Spinner size={13} weight="fill" className="animate-spin" />}
       {children}
     </button>
   );
@@ -204,11 +194,11 @@ export function LocalComputerSection() {
         <div className="flex flex-wrap items-center gap-2">
           <span
             className={cn(
-              "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12.5px]",
+              "flex items-center gap-1.5 rounded-md px-2.5 py-1 font-mono text-[12.5px] tracking-tight",
               ready ? "bg-success/15 text-success" : "bg-raised text-ink-secondary",
             )}
           >
-            {loading ? <Loader2 size={12} className="animate-spin" /> : ready ? <Check size={12} /> : <Circle size={9} />}
+            {loading ? <Spinner size={12} weight="fill" className="animate-spin" /> : ready ? <Check size={12} weight="fill" /> : <Circle size={9} weight="fill" />}
             {loading ? "Checking…" : unavailable ? "Status unavailable" : ready ? "Ready" : (status?.problem ?? "Not ready")}
           </span>
           <button
@@ -217,18 +207,18 @@ export function LocalComputerSection() {
               setRefreshKey((key) => key + 1);
             }}
             disabled={loading || pending !== null}
-            className="flex items-center gap-1.5 rounded-lg border border-hairline/40 px-2.5 py-1 text-[12.5px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40"
+            className="flex items-center gap-1.5 rounded-lg border border-hairline px-2.5 py-1 text-[12.5px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40"
           >
-            <RefreshCw size={12} /> Re-check
+            <ArrowClockwise size={12} weight="bold" /> Re-check
           </button>
           {ready && (
             <a
               href={status?.viewer_url ?? c?.view}
               target="_blank"
               rel="noreferrer"
-              className="flex items-center gap-1.5 rounded-lg border border-hairline/40 px-2.5 py-1 text-[12.5px] text-ink hover:bg-raised"
+              className="flex items-center gap-1.5 rounded-lg border border-hairline px-2.5 py-1 text-[12.5px] text-ink hover:bg-raised"
             >
-              <ExternalLink size={12} /> Watch screen
+              <ArrowSquareOut size={12} weight="bold" /> Watch screen
             </a>
           )}
         </div>
@@ -273,12 +263,12 @@ export function LocalComputerSection() {
             {needsRecreate ? (
               <>
                 <div className="flex gap-2 text-[13px] text-warning">
-                  <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+                  <Warning size={15} weight="bold" className="mt-0.5 shrink-0" />
                   <span>{status?.problem}</span>
                 </div>
                 {status?.image ? (
                   <ActionButton action="recreate" pending={pending} onClick={() => void act("recreate")} danger>
-                    <RotateCcw size={13} /> Delete and recreate
+                    <ArrowCounterClockwise size={13} weight="bold" /> Delete and recreate
                   </ActionButton>
                 ) : (
                   <div className="text-[13px] text-ink-secondary">Prepare the pinned Cua desktop above before replacing this VM.</div>
@@ -287,7 +277,7 @@ export function LocalComputerSection() {
             ) : status?.container === "stopped" ? (
               <ActionButton action="start" pending={pending} onClick={() => void act("start")}>Start Local VM</ActionButton>
             ) : status?.container === "running" ? (
-              <div className="flex items-center gap-2 text-[13px] text-ink-secondary"><Loader2 size={13} className="animate-spin" /> Waiting for the desktop…</div>
+              <div className="flex items-center gap-2 text-[13px] text-ink-secondary"><Spinner size={13} weight="fill" className="animate-spin" /> Waiting for the desktop…</div>
             ) : status?.image ? (
               <ActionButton action="run" pending={pending} onClick={() => void act("run")}>Create Local VM</ActionButton>
             ) : null}
@@ -299,7 +289,7 @@ export function LocalComputerSection() {
       {unavailable && (
         <Card>
           <div className="flex gap-2 text-[13px] text-ink-secondary">
-            <AlertTriangle size={15} className="mt-0.5 shrink-0 text-warning" />
+            <Warning size={15} weight="bold" className="mt-0.5 shrink-0 text-warning" />
             <span>MausCrew could not inspect the container runtime. Re-check, or review the app logs.</span>
           </div>
         </Card>
@@ -313,11 +303,11 @@ export function LocalComputerSection() {
           <div className="flex flex-wrap gap-2">
             {status?.container === "running" && (
               <ActionButton action="stop" pending={pending} onClick={() => void act("stop")}>
-                <Square size={12} /> Stop
+                <Square size={12} weight="fill" /> Stop
               </ActionButton>
             )}
             <ActionButton action="remove" pending={pending} onClick={() => void act("remove")} danger>
-              <Trash2 size={12} /> Delete VM
+              <Trash size={12} weight="bold" /> Delete VM
             </ActionButton>
           </div>
         )}

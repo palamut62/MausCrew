@@ -23,6 +23,7 @@ import { defaultWorkspaceFor } from "./drivers/deepseek/session-manager.js";
 import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply } from "./comms-visibility.js";
 import { discardDelegations, drainDelegations, queueDelegation } from "./delegations.js";
 import { EventBus } from "./harness/bus.js";
+import { normalizeModelSelection } from "./model-selection.js";
 import { ProviderRegistry } from "./harness/registry.js";
 import { cancelPeerApprovalsFor, dismissStalePeerCards, requestPeerApproval, resolvePeerComms } from "./peer-approval.js";
 import { mentionedBots, roomResponders, Store, } from "./store.js";
@@ -740,7 +741,19 @@ async function startTurn(botId, text, opts) {
             : `provider instance "${bot.modelSelection.instanceId}" is unavailable — pick another model in settings`), { status: 409 });
     }
     const instanceId = instance.instanceId;
-    const model = opts?.runOn === "cloud" ? instance.models.default : bot.modelSelection.model;
+    // Last line of defence for selections that were written before this check
+    // existed, or by something other than the picker: a model this engine
+    // does not serve becomes a raw CLI error the moment it ships as a flag.
+    // Repair the record too, so the fix outlives this turn.
+    const normalized = opts?.runOn === "cloud" ? null : normalizeModelSelection(bot.modelSelection, instance);
+    if (normalized?.changed && normalized.reason) {
+        store.patchBot(bot.id, { modelSelection: normalized.selection });
+        noteModelNormalized(threadId, normalized.reason);
+        const patched = store.bot(bot.id);
+        if (patched)
+            broadcast({ kind: "bot", bot: wireBot(patched) });
+    }
+    const model = normalized ? normalized.selection.model : instance.models.default;
     // a cloud routine borrows the instance default model, so it borrows no
     // per-bot effort either
     const effort = opts?.runOn === "cloud" ? undefined : bot.modelSelection.effort;
@@ -1218,6 +1231,17 @@ function configStatus() {
         // not a secret — the sidebar shows it
         profile: { name: cfg.profile?.name ?? "", email: cfg.profile?.email ?? "" },
     };
+}
+/** Say out loud that a bot's model moved. Same channel as any other
+ * turn-level problem — an activity chip in the thread — because a silent
+ * switch is exactly what makes a wrong answer hard to explain later. */
+function noteModelNormalized(threadId, reason) {
+    const note = store.appendMessage(threadId, {
+        role: "bot",
+        kind: "activity",
+        tool: { name: reason.slice(0, 160), ok: false },
+    });
+    broadcast({ kind: "message", threadId, message: note });
 }
 /** Rebuild the provider fleet after a config change so new keys take
  * effect without a server restart (kills any in-flight turns). */
@@ -1906,6 +1930,20 @@ const server = createServer(async (req, res) => {
                     });
                 }
             }
+            // The picker only ever emits pairings its engine offers; this endpoint
+            // is also reachable by hand and by import, and a model the engine never
+            // served would sit on disk until a turn turned it into a raw CLI error.
+            // Clamp it here so nothing broken is stored and the UI redraws with the
+            // model that will actually run.
+            let modelNotice;
+            const candidate = body.modelSelection;
+            if (candidate && typeof candidate.instanceId === "string" && typeof candidate.model === "string") {
+                const normalized = normalizeModelSelection(candidate, registry.get(candidate.instanceId));
+                if (normalized.changed) {
+                    body.modelSelection = normalized.selection;
+                    modelNotice = normalized.reason;
+                }
+            }
             const patch = {};
             for (const key of ["name", "title", "description", "notifications", "modelSelection", "unread", "computer", "color", "mascotExpression", "pinned", "hidden", "speakReplies", "voice"]) {
                 if (body[key] !== undefined)
@@ -1966,6 +2004,8 @@ const server = createServer(async (req, res) => {
             const bot = store.patchBot(m[1], patch);
             if (!bot)
                 return json(res, 404, { error: "no such bot" });
+            if (modelNotice)
+                noteModelNormalized(bot.threadId, modelNotice);
             const chiefChanges = body.chiefOfStaff === true
                 ? store.setChiefOfStaff(bot.id)
                 : body.chiefOfStaff === false && bot.chiefOfStaff

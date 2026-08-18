@@ -6,8 +6,13 @@
 // JSONL log on disk is what carries the model's context (spec §48, §49).
 // Anything stateful here would lose continuation the first time the process
 // died — the exact case §47 asks us to survive.
-import { homedir } from "node:os";
 import { join } from "node:path";
+
+// The shared data root, not a hardcoded ~/.mauscrew: MAUSCREW_DATA_DIR has to
+// move DeepSeek's sessions and workspaces along with everything else, and a
+// driver that creates the real ~/.mauscrew early would silently skip the
+// legacy-dir migration ensureDirs() only performs while it is still absent.
+import { DATA_DIR } from "../../config.ts";
 
 const PREFIX = "dsh";
 
@@ -35,7 +40,7 @@ export function parseSessionId(sessionId: string): { instanceId: string; threadI
 }
 
 export function defaultSessionRoot(): string {
-  return join(homedir(), ".mauscrew", "deepseek-harness", "sessions");
+  return join(DATA_DIR, "deepseek-harness", "sessions");
 }
 
 /** Per-instance session directory. Kept separate so two provider instances
@@ -50,5 +55,5 @@ export function sessionRootFor(instanceId: string, configuredRoot: string): stri
  * Never the home directory: the agent gets filesystem and shell tools, and
  * an unscoped cwd is precisely the §35 failure the spec calls unacceptable. */
 export function defaultWorkspaceFor(instanceId: string, threadId: string): string {
-  return join(homedir(), ".mauscrew", "workspaces", sanitize(instanceId), sanitize(threadId));
+  return join(DATA_DIR, "workspaces", sanitize(instanceId), sanitize(threadId));
 }

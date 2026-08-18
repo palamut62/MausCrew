@@ -1,4 +1,4 @@
-import { Loader2, Square, Volume2 } from "lucide-react";
+import { SpeakerHigh, Spinner, Square } from "@phosphor-icons/react";
 
 import { speaker } from "@/lib/tts";
 import { useSpeech } from "@/lib/tts/useSpeech";
@@ -52,7 +52,7 @@ export function SpeakButton({
         className,
       )}
     >
-      {preparing ? <Loader2 size={14} className="animate-spin" /> : mine ? <Square size={14} className="fill-current" /> : <Volume2 size={14} />}
+      {preparing ? <Spinner size={14} weight="fill" className="animate-spin" /> : mine ? <Square size={14} weight="fill" /> : <SpeakerHigh size={14} weight="bold" />}
     </button>
   );
 }

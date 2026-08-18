@@ -18,13 +18,13 @@
 // it happens, which is why waiting feels like listening to someone work
 // rather than listening to nothing.
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { Loader2, Phone, PhoneOff, X } from "lucide-react";
+import { Phone, PhoneSlash, Spinner, X } from "@phosphor-icons/react";
 
 import { useStore, visibleMessages, type Bot } from "@/state/store";
 import { currentCall, deferCallCleanup, endCall, startCall, useOnCall } from "@/lib/call";
 import { speaker } from "@/lib/tts";
 import { useSpeech } from "@/lib/tts/useSpeech";
-import { usePushToTalk } from "@/lib/push-to-talk";
+import { usePushToTalk, PUSH_TO_TALK_LABEL } from "@/lib/push-to-talk";
 import { MausAvatar } from "./Avatar";
 import { pendingApprovals } from "./PendingApproval";
 import { cn } from "@/lib/cn";
@@ -137,7 +137,7 @@ export function CallTargetButton({
         aria-label={label}
         title={label}
         className={cn(
-          "relative flex size-9 items-center justify-center rounded-full transition-colors",
+          "relative flex size-9 items-center justify-center rounded-md transition-colors",
           active
             ? "bg-danger text-white hover:brightness-110"
             : unavailable
@@ -145,7 +145,7 @@ export function CallTargetButton({
               : "text-ink-secondary hover:bg-raised hover:text-ink",
         )}
       >
-        {active ? <PhoneOff size={17} /> : <Phone size={17} />}
+        {active ? <PhoneSlash size={17} weight="fill" /> : <Phone size={17} weight="bold" />}
         {unavailable && (
           <span className="absolute right-1 top-1 size-1.5 rounded-full bg-warning ring-2 ring-app" aria-hidden="true" />
         )}
@@ -156,7 +156,7 @@ export function CallTargetButton({
           id={helpId}
           role="group"
           aria-label="Call unavailable"
-          className="animate-pop-in absolute right-0 z-30 mt-1.5 w-[280px] rounded-xl border border-hairline bg-panel p-3 text-left shadow-2xl"
+          className="animate-pop-in absolute right-0 z-30 mt-1.5 w-[280px] rounded-xl border border-hairline bg-panel p-3 text-left"
         >
           <div className="text-[13px] font-medium text-ink">Call unavailable</div>
           <div className="mt-1 text-[12px] leading-[1.45] text-ink-secondary">{reason}</div>
@@ -167,7 +167,7 @@ export function CallTargetButton({
                 setHelpOpen(false);
                 dispatch({ type: "toggleAppSettings", open: true, section: "voice" });
               }}
-              className="mt-2.5 rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-white hover:brightness-110"
+              className="mt-2.5 rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-app hover:brightness-110"
             >
               Open Voice settings
             </button>
@@ -475,15 +475,15 @@ function Call({ bot }: { bot: Bot }) {
         aria-label="Hang up"
         className="absolute right-5 top-5 rounded-md p-2 text-ink-secondary hover:bg-raised hover:text-ink"
       >
-        <X size={18} />
+        <X size={18} weight="bold" />
       </button>
 
-      <MausAvatar color={bot.color} state={mascotState} size={220} animated trackPointer />
+      <MausAvatar color={bot.color} name={bot.name} state={mascotState} size={220} animated trackPointer />
 
       <div className="flex flex-col items-center gap-1.5 text-center">
         <div className="text-[20px] font-medium text-ink">{bot.name}</div>
         <div className="flex items-center gap-2 text-[13.5px] text-ink-secondary">
-          {(phase === "working" || phase === "sending") && <Loader2 size={13} className="animate-spin" />}
+          {(phase === "working" || phase === "sending") && <Spinner size={13} weight="fill" className="animate-spin" />}
           {status}
         </div>
       </div>
@@ -493,7 +493,7 @@ function Call({ bot }: { bot: Bot }) {
         {phase === "listening" ? (
           heard || (
             <span className="text-ink-secondary">
-              {pushToTalk ? "Release Control + Option to send…" : "Say something…"}
+              {pushToTalk ? `Release ${PUSH_TO_TALK_LABEL} to send…` : "Say something…"}
             </span>
           )
         ) : (
@@ -506,7 +506,7 @@ function Call({ bot }: { bot: Bot }) {
           <span>{note}</span>
           <button
             onClick={listen}
-            className="rounded-full border border-warning/40 px-3 py-1.5 text-[12px] hover:bg-warning/10"
+            className="rounded-md border border-warning/40 px-3 py-1.5 text-[12px] hover:bg-warning/10"
           >
             Try microphone again
           </button>
@@ -522,21 +522,21 @@ function Call({ bot }: { bot: Bot }) {
               speaker.stop();
               listen();
             }}
-            className="rounded-full border border-hairline/50 px-4 py-2 text-[13.5px] text-ink hover:bg-raised"
+            className="rounded-md border border-hairline px-4 py-2 text-[13.5px] text-ink hover:bg-raised"
           >
             Interrupt
           </button>
         )}
         <button
           onClick={() => endCall(bot.id)}
-          className="flex items-center gap-2 rounded-full bg-danger px-5 py-2.5 text-[14px] font-medium text-white hover:brightness-110"
+          className="flex items-center gap-2 rounded-md bg-danger px-5 py-2.5 text-[14px] font-medium text-white hover:brightness-110"
         >
-          <PhoneOff size={16} /> Hang up
+          <PhoneSlash size={16} weight="bold" /> Hang up
         </button>
       </div>
 
-      <div className="text-[11.5px] text-ink-secondary/70">
-        Hold Control + Option to talk · Space interrupts · Esc hangs up
+      <div className="font-mono text-[11.5px] tracking-tight text-ink-secondary/70">
+        Hold {PUSH_TO_TALK_LABEL} to talk · Space interrupts · Esc hangs up
       </div>
     </div>
   );

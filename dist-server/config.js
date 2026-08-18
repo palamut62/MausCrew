@@ -86,6 +86,11 @@ export function instanceConfigs(cfg) {
     // CLI"), so a default `gemini` instance could only ever show unavailable.
     // The driver stays registered for enterprise licences, which keep Gemini
     // CLI — `{"instances": {"gemini": {"driver": "geminiAgent"}}}` restores it.
+    //
+    // DeepSeek is not in that retired category: its runtime is installable, so
+    // the default `deepseek` instance is how the engine reaches the model
+    // picker at all. It shows unavailable until the SDK is present, exactly
+    // like droid, claude and opencodeGo — that is the intended shape.
     const map = cfg.instances && Object.keys(cfg.instances).length
         ? cfg.instances
         : {
@@ -97,6 +102,7 @@ export function instanceConfigs(cfg) {
             antigravity: { driver: "antigravityAgent" },
             opencodeGo: { driver: "opencodeGo" },
             computer: { driver: "boxAgent" },
+            deepseek: { driver: "deepseek-harness" },
         };
     for (const entry of Object.values(map)) {
         entry.environment = {

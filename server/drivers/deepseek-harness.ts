@@ -376,6 +376,17 @@ export async function createDeepSeekInstance(
         if (byThread.has(turnInput.threadId)) {
           throw new Error("a turn is already running on this thread");
         }
+        // A bundled runtime that could not be located leaves launchArgs empty,
+        // and the transport can then only say "argv missing" — which is true
+        // and useless, because the user never configures that argv for a
+        // bundled runtime. The lookup already knows why it failed, so say
+        // that instead. Same error kind, so the surfaces treat it the same.
+        if (config.transport.mode === "native" && config.transport.launchArgs.length === 0 && bundledRuntimeReason) {
+          throw new DeepSeekBridgeError(
+            "sdk_missing",
+            `the bundled DeepSeek Harness runtime could not be located: ${bundledRuntimeReason}`,
+          );
+        }
 
         const workspace = turnInput.cwd || defaultWorkspaceFor(instanceId, turnInput.threadId);
         await mkdir(workspace, { recursive: true });

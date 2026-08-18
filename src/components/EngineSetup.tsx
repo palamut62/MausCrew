@@ -11,7 +11,7 @@
 // sign-in, which is why the terminal is the destination rather than a
 // background `npm install` the user never sees.
 import { useState } from "react";
-import { Check, Copy, ExternalLink, TerminalSquare } from "lucide-react";
+import { ArrowSquareOut, Check, Copy, TerminalWindow } from "@phosphor-icons/react";
 import type { EngineInstall, InstanceInfo } from "@/state/store";
 import { cn } from "@/lib/cn";
 
@@ -71,9 +71,9 @@ function CommandRow({ command }: { command: string }) {
         {canOpen && (
           <button
             onClick={openTerminal}
-            className="flex items-center gap-1.5 rounded-lg bg-accent px-2.5 py-1.5 text-[12.5px] font-medium text-white"
+            className="flex items-center gap-1.5 rounded-lg bg-accent px-2.5 py-1.5 text-[12.5px] font-medium text-app"
           >
-            <TerminalSquare size={13} /> Copy &amp; Open Terminal
+            <TerminalWindow size={13} weight="bold" /> Copy &amp; Open Terminal
           </button>
         )}
         <button
@@ -83,7 +83,7 @@ function CommandRow({ command }: { command: string }) {
             canOpen ? "text-ink-secondary hover:bg-raised hover:text-ink" : "bg-raised text-ink hover:bg-raised-hover",
           )}
         >
-          {done ? <Check size={13} /> : <Copy size={13} />}
+          {done ? <Check size={13} weight="fill" /> : <Copy size={13} weight="bold" />}
           {done === "copied" ? "Copied" : done === "opened" ? "Copied — paste" : "Copy"}
         </button>
       </div>
@@ -156,7 +156,7 @@ export function EngineSetup({
           rel="noreferrer"
           className="mt-2 inline-flex items-center gap-1.5 text-[12.5px] text-accent hover:underline"
         >
-          <ExternalLink size={12} /> Setup guide
+          <ArrowSquareOut size={12} weight="bold" /> Setup guide
         </a>
       )}
     </div>
