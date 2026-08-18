@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { X } from "lucide-react";
+import { X } from "@phosphor-icons/react";
 import { useStore, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 
@@ -23,7 +23,7 @@ export function OptionCard({
   };
 
   return (
-    <div className="w-full max-w-[840px] rounded-2xl border border-hairline/50 bg-card p-4">
+    <div className="w-full max-w-[840px] rounded-xl border border-hairline bg-card p-4">
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="text-[16px] font-semibold text-ink">{card.title}</div>
@@ -37,11 +37,11 @@ export function OptionCard({
           }
           className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
         >
-          <X size={16} />
+          <X size={16} weight="bold" />
         </button>
       </div>
 
-      <div className="mt-3 overflow-hidden rounded-lg border border-hairline/40">
+      <div className="mt-3 overflow-hidden rounded-lg border border-hairline">
         {card.options.map((opt, i) => (
           <button
             key={opt}
@@ -49,7 +49,7 @@ export function OptionCard({
             onClick={() => answer(opt)}
             className={cn(
               "flex w-full items-center gap-3 px-3 py-3 text-left text-[15px] text-ink",
-              i > 0 && "border-t border-hairline/40",
+              i > 0 && "border-t border-hairline",
               card.answered === opt
                 ? "bg-raised"
                 : "hover:bg-raised/60 disabled:hover:bg-transparent",
@@ -71,7 +71,7 @@ export function OptionCard({
           onChange={(e) => setCustom(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && answer(custom)}
           placeholder="Type your own answer"
-          className="mt-3 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2.5 text-[15px] text-ink placeholder:text-ink-secondary focus:outline-none focus:border-hairline"
+          className="mt-3 w-full rounded-lg border border-hairline bg-inset px-3 py-2.5 text-[15px] text-ink placeholder:text-ink-secondary focus:outline-none focus:border-hairline"
         />
       )}
     </div>

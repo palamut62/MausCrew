@@ -2,7 +2,7 @@
 // Routing is by exact instanceId only — an entry is never inferred from a
 // driver kind, and unavailable instances render disabled with the reason.
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, TriangleAlert } from "lucide-react";
+import { CaretDown, Check, Warning } from "@phosphor-icons/react";
 import { useStore, type Bot, type InstanceInfo } from "@/state/store";
 import { ProviderMark } from "./ProviderIcons";
 import { EngineSetup, needsSignIn } from "./EngineSetup";
@@ -71,21 +71,21 @@ export function ModelPicker({ bot, className }: { bot: Bot; className?: string }
           setRailId(selection.instanceId);
           setOpen((o) => !o);
         }}
-        className="flex items-center gap-1.5 rounded-full border border-hairline/40 bg-raised/60 py-1 pl-2 pr-2.5 text-[13px] text-ink hover:bg-raised"
+        className="flex items-center gap-1.5 rounded-md border border-accent bg-raised/60 py-1 pl-2 pr-2.5 text-[13px] text-ink hover:bg-raised"
         title={active ? `${active.displayName} · ${modelLabel(active, selection.model)}` : selection.model}
       >
         {active && <ProviderMark driverKind={active.driverKind} size={14} />}
-        <span className="max-w-[160px] truncate">{modelLabel(active, selection.model)}</span>
-        <ChevronDown size={14} className="text-ink-secondary" />
+        <span className="max-w-[160px] truncate font-mono tracking-tight">{modelLabel(active, selection.model)}</span>
+        <CaretDown size={14} weight="bold" className="text-ink-secondary" />
       </button>
 
       {open && (
         <div
           data-model-picker-content
-          className="absolute right-0 top-full z-30 mt-2 flex w-[320px] overflow-hidden rounded-xl border border-hairline/50 bg-card shadow-2xl shadow-black/50"
+          className="absolute right-0 top-full z-30 mt-2 flex w-[320px] overflow-hidden rounded-xl border border-hairline bg-card"
         >
           {/* instance rail */}
-          <div className="flex flex-col gap-1 border-r border-hairline/40 bg-panel p-2">
+          <div className="flex flex-col gap-1 border-r border-hairline bg-panel p-2">
             {state.instances.map((instance) => {
               const unavailable =
                 instance.snapshot.state !== "available" || instance.snapshot.authenticated === false;
@@ -120,12 +120,26 @@ export function ModelPicker({ bot, className }: { bot: Bot; className?: string }
               <>
                 <div className="px-2 pb-1 pt-1">
                   <div className="text-[13px] font-semibold text-ink">{railInstance.displayName}</div>
-                  <div className="truncate text-[11px] text-ink-secondary">
-                    {railInstance.snapshot.state === "available" &&
-                    railInstance.snapshot.authenticated !== false
-                      ? (railInstance.snapshot.version ?? "ready")
-                      : (railInstance.snapshot.reason ?? "sign-in required")}
-                  </div>
+                  {/* A version string is metadata and reads as mono; a reason
+                      is a sentence written for the user and does not. */}
+                  {(() => {
+                    const healthy =
+                      railInstance.snapshot.state === "available" &&
+                      railInstance.snapshot.authenticated !== false;
+                    const version = healthy ? railInstance.snapshot.version : undefined;
+                    return (
+                      <div
+                        className={cn(
+                          "truncate text-[11px] text-ink-secondary",
+                          version && "font-mono tracking-tight",
+                        )}
+                      >
+                        {healthy
+                          ? (version ?? "ready")
+                          : (railInstance.snapshot.reason ?? "sign-in required")}
+                      </div>
+                    );
+                  })()}
                   {/* A working engine can still have something the user needs
                       to know — a bot pointed at a third-party endpoint is
                       "available" and is also sending that host an API key.
@@ -135,7 +149,7 @@ export function ModelPicker({ bot, className }: { bot: Bot; className?: string }
                     railInstance.snapshot.authenticated !== false &&
                     railInstance.snapshot.reason && (
                       <div className="mt-1 flex gap-1.5 rounded-lg border border-warning/25 bg-warning/10 px-2 py-1.5 text-[10.5px] leading-[1.4] text-warning">
-                        <TriangleAlert size={12} className="mt-px shrink-0" aria-hidden="true" />
+                        <Warning size={12} weight="bold" className="mt-px shrink-0" aria-hidden="true" />
                         <span>{railInstance.snapshot.reason}</span>
                       </div>
                     )}
@@ -144,7 +158,7 @@ export function ModelPicker({ bot, className }: { bot: Bot; className?: string }
                     rows and the reason hidden in a tooltip, at exactly the
                     moment the user is trying to fix it. Show the way out. */}
                 {(railInstance.snapshot.state !== "available" || needsSignIn(railInstance)) && (
-                  <div className="border-b border-hairline/40 px-2 pb-2.5">
+                  <div className="border-b border-hairline px-2 pb-2.5">
                     <EngineSetup instance={railInstance} />
                   </div>
                 )}
@@ -166,14 +180,14 @@ export function ModelPicker({ bot, className }: { bot: Bot; className?: string }
                       )}
                     >
                       <span className="flex min-w-0 items-center gap-2">
-                        <span className="truncate">{option.label}</span>
+                        <span className="truncate font-mono tracking-tight">{option.label}</span>
                         {option.id === railInstance.models.default && (
-                          <span className="shrink-0 rounded bg-inset px-1 py-px text-[10px] text-ink-secondary">
+                          <span className="shrink-0 rounded bg-inset px-1 py-px font-mono text-[10px] tracking-tight text-ink-secondary">
                             default
                           </span>
                         )}
                       </span>
-                      {current && <Check size={14} className="shrink-0 text-accent" />}
+                      {current && <Check size={14} weight="fill" className="shrink-0 text-accent" />}
                     </button>
                   );
                 })}

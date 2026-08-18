@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Loader2, Menu } from "lucide-react";
+import { List, Spinner } from "@phosphor-icons/react";
 import { StoreProvider, useStore } from "@/state/store";
 import { Onboarding } from "@/components/Onboarding";
 import { emailGateDone, initAnalytics } from "@/lib/analytics";
@@ -89,7 +89,7 @@ function Shell() {
         onClick={() => setDrawerOpen(true)}
         className="absolute left-3 top-3 z-30 rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink md:hidden"
       >
-        <Menu size={18} />
+        <List size={18} weight="bold" />
       </button>
       {drawerOpen && (
         <div
@@ -115,7 +115,7 @@ function Shell() {
         <ChatView bot={bot} />
       ) : (
         <main className="flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-3 bg-app text-ink-secondary">
-          <Loader2 size={20} className="animate-spin" />
+          <Spinner size={20} weight="fill" className="animate-spin" />
           <div className="text-[14px]">
             {state.connected ? "No bots yet" : "Connecting to the bot server…"}
           </div>

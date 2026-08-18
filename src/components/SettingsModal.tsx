@@ -3,7 +3,7 @@
 // is the stuff shared by every bot: who you are, your keys, and the
 // machine your bots can borrow.
 import { useEffect, useRef, useState } from "react";
-import { KeyRound, Monitor, User, Volume2, X } from "lucide-react";
+import { Key, Monitor, SpeakerHigh, User, X } from "@phosphor-icons/react";
 import { useStore, type AppSettingsSection } from "@/state/store";
 import { ApiKeyRow, DeepSeekOptions } from "./ApiKeys";
 import { useUpdaterState } from "@/lib/updater";
@@ -14,9 +14,9 @@ import { cn } from "@/lib/cn";
 
 const SECTIONS: Array<{ id: AppSettingsSection; label: string; icon: typeof User }> = [
   { id: "general", label: "General", icon: User },
-  { id: "connections", label: "Connections", icon: KeyRound },
+  { id: "connections", label: "Connections", icon: Key },
   { id: "computer", label: "Local VM", icon: Monitor },
-  { id: "voice", label: "Voice", icon: Volume2 },
+  { id: "voice", label: "Voice", icon: SpeakerHigh },
 ];
 
 /** Name + email, persisted to /api/config {profile} on blur. */
@@ -41,7 +41,7 @@ function ProfileFields() {
   };
 
   const inputClass =
-    "w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none";
+    "w-full rounded-lg border border-hairline bg-inset px-3 py-2 text-[14px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none";
   return (
     <div className="flex flex-col gap-3">
       <input value={name} onChange={(e) => setName(e.target.value)} onBlur={save} placeholder="Your name" className={inputClass} />
@@ -82,7 +82,7 @@ function UpdatesRow() {
           void updater.check();
         }}
         disabled={s?.status === "checking" || s?.status === "downloading"}
-        className="rounded-lg border border-hairline/40 px-3 py-1.5 text-[13px] text-ink hover:bg-raised disabled:opacity-40"
+        className="rounded-lg border border-hairline px-3 py-1.5 text-[13px] text-ink hover:bg-raised disabled:opacity-40"
       >
         {s?.status === "available"
           ? "Download"
@@ -153,10 +153,10 @@ export function SettingsModal() {
         aria-modal="true"
         aria-labelledby="app-settings-title"
         tabIndex={-1}
-        className="flex h-[560px] w-full max-w-[860px] overflow-hidden rounded-2xl border border-hairline/50 bg-panel shadow-2xl outline-none"
+        className="flex h-[560px] w-full max-w-[860px] overflow-hidden rounded-xl border border-hairline bg-panel outline-none"
       >
         {/* section nav */}
-        <nav className="flex w-[190px] shrink-0 flex-col gap-0.5 border-r border-hairline/40 p-3">
+        <nav className="flex w-[190px] shrink-0 flex-col gap-0.5 border-r border-hairline p-3">
           <div id="app-settings-title" className="px-2 pb-2 pt-1 text-[15px] font-semibold text-ink">
             Settings
           </div>
@@ -174,7 +174,7 @@ export function SettingsModal() {
               {label}
             </button>
           ))}
-          <div className="mt-auto border-t border-hairline/40 px-2 pt-3 text-[10.5px] leading-relaxed text-ink-secondary">
+          <div className="mt-auto border-t border-hairline px-2 pt-3 text-[10.5px] leading-relaxed text-ink-secondary">
             <div>Product Owner</div>
             <div className="font-medium text-ink">Umut Çelik</div>
             <div className="mt-1 flex gap-2">
@@ -198,7 +198,7 @@ export function SettingsModal() {
               aria-label="Close settings"
               className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
             >
-              <X size={18} />
+              <X size={18} weight="bold" />
             </button>
           </div>
 

@@ -4,7 +4,7 @@
 // completely functional until the first message, then fails with a raw spawn
 // error. Every engine unavailable is a setup state, not an error state, so it
 // gets a screen that says what to do rather than a bot that can't answer.
-import { Loader2, RefreshCw } from "lucide-react";
+import { ArrowClockwise, Spinner } from "@phosphor-icons/react";
 import { useState } from "react";
 import { useStore } from "@/state/store";
 import { EngineSetup, installCommandFor } from "@/components/EngineSetup";
@@ -48,7 +48,7 @@ export function NoEngines() {
 
         <div className="mt-6 flex flex-col gap-2.5">
           {engines.map((instance) => (
-            <div key={instance.instanceId} className="rounded-xl border border-hairline/40 bg-card p-3.5">
+            <div key={instance.instanceId} className="rounded-xl border border-hairline bg-card p-3.5">
               <div className="text-[14px] font-medium text-ink">{instance.displayName}</div>
               <EngineSetup instance={instance} className="mt-0.5" />
             </div>
@@ -60,7 +60,7 @@ export function NoEngines() {
           disabled={rechecking}
           className="mt-6 flex items-center gap-2 rounded-lg bg-raised px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-60"
         >
-          {rechecking ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+          {rechecking ? <Spinner size={14} weight="fill" className="animate-spin" /> : <ArrowClockwise size={14} weight="bold" />}
           {rechecking ? "Checking…" : "Check again"}
         </button>
       </div>

@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Check, AlertTriangle, Loader2, Mic } from "lucide-react";
+import { Check, Microphone, Spinner, Warning } from "@phosphor-icons/react";
 import { MausAvatar } from "./Avatar";
 import { identifyEmail, setEmailGateDone, track } from "@/lib/analytics";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
@@ -28,11 +28,11 @@ function StatusRow({
   return (
     <div className="flex items-start gap-3 rounded-xl bg-card p-3.5">
       <span
-        className={`mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full ${
+        className={`mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md ${
           ok ? "bg-[#00c97222] text-[#38d591]" : warn ? "bg-[#ff980022] text-[#ff9800]" : "bg-raised text-ink-secondary"
         }`}
       >
-        {ok ? <Check size={14} /> : <AlertTriangle size={13} />}
+        {ok ? <Check size={14} weight="fill" /> : <Warning size={13} weight="bold" />}
       </span>
       <div className="min-w-0 flex-1">
         <div className="text-[14px] font-medium text-ink">{title}</div>
@@ -141,10 +141,10 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-app">
-      <div className="flex w-[460px] flex-col rounded-2xl border border-hairline/40 bg-panel p-8">
+      <div className="flex w-[460px] flex-col rounded-xl border border-hairline bg-panel p-8">
         {step === 0 && (
           <div className="flex flex-col items-center">
-            <MausAvatar color="green" state="happy" size={72} />
+            <MausAvatar color="green" name="MausCrew" state="happy" size={72} />
             <h1 className="mt-4 text-[20px] font-semibold text-ink">Welcome to MausCrew</h1>
             <p className="mt-1.5 text-center text-[14px] leading-relaxed text-ink-secondary">
               Bots that do real work on their own computer. Tell us who you are
@@ -156,7 +156,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Your name"
-              className="mt-5 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2.5 text-[15px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
+              className="mt-5 w-full rounded-lg border border-hairline bg-inset px-3 py-2.5 text-[15px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
             />
             <input
               type="email"
@@ -164,12 +164,12 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
               onChange={(e) => setEmail(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && valid && saveProfile()}
               placeholder="you@example.com"
-              className="mt-3 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2.5 text-[15px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
+              className="mt-3 w-full rounded-lg border border-hairline bg-inset px-3 py-2.5 text-[15px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
             />
             <button
               onClick={saveProfile}
               disabled={!valid}
-              className="mt-3 w-full rounded-lg bg-accent py-2.5 text-[15px] font-medium text-white disabled:opacity-40"
+              className="mt-3 w-full rounded-lg bg-accent py-2.5 text-[15px] font-medium text-app disabled:opacity-40"
             >
               Continue
             </button>
@@ -194,7 +194,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             <div className="mt-4 flex flex-col gap-2.5">
               {!instances ? (
                 <div className="flex items-center gap-2 py-6 text-ink-secondary">
-                  <Loader2 size={16} className="animate-spin" /> Checking…
+                  <Spinner size={16} weight="fill" className="animate-spin" /> Checking…
                 </div>
               ) : (
                 <>
@@ -220,7 +220,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             </div>
             <button
               onClick={() => (capabilities.dictation.available ? setStep(2) : finish())}
-              className="mt-5 w-full rounded-lg bg-accent py-2.5 text-[15px] font-medium text-white"
+              className="mt-5 w-full rounded-lg bg-accent py-2.5 text-[15px] font-medium text-app"
             >
               Continue
             </button>
@@ -236,7 +236,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             <div className="mt-4 flex flex-col gap-2.5">
               <div className="flex items-center justify-between gap-3 rounded-xl bg-card p-3.5">
                 <div className="flex items-start gap-3">
-                  <Mic size={18} className="mt-0.5 shrink-0 text-ink-secondary" />
+                  <Microphone size={18} weight="bold" className="mt-0.5 shrink-0 text-ink-secondary" />
                   <div>
                     <div className="text-[14px] font-medium text-ink">Microphone & speech</div>
                     <div className="mt-0.5 text-[12.5px] text-ink-secondary">
@@ -245,7 +245,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                   </div>
                 </div>
                 {perms?.mic === "granted" ? (
-                  <Check size={16} className="shrink-0 text-[#38d591]" />
+                  <Check size={16} weight="fill" className="shrink-0 text-[#38d591]" />
                 ) : perms?.mic === "denied" || perms?.mic === "restricted" ? (
                   <button
                     onClick={() => window.mauscrew?.permOpenSettings?.("mic")}
@@ -270,7 +270,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                   triggers on the first real capture in the Computer panel,
                   which is the moment the user has context for the dialog. */}
             </div>
-            <button onClick={finish} className="mt-5 w-full rounded-lg bg-accent py-2.5 text-[15px] font-medium text-white">
+            <button onClick={finish} className="mt-5 w-full rounded-lg bg-accent py-2.5 text-[15px] font-medium text-app">
               Start using MausCrew
             </button>
             <button onClick={finish} className="mt-3 text-[12px] text-ink-secondary hover:text-ink">

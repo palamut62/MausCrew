@@ -1,5 +1,5 @@
 // Provider brand marks, keyed by driver kind. Dark-theme fills.
-import { Monitor } from "lucide-react";
+import { Monitor } from "@phosphor-icons/react";
 import { cn } from "@/lib/cn";
 
 export interface IconProps {

@@ -19,6 +19,8 @@ const KNOWN: ReadonlyArray<{ id: string; label: string }> = [{ id: DEFAULT_MODEL
 export const MODELS: ModelCatalog = {
   default: DEFAULT_MODEL,
   options: [...KNOWN],
+  // convenience list, not a whitelist — see the note at the top of the file
+  extensible: true,
 };
 
 /** Catalog for one configured instance: the known models plus the user's
@@ -27,7 +29,7 @@ export const MODELS: ModelCatalog = {
 export function catalogFor(defaultModel: string): ModelCatalog {
   const model = defaultModel || DEFAULT_MODEL;
   const options = KNOWN.some((m) => m.id === model) ? [...KNOWN] : [...KNOWN, { id: model, label: model }];
-  return { default: model, options };
+  return { default: model, options, extensible: true };
 }
 
 const DEFAULT_BASE_URL = "https://api.deepseek.com";
@@ -77,7 +79,9 @@ export async function discoverModels(input: DiscoverInput): Promise<ModelCatalog
     // and dropping it here would silently switch the bot's model.
     const model = defaultModel || DEFAULT_MODEL;
     if (!options.some((o) => o.id === model)) options.unshift({ id: model, label: model });
-    return { default: model, options };
+    // same reason the default survives above: an endpoint can serve more
+    // than it lists, so a discovered list is still not a whitelist
+    return { default: model, options, extensible: true };
   } catch {
     // timeout, DNS, TLS, malformed JSON — all the same answer: no news
     return null;

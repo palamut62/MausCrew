@@ -3,7 +3,7 @@
 // The voice list comes from the harness, which holds the key — the
 // renderer never talks to ElevenLabs itself.
 import { useEffect, useState } from "react";
-import { Check, Loader2, Volume2 } from "lucide-react";
+import { Check, SpeakerHigh, Spinner } from "@phosphor-icons/react";
 
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import { speaker } from "@/lib/tts";
@@ -80,14 +80,14 @@ export function VoiceSettings() {
             placeholder={configured ? "••••••••  (paste to replace)" : "Paste your ElevenLabs API key"}
             aria-label="ElevenLabs key"
             autoComplete="off"
-            className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
+            className="w-full rounded-lg border border-hairline bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
           />
           <button
             onClick={() => key.trim() && void save({ key: key.trim() })}
             disabled={saving || !key.trim()}
             className="flex w-[72px] shrink-0 items-center justify-center gap-1.5 rounded-lg bg-raised py-2 text-[13px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {saving ? <Loader2 size={13} className="animate-spin" /> : <><Check size={13} />Save</>}
+            {saving ? <Spinner size={13} weight="fill" className="animate-spin" /> : <><Check size={13} weight="fill" />Save</>}
           </button>
         </div>
         {!configured && (
@@ -110,7 +110,7 @@ export function VoiceSettings() {
               value={tts.voice}
               onChange={(e) => void save({ voice: e.target.value })}
               aria-label="Voice"
-              className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink focus:border-hairline focus:outline-none"
+              className="w-full rounded-lg border border-hairline bg-inset px-3 py-2 text-[13px] text-ink focus:border-hairline focus:outline-none"
             >
               <option value="">{loadingVoices ? "Loading voices…" : "Pick a voice"}</option>
               {voices.map((v) => (
@@ -127,7 +127,7 @@ export function VoiceSettings() {
               aria-label="Hear this voice"
               className="flex w-[72px] shrink-0 items-center justify-center gap-1.5 rounded-lg bg-raised py-2 text-[13px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <Volume2 size={14} /> Try
+              <SpeakerHigh size={14} weight="bold" /> Try
             </button>
           </div>
         </div>

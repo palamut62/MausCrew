@@ -1,6 +1,6 @@
 import { track } from "@/lib/analytics";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, Clock, Mic, Square, Users, X } from "lucide-react";
+import { ArrowUp, Clock, Microphone, Square, Users, X } from "@phosphor-icons/react";
 import { useStore, visibleMessages, type Bot, type Group } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { useComposerDraft } from "@/lib/drafts";
@@ -213,8 +213,8 @@ export function Composer({
       )}
       <div className="relative mx-auto max-w-[900px]">
         {queued && (
-          <div className="mb-2 flex items-center gap-2 rounded-lg border border-hairline/40 bg-panel px-3 py-2 text-[12.5px] text-ink-secondary">
-            <Clock size={13} className="shrink-0" />
+          <div className="mb-2 flex items-center gap-2 rounded-lg border border-hairline bg-panel px-3 py-2 text-[12.5px] text-ink-secondary">
+            <Clock size={13} weight="bold" className="shrink-0" />
             <span className="min-w-0 flex-1 truncate">
               Queued — sends when {busyName} finishes: “{queued}”
             </span>
@@ -223,7 +223,7 @@ export function Composer({
               aria-label="Discard queued message"
               className="rounded p-0.5 hover:bg-raised hover:text-ink"
             >
-              <X size={13} />
+              <X size={13} weight="bold" />
             </button>
           </div>
         )}
@@ -231,7 +231,7 @@ export function Composer({
           <div
             role="listbox"
             aria-label="Tag a bot"
-            className="absolute bottom-full left-2 z-20 mb-2 w-72 overflow-hidden rounded-xl border border-hairline/40 bg-raised shadow-lg"
+            className="absolute bottom-full left-2 z-20 mb-2 w-72 overflow-hidden rounded-xl border border-hairline bg-raised"
           >
             {candidates.map((peer, i) => (
               <button
@@ -248,16 +248,17 @@ export function Composer({
                 {peer.bot ? (
                   <MausAvatar
                     color={peer.bot.color}
+                    name={peer.name}
                     state={normalizeState(peer.bot.mascotExpression) ?? "happy"}
                     size={24}
                   />
                 ) : (
                   <span className="flex size-6 items-center justify-center rounded-full bg-raised text-ink-secondary">
-                    <Users size={14} aria-hidden="true" />
+                    <Users size={14} weight="bold" aria-hidden="true" />
                   </span>
                 )}
                 <span className="min-w-0 flex-1 truncate text-[14px] font-medium text-ink">{peer.name}</span>
-                <span className="shrink-0 text-xs text-ink-secondary">{peer.bot ? "Agent" : "Room"}</span>
+                <span className="shrink-0 font-mono text-xs tracking-tight text-ink-secondary">{peer.bot ? "Agent" : "Room"}</span>
               </button>
             ))}
           </div>
@@ -265,7 +266,7 @@ export function Composer({
         {/* An approval takes over the composer: you answer it before you
             can type again, so a waiting bot is impossible to miss. */}
         {approval && (
-          <div className="mb-2 overflow-hidden rounded-2xl border border-accent/40 bg-card">
+          <div className="mb-2 overflow-hidden rounded-xl border border-accent/40 bg-card">
             <PendingApprovalPanel pending={approval} count={approvals.length} index={0} />
             <PendingApprovalActions
               pending={approval}
@@ -283,7 +284,7 @@ export function Composer({
           onAdd={addAttachments}
           onRemove={removeAttachment}
         />
-        <div className="flex items-end gap-2 rounded-3xl border border-hairline/40 bg-raised/60 py-2 pl-3 pr-2">
+        <div className="flex items-end gap-2 rounded-xl border border-hairline bg-raised/60 focus-within:border-accent py-2 pl-3 pr-2">
         <textarea
           ref={inputRef}
           rows={1}
@@ -364,10 +365,10 @@ export function Composer({
               else if (bot) dispatch({ type: "interrupt", botId: bot.id });
             }}
             aria-label="Stop this turn"
-            className="flex size-8 shrink-0 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink"
+            className="flex size-8 shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink"
             title="Stop"
           >
-            <Square size={14} className="fill-current" />
+            <Square size={14} weight="fill" />
           </button>
         )}
         {!busy && !hasContent && capabilities.dictation.available && (
@@ -375,14 +376,14 @@ export function Composer({
             onClick={toggleMic}
             aria-label={recording ? "Stop dictation" : "Start dictation"}
             className={cn(
-              "flex size-8 shrink-0 items-center justify-center rounded-full",
+              "flex size-8 shrink-0 items-center justify-center rounded-md",
               recording
                 ? "animate-pulse bg-danger/20 text-danger"
                 : "text-ink-secondary hover:bg-raised hover:text-ink",
             )}
             title={recording ? "Stop dictation (Esc)" : "Dictate"}
           >
-            <Mic size={18} />
+            <Microphone size={18} weight={recording ? "fill" : "bold"} />
           </button>
         )}
         {hasContent && (
@@ -391,11 +392,11 @@ export function Composer({
             aria-label={busy ? "Queue message" : "Send message"}
             title={busy ? "Queue — sends when the bot finishes" : "Send"}
             className={cn(
-              "flex size-8 shrink-0 items-center justify-center rounded-full text-white",
-              busy ? "bg-raised text-ink-secondary hover:bg-raised-hover" : "bg-accent hover:brightness-110",
+              "flex size-8 shrink-0 items-center justify-center rounded-md",
+              busy ? "bg-raised text-ink-secondary hover:bg-raised-hover" : "bg-accent text-app hover:brightness-110",
             )}
           >
-            {busy ? <Clock size={15} /> : <ArrowUp size={17} />}
+            {busy ? <Clock size={15} weight="bold" /> : <ArrowUp size={17} weight="fill" />}
           </button>
         )}
         </div>
