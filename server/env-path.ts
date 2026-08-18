@@ -165,10 +165,18 @@ function whichWin(cli: string): string | null {
     return order.find(isFile) ?? null;
   };
   if (/[\\/]/.test(cli) || /^[a-zA-Z]:/.test(cli)) return probe(cli);
-  for (const dir of augmentedPath().split(delimiter)) {
-    if (!dir) continue;
-    const hit = probe(join(dir, cli));
+  const dirs = augmentedPath().split(delimiter).filter(Boolean);
+  // two passes, exactly like `where`: PATHEXT wins across the *whole* PATH
+  // before any bare name counts. Probing both per directory would let an
+  // extensionless stray early on PATH (there really is a 0-byte
+  // C:\Windows\system32\claude out there) shadow the real claude.cmd later.
+  for (const dir of dirs) {
+    const hit = exts.map((e) => join(dir, cli) + e).find(isFile);
     if (hit) return hit;
+  }
+  for (const dir of dirs) {
+    const bare = join(dir, cli);
+    if (isFile(bare)) return bare;
   }
   return null;
 }

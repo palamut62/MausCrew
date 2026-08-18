@@ -13,8 +13,18 @@ export function isPushToTalkPress(event: ModifierEvent): boolean {
   return modifier && event.altKey && event.ctrlKey && !event.repeat;
 }
 
-/** Hold Control + Option to replace automatic endpointing with a manually
- * finalized utterance. The ordinary call listener remains the default. */
+/** The held chord, named the way this OS names it. The binding is the same
+ * physical keys everywhere (altKey + ctrlKey), but "Option" is a Mac key cap:
+ * printing it on Windows and Linux tells the user to press a key they do not
+ * have. */
+// Read through globalThis: this module is imported by node-environment unit
+// tests where `window` is not declared at all.
+export const PUSH_TO_TALK_LABEL =
+  globalThis.window?.mauscrew?.platform === "darwin" ? "Control + Option" : "Ctrl + Alt";
+
+/** Hold the push-to-talk chord to replace automatic endpointing with a
+ * manually finalized utterance. The ordinary call listener remains the
+ * default. */
 export function usePushToTalk(targetId: string, enabled: boolean, onError: () => void): boolean {
   const [active, setActive] = useState(false);
   const held = useRef(false);

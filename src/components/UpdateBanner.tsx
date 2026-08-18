@@ -3,7 +3,7 @@
 // and while idle/checking; appears only when actionable: an update to
 // download, a download in progress, a restart to apply, or an error.
 import { useEffect, useState } from "react";
-import { ArrowDownToLine, Loader2, RefreshCw, Sparkles, X } from "lucide-react";
+import { ArrowClockwise, ArrowLineDown, Sparkle, Spinner, X } from "@phosphor-icons/react";
 import { useUpdaterState } from "@/lib/updater";
 import { cn } from "@/lib/cn";
 
@@ -11,7 +11,7 @@ import { cn } from "@/lib/cn";
 // flat raised grey — the "I heard you" the click needs while the main process
 // gets going.
 const primaryAction =
-  "flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-accent py-1.5 text-[13px] font-medium text-white transition-colors disabled:cursor-default disabled:bg-raised disabled:text-ink-secondary";
+  "flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-accent py-1.5 text-[13px] font-medium text-app transition-colors disabled:cursor-default disabled:bg-raised disabled:text-ink-secondary";
 
 // electron-updater surfaces failures as a whole HTTP dump — status line,
 // every response header, stack trace. That is unreadable in a 300px popup,
@@ -72,10 +72,10 @@ export function UpdateBanner() {
             : friendlyError(s.message);
 
   return (
-    <div className="animate-panel-in fixed bottom-4 left-4 z-50 w-[300px] rounded-xl border border-hairline/40 bg-panel p-3.5 shadow-2xl shadow-black/50">
+    <div className="animate-panel-in fixed bottom-4 left-4 z-50 w-[300px] rounded-xl border border-hairline bg-panel p-3.5">
       <div className="flex items-start gap-2.5">
-        <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-accent/15 text-accent">
-          <Sparkles size={14} />
+        <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md bg-accent/15 text-accent">
+          <Sparkle size={14} weight="bold" />
         </span>
         <div className="min-w-0 flex-1">
           <div className="text-[13.5px] font-semibold text-ink">{title}</div>
@@ -89,7 +89,7 @@ export function UpdateBanner() {
             className="shrink-0 rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
             title="Dismiss"
           >
-            <X size={14} />
+            <X size={14} weight="bold" />
           </button>
         )}
       </div>
@@ -114,7 +114,7 @@ export function UpdateBanner() {
             disabled
             className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-raised py-1.5 text-[13px] font-medium text-ink-secondary"
           >
-            <Loader2 size={13} className="animate-spin" /> Restarting…
+            <Spinner size={13} weight="fill" className="animate-spin" /> Restarting…
           </button>
         </div>
       )}
@@ -132,11 +132,11 @@ export function UpdateBanner() {
             >
               {pending === "download" ? (
                 <>
-                  <Loader2 size={13} className="animate-spin" /> Starting…
+                  <Spinner size={13} weight="fill" className="animate-spin" /> Starting…
                 </>
               ) : (
                 <>
-                  <ArrowDownToLine size={13} /> Download
+                  <ArrowLineDown size={13} weight="bold" /> Download
                 </>
               )}
             </button>
@@ -152,11 +152,11 @@ export function UpdateBanner() {
             >
               {pending === "install" ? (
                 <>
-                  <Loader2 size={13} className="animate-spin" /> Restarting…
+                  <Spinner size={13} weight="fill" className="animate-spin" /> Restarting…
                 </>
               ) : (
                 <>
-                  <RefreshCw size={13} /> Restart to update
+                  <ArrowClockwise size={13} weight="bold" /> Restart to update
                 </>
               )}
             </button>
@@ -172,7 +172,7 @@ export function UpdateBanner() {
             >
               {pending === "check" ? (
                 <>
-                  <Loader2 size={13} className="animate-spin" /> Checking…
+                  <Spinner size={13} weight="fill" className="animate-spin" /> Checking…
                 </>
               ) : (
                 "Try again"

@@ -3,7 +3,7 @@
 // Composio API key is configured, a curated set otherwise. Icons resolve
 // logo → favicon → monogram.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, RefreshCw, X } from "lucide-react";
+import { ArrowClockwise, Spinner, X } from "@phosphor-icons/react";
 import { api, useStore } from "@/state/store";
 import { cn } from "@/lib/cn";
 
@@ -164,7 +164,7 @@ export function PluginsPanel() {
         aria-modal="true"
         aria-labelledby="connected-apps-title"
         tabIndex={-1}
-        className="animate-pop-in flex max-h-[calc(100dvh-2.5rem)] w-full max-w-[560px] flex-col overflow-hidden rounded-2xl border border-hairline/50 bg-panel p-5 shadow-2xl"
+        className="animate-pop-in flex max-h-[calc(100dvh-2.5rem)] w-full max-w-[560px] flex-col overflow-hidden rounded-xl border border-hairline bg-panel p-5"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">
@@ -175,14 +175,14 @@ export function PluginsPanel() {
               className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
               title="Refresh connection status"
             >
-              <RefreshCw size={15} className={cn(refreshing && "animate-spin")} />
+              <ArrowClockwise size={15} weight="bold" className={cn(refreshing && "animate-spin")} />
             </button>
             <button
               onClick={() => dispatch({ type: "togglePlugins", open: false })}
               aria-label="Close connected apps"
               className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
             >
-              <X size={18} />
+              <X size={18} weight="bold" />
             </button>
           </div>
         </div>
@@ -226,13 +226,13 @@ export function PluginsPanel() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search apps"
-          className="mt-3 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
+          className="mt-3 w-full rounded-lg border border-hairline bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
         />
 
-        <div className="mt-3 min-h-0 flex-1 overflow-y-auto rounded-xl border border-hairline/40">
+        <div className="mt-3 min-h-0 flex-1 overflow-y-auto rounded-xl border border-hairline">
           {cards === null ? (
             <div className="flex items-center justify-center gap-2 py-8 text-[13px] text-ink-secondary">
-              <Loader2 size={14} className="animate-spin" /> Loading catalog…
+              <Spinner size={14} weight="fill" className="animate-spin" /> Loading catalog…
             </div>
           ) : (
             visible.map((card, i) => {
@@ -243,7 +243,7 @@ export function PluginsPanel() {
                   key={card.slug}
                   className={cn(
                     "flex items-center gap-3 bg-card px-4 py-3",
-                    i > 0 && "border-t border-hairline/40",
+                    i > 0 && "border-t border-hairline",
                   )}
                 >
                   <ServiceIcon card={card} />
@@ -265,7 +265,7 @@ export function PluginsPanel() {
                     )}
                   >
                     {busy ? (
-                      <Loader2 size={13} className="mx-auto animate-spin" />
+                      <Spinner size={13} weight="fill" className="mx-auto animate-spin" />
                     ) : connected ? (
                       "Disconnect"
                     ) : (

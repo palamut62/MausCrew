@@ -64,4 +64,16 @@ describe("DeepSeek Harness configuration", () => {
     });
     expect((instances.deepseek.config as { baseUrl: string }).baseUrl).toBe("https://this-bot-only.example");
   });
+
+  it("ships a default deepseek instance so the engine reaches the picker", () => {
+    // Without a default entry the driver is registered but /api/instances
+    // never lists it, and no amount of key-saving in Settings makes DeepSeek
+    // selectable.
+    const instances = instanceConfigs({ deepseekHarness: { apiKey: "sk" } });
+    expect(instances.deepseek).toBeDefined();
+    expect(instances.deepseek.driver).toBe("deepseek-harness");
+    expect(instances.deepseek.environment).toEqual({ DEEPSEEK_API_KEY: "sk" });
+    // appended last — the existing engine order in the picker stays put
+    expect(Object.keys(instances).at(-1)).toBe("deepseek");
+  });
 });

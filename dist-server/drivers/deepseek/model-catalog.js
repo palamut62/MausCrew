@@ -3,6 +3,8 @@ const KNOWN = [{ id: DEFAULT_MODEL, label: "DeepSeek V4 Flash" }];
 export const MODELS = {
     default: DEFAULT_MODEL,
     options: [...KNOWN],
+    // convenience list, not a whitelist — see the note at the top of the file
+    extensible: true,
 };
 /** Catalog for one configured instance: the known models plus the user's
  * own default when it is something else, so a custom endpoint's model shows
@@ -10,7 +12,7 @@ export const MODELS = {
 export function catalogFor(defaultModel) {
     const model = defaultModel || DEFAULT_MODEL;
     const options = KNOWN.some((m) => m.id === model) ? [...KNOWN] : [...KNOWN, { id: model, label: model }];
-    return { default: model, options };
+    return { default: model, options, extensible: true };
 }
 const DEFAULT_BASE_URL = "https://api.deepseek.com";
 const DISCOVERY_TIMEOUT_MS = 5_000;
@@ -52,7 +54,9 @@ export async function discoverModels(input) {
         const model = defaultModel || DEFAULT_MODEL;
         if (!options.some((o) => o.id === model))
             options.unshift({ id: model, label: model });
-        return { default: model, options };
+        // same reason the default survives above: an endpoint can serve more
+        // than it lists, so a discovered list is still not a whitelist
+        return { default: model, options, extensible: true };
     }
     catch {
         // timeout, DNS, TLS, malformed JSON — all the same answer: no news

@@ -2,7 +2,7 @@
 // ~/.mauscrew/config.json and hot-reloads the provider fleet; secrets
 // are write-only — GET /api/config returns configured flags, never values.
 import { useEffect, useId, useRef, useState } from "react";
-import { Check, CircleHelp, ExternalLink, Loader2, TriangleAlert } from "lucide-react";
+import { ArrowSquareOut, Check, Question, Spinner, Warning } from "@phosphor-icons/react";
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import { cn } from "@/lib/cn";
 
@@ -110,19 +110,19 @@ function CredentialHelp({ section }: { section: ConfigSection }) {
         onClick={() => setOpen((current) => !current)}
         className="flex size-6 items-center justify-center rounded-md text-ink-secondary outline-none transition-colors hover:bg-raised hover:text-ink focus-visible:ring-2 focus-visible:ring-accent/70"
       >
-        <CircleHelp size={14} aria-hidden="true" />
+        <Question size={14} weight="bold" aria-hidden="true" />
       </button>
       {open && (
         <div
           id={popoverId}
           role="group"
           aria-label={`${credential.label} help`}
-          className="animate-pop-in absolute right-0 z-30 mt-1.5 w-[270px] rounded-xl border border-hairline bg-panel p-3 text-left shadow-2xl"
+          className="animate-pop-in absolute right-0 z-30 mt-1.5 w-[270px] rounded-xl border border-hairline bg-panel p-3 text-left"
         >
           <div className="text-[12px] leading-[1.45] text-ink-secondary">{credential.description}</div>
           {credential.warning && (
             <div className="mt-2 flex gap-1.5 rounded-lg border border-warning/25 bg-warning/10 px-2 py-1.5 text-[11px] leading-[1.4] text-warning">
-              <TriangleAlert size={13} className="mt-px shrink-0" aria-hidden="true" />
+              <Warning size={13} weight="bold" className="mt-px shrink-0" aria-hidden="true" />
               <span>{credential.warning}</span>
             </div>
           )}
@@ -134,7 +134,7 @@ function CredentialHelp({ section }: { section: ConfigSection }) {
             className="mt-2.5 flex items-center gap-1.5 text-[12px] font-medium text-accent hover:underline focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
           >
             {credential.linkLabel}
-            <ExternalLink size={12} aria-hidden="true" />
+            <ArrowSquareOut size={12} weight="bold" aria-hidden="true" />
           </a>
         </div>
       )}
@@ -185,7 +185,7 @@ export function ApiKeyRow({
         <span className={cn("size-1.5 rounded-full", configured ? "bg-success" : "bg-raised-hover")} />
         <span>{credential.label}</span>
         {credential.optional && (
-          <span className="rounded bg-raised px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-ink-secondary">
+          <span className="rounded bg-raised px-1.5 py-0.5 font-mono text-[10px] font-medium uppercase tracking-wide text-ink-secondary">
             Optional
           </span>
         )}
@@ -201,7 +201,7 @@ export function ApiKeyRow({
           placeholder={configured ? "••••••••  (paste to replace)" : credential.placeholder}
           aria-label={credential.label}
           autoComplete="off"
-          className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
+          className="w-full rounded-lg border border-hairline bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
         />
         <button
           onClick={save}
@@ -215,7 +215,7 @@ export function ApiKeyRow({
           )}
           title={clearing ? "Remove the saved key" : "Save"}
         >
-          {saving ? <Loader2 size={13} className="animate-spin" /> : clearing ? "Clear" : <><Check size={13} />Save</>}
+          {saving ? <Spinner size={13} weight="fill" className="animate-spin" /> : clearing ? "Clear" : <><Check size={13} weight="fill" />Save</>}
         </button>
       </div>
       {error && <div className="mt-1 text-[12px] text-danger">{error}</div>}
@@ -282,19 +282,19 @@ export function DeepSeekOptions() {
             onKeyDown={(e) => e.key === "Enter" && put({ baseUrl: trimmed })}
             placeholder="https://api.deepseek.com (default)"
             autoComplete="off"
-            className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
+            className="w-full rounded-lg border border-hairline bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
           />
           <button
             onClick={() => put({ baseUrl: trimmed })}
             disabled={saving || (baseUrl === null)}
             className="flex w-[72px] shrink-0 items-center justify-center gap-1.5 rounded-lg bg-raised py-2 text-[13px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {saving ? <Loader2 size={13} className="animate-spin" /> : <><Check size={13} />Save</>}
+            {saving ? <Spinner size={13} weight="fill" className="animate-spin" /> : <><Check size={13} weight="fill" />Save</>}
           </button>
         </div>
         {custom && (
           <div className="mt-1.5 flex gap-1.5 rounded-lg border border-warning/25 bg-warning/10 px-2 py-1.5 text-[11px] leading-[1.4] text-warning">
-            <TriangleAlert size={13} className="mt-px shrink-0" aria-hidden="true" />
+            <Warning size={13} weight="bold" className="mt-px shrink-0" aria-hidden="true" />
             <span>
               Your DeepSeek API key will be sent to this host{plaintext ? " over plain HTTP, unencrypted" : ""}. Only
               use an endpoint you trust.
@@ -312,7 +312,7 @@ export function DeepSeekOptions() {
           value={runtimeStrategy}
           disabled={saving}
           onChange={(e) => put({ runtimeStrategy: e.target.value })}
-          className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink focus:border-hairline focus:outline-none disabled:opacity-50"
+          className="w-full rounded-lg border border-hairline bg-inset px-3 py-2 text-[13px] text-ink focus:border-hairline focus:outline-none disabled:opacity-50"
         >
           <option value="system">System Python</option>
           <option value="managed">MausCrew managed venv</option>
@@ -333,7 +333,7 @@ export function DeepSeekOptions() {
           value={sandboxMode}
           disabled={saving}
           onChange={(e) => put({ sandboxMode: e.target.value })}
-          className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink focus:border-hairline focus:outline-none disabled:opacity-50"
+          className="w-full rounded-lg border border-hairline bg-inset px-3 py-2 text-[13px] text-ink focus:border-hairline focus:outline-none disabled:opacity-50"
         >
           <option value="read-only">Read only</option>
           <option value="workspace-write">Workspace write (default)</option>
@@ -346,7 +346,7 @@ export function DeepSeekOptions() {
         </div>
         {sandboxMode === "danger-full-access" && (
           <div className="mt-1.5 flex gap-1.5 rounded-lg border border-warning/25 bg-warning/10 px-2 py-1.5 text-[11px] leading-[1.4] text-warning">
-            <TriangleAlert size={13} className="mt-px shrink-0" aria-hidden="true" />
+            <Warning size={13} weight="bold" className="mt-px shrink-0" aria-hidden="true" />
             <span>The runtime can modify files outside the workspace after you approve a tool. Use only when necessary.</span>
           </div>
         )}
@@ -361,7 +361,7 @@ export function DeepSeekOptions() {
           value={telemetry}
           disabled={saving}
           onChange={(e) => put({ telemetry: e.target.value })}
-          className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink focus:border-hairline focus:outline-none disabled:opacity-50"
+          className="w-full rounded-lg border border-hairline bg-inset px-3 py-2 text-[13px] text-ink focus:border-hairline focus:outline-none disabled:opacity-50"
         >
           <option value="off">Off — send nothing (default)</option>
           <option value="feedback-only">Feedback only</option>

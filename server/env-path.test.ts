@@ -218,6 +218,37 @@ winOnly("resolveCli (Windows)", () => {
     expect(resolved.args).toEqual(["--mcp-config", payload]);
   });
 
+  // regression: the bare-name fallback used to run per directory, so an
+  // extensionless stray early on PATH beat the real .cmd further down
+  it("prefers a PATHEXT hit later on PATH over an extensionless file earlier", () => {
+    const dirA = mkdtempSync(join(tmpdir(), "mauscrew-patha-"));
+    const dirB = mkdtempSync(join(tmpdir(), "mauscrew-pathb-"));
+    try {
+      writeFileSync(join(dirA, "ombfaketool"), "");
+      writeFileSync(join(dirB, "ombfaketool.cmd"), "@ECHO OFF\ncustom-launcher %*\n");
+      process.env.MAUSCREW_EXTRA_PATH = [dirA, dirB].join(delimiter);
+      resetPathCacheForTests();
+      expect(resolveCli("ombfaketool", []).command.toLowerCase()).toBe(join(dirB, "ombfaketool.cmd").toLowerCase());
+    } finally {
+      rmSync(dirA, { recursive: true, force: true });
+      rmSync(dirB, { recursive: true, force: true });
+    }
+  });
+
+  it("still falls back to the extensionless file when no PATHEXT hit exists anywhere", () => {
+    const dirA = mkdtempSync(join(tmpdir(), "mauscrew-patha-"));
+    const dirB = mkdtempSync(join(tmpdir(), "mauscrew-pathb-"));
+    try {
+      writeFileSync(join(dirB, "ombfaketool"), "");
+      process.env.MAUSCREW_EXTRA_PATH = [dirA, dirB].join(delimiter);
+      resetPathCacheForTests();
+      expect(resolveCli("ombfaketool", []).command).toBe(join(dirB, "ombfaketool"));
+    } finally {
+      rmSync(dirA, { recursive: true, force: true });
+      rmSync(dirB, { recursive: true, force: true });
+    }
+  });
+
   it("hands an unknown CLI back untouched so spawn reports its own ENOENT", () => {
     onPath();
     expect(resolveCli("definitely-not-installed", ["-p"])).toEqual({
