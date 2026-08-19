@@ -1310,6 +1310,13 @@ function configStatus() {
       sandboxMode: cfg.deepseekHarness?.sandboxMode ?? "workspace-write",
       runtimeStrategy: cfg.deepseekHarness?.runtimeStrategy ?? "bundled",
     },
+    // Same split for the Claude gateway: token configured-or-not, endpoint and
+    // model list echoed so the form can show what it is pointed at.
+    claudeGateway: {
+      configured: Boolean(cfg.claudeGateway?.authToken),
+      baseUrl: cfg.claudeGateway?.baseUrl ?? "",
+      models: cfg.claudeGateway?.models ?? [],
+    },
     // the chosen voice is a setting, not a secret; the key is reported the
     // same configured-or-not way as every other credential
     tts: tts.describeVoice(cfg),
@@ -2454,8 +2461,47 @@ const server = createServer(async (req, res) => {
           return json(res, 400, { error: "deepseekHarness.runtimeStrategy must be system, managed or bundled" });
         }
       }
+      const rawGateway = body.claudeGateway;
+      if (
+        rawGateway !== undefined
+        && (rawGateway === null || typeof rawGateway !== "object" || Array.isArray(rawGateway))
+      ) {
+        return json(res, 400, { error: "claudeGateway must be an object" });
+      }
+      if (rawGateway) {
+        const gw = rawGateway as Record<string, unknown>;
+        for (const field of ["baseUrl", "authToken"] as const) {
+          if (Object.prototype.hasOwnProperty.call(gw, field) && typeof gw[field] !== "string") {
+            return json(res, 400, { error: `claudeGateway.${field} must be a string` });
+          }
+        }
+        // Deliberately stricter than the DeepSeek endpoint check, which only
+        // warns about plaintext: this token rides an Authorization header on
+        // every turn, and the driver's own decodeConfig refuses http off
+        // loopback. Accepting it here would persist a value that turns the
+        // instance into a shadow at load time, with the error nowhere near
+        // the field that caused it.
+        if (typeof gw.baseUrl === "string" && gw.baseUrl.trim()) {
+          let parsed: URL;
+          try {
+            parsed = new URL(gw.baseUrl.trim());
+          } catch {
+            return json(res, 400, { error: `claudeGateway.baseUrl is not a URL: ${gw.baseUrl}` });
+          }
+          const loopback =
+            parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost" || parsed.hostname === "[::1]";
+          if (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && loopback)) {
+            return json(res, 400, { error: "claudeGateway.baseUrl must be https (or http on loopback)" });
+          }
+        }
+        if (Object.prototype.hasOwnProperty.call(gw, "models")) {
+          if (!Array.isArray(gw.models) || gw.models.some((m) => typeof m !== "string")) {
+            return json(res, 400, { error: "claudeGateway.models must be an array of strings" });
+          }
+        }
+      }
       const patch: Record<string, object> = {};
-      for (const key of ["xai", "composio", "box", "opencodeGo", "deepseekHarness", "tts", "profile"] as const) {
+      for (const key of ["xai", "composio", "box", "opencodeGo", "deepseekHarness", "claudeGateway", "tts", "profile"] as const) {
         if (body[key] && typeof body[key] === "object") patch[key] = body[key];
       }
       if (!Object.keys(patch).length) return json(res, 400, { error: "nothing to save" });
