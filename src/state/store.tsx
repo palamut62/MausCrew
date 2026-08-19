@@ -228,6 +228,10 @@ export interface InstanceInfo {
   models: { default: string; options: Array<{ id: string; label: string }> };
   capabilities?: { computerMcp?: boolean; agentsMcp?: boolean; effortLevels?: readonly EffortLevel[] };
   install?: EngineInstall;
+  /** A user-added Anthropic-compatible gateway rather than a built-in engine.
+   * It rides the claudeAgent driver, so this is what stops the UI from
+   * presenting somebody's DeepSeek endpoint as Claude. */
+  gateway?: boolean;
 }
 
 export type AppSettingsSection = "general" | "connections" | "voice" | "computer";

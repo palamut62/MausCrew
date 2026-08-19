@@ -13,7 +13,7 @@ import * as box from "./box.js";
 import * as composio from "./composio.js";
 import { chiefOfStaffSystemPrompt } from "./chief-of-staff.js";
 import { containerComputerAction, containerComputerMcp, containerComputerScreenshot, containerComputerStatus, setupCommands, } from "./container-computer.js";
-import { ensureDirs, instanceConfigs, loadConfig, saveConfig, EVENTS_DIR, NATIVE_DIR } from "./config.js";
+import { claudeGateways, ensureDirs, gatewayInstanceId, instanceConfigs, loadConfig, saveConfig, EVENTS_DIR, NATIVE_DIR, } from "./config.js";
 import { resetPathCache } from "./env-path.js";
 import { buildNotification } from "./notify.js";
 import { isEffortLevel } from "./contracts.js";
@@ -205,6 +205,11 @@ const sseClients = new Set();
  * inside the SSE `id:` field, which means a browser EventSource resumes
  * correctly through its own Last-Event-ID with no client code at all. */
 const STREAM_ID = randomUUID().slice(0, 8);
+/** Full-size frames parked for the browser to fetch by URL (POST /api/frames).
+ * In memory and short-lived on purpose: these are pictures of the user's
+ * desktop, so they should not outlive the moment they were opened. */
+const parkedFrames = new Map();
+const PARKED_FRAME_TTL_MS = 10 * 60 * 1000;
 const REPLAY_MAX = 500;
 let lastSeq = 0;
 const replayBuffer = [];
@@ -1225,13 +1230,18 @@ function configStatus() {
             sandboxMode: cfg.deepseekHarness?.sandboxMode ?? "workspace-write",
             runtimeStrategy: cfg.deepseekHarness?.runtimeStrategy ?? "bundled",
         },
-        // Same split for the Claude gateway: token configured-or-not, endpoint and
-        // model list echoed so the form can show what it is pointed at.
-        claudeGateway: {
-            configured: Boolean(cfg.claudeGateway?.authToken),
-            baseUrl: cfg.claudeGateway?.baseUrl ?? "",
-            models: cfg.claudeGateway?.models ?? [],
-        },
+        // Same split for the Claude gateways: token configured-or-not, endpoint,
+        // label and model list echoed so the form can show what each is pointed
+        // at. instanceId is echoed too — it is what the picker routes by, and
+        // deriving it a second time in the renderer is how the two drift apart.
+        claudeGateways: claudeGateways(cfg).map((gw) => ({
+            id: gw.id,
+            instanceId: gatewayInstanceId(gw.id),
+            label: gw.label ?? "",
+            baseUrl: gw.baseUrl,
+            models: gw.models ?? [],
+            configured: Boolean(gw.authToken),
+        })),
         // the chosen voice is a setting, not a secret; the key is reported the
         // same configured-or-not way as every other credential
         tts: tts.describeVoice(cfg),
@@ -2293,6 +2303,48 @@ const server = createServer(async (req, res) => {
             localVmIdle.touch();
             return json(res, 200, { image: await containerComputerScreenshot() });
         }
+        // ── full-size frame handoff ────────────────────────────────────────
+        // The panel preview is a thumbnail, and a desktop screenshot is exactly
+        // the thing you need to look at closely. The renderer cannot hand a data
+        // URL to the browser — Electron routes window.open through
+        // shell.openExternal, and no browser will open a blob or data URL from
+        // another process — so the frame is parked here and opened by real URL.
+        if (method === "POST" && path === "/api/frames") {
+            const body = await readBody(req);
+            const dataUrl = typeof body.dataUrl === "string" ? body.dataUrl : "";
+            const match = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
+            if (!match)
+                return json(res, 400, { error: "dataUrl must be a base64 image data URL" });
+            const bytes = Buffer.from(match[2], "base64");
+            if (bytes.byteLength > 32 * 1024 * 1024)
+                return json(res, 413, { error: "frame too large" });
+            const id = randomUUID();
+            parkedFrames.set(id, { mime: match[1], bytes, at: Date.now() });
+            // Bounded on both axes so a long session cannot accumulate desktops in
+            // memory: oldest evicted past the cap, and everything expires anyway.
+            for (const [key, frame] of parkedFrames) {
+                if (parkedFrames.size <= 8 && Date.now() - frame.at < PARKED_FRAME_TTL_MS)
+                    break;
+                parkedFrames.delete(key);
+            }
+            return json(res, 200, { url: `/frames/${id}` });
+        }
+        if (method === "GET" && path.startsWith("/frames/")) {
+            const frame = parkedFrames.get(path.slice("/frames/".length));
+            if (!frame || Date.now() - frame.at > PARKED_FRAME_TTL_MS) {
+                res.writeHead(404, { "content-type": "text/plain" });
+                return res.end("this frame has expired — take a new screenshot");
+            }
+            res.writeHead(200, {
+                "content-type": frame.mime,
+                "content-length": String(frame.bytes.byteLength),
+                // A screenshot of someone's desktop is not something to leave in the
+                // browser cache or hand to a referrer.
+                "cache-control": "no-store",
+                "referrer-policy": "no-referrer",
+            });
+            return res.end(frame.bytes);
+        }
         // identity handshake for the packaged app's port fallback: the forked
         // child proves it is OURS by echoing its pid (a stray dev server has
         // the same API shape but a different pid)
@@ -2373,45 +2425,89 @@ const server = createServer(async (req, res) => {
                     return json(res, 400, { error: "deepseekHarness.runtimeStrategy must be system, managed or bundled" });
                 }
             }
-            const rawGateway = body.claudeGateway;
-            if (rawGateway !== undefined
-                && (rawGateway === null || typeof rawGateway !== "object" || Array.isArray(rawGateway))) {
-                return json(res, 400, { error: "claudeGateway must be an object" });
-            }
-            if (rawGateway) {
-                const gw = rawGateway;
-                for (const field of ["baseUrl", "authToken"]) {
-                    if (Object.prototype.hasOwnProperty.call(gw, field) && typeof gw[field] !== "string") {
-                        return json(res, 400, { error: `claudeGateway.${field} must be a string` });
-                    }
+            // The whole list arrives at once, because removing a gateway is
+            // expressed by its absence. Tokens are the exception: the form never
+            // receives them, so an entry that sends no token keeps the stored one
+            // — otherwise every unrelated edit would silently clear the secret.
+            const rawGateways = body.claudeGateways;
+            let gatewaysPatch;
+            if (rawGateways !== undefined) {
+                if (!Array.isArray(rawGateways)) {
+                    return json(res, 400, { error: "claudeGateways must be an array" });
                 }
-                // Deliberately stricter than the DeepSeek endpoint check, which only
-                // warns about plaintext: this token rides an Authorization header on
-                // every turn, and the driver's own decodeConfig refuses http off
-                // loopback. Accepting it here would persist a value that turns the
-                // instance into a shadow at load time, with the error nowhere near
-                // the field that caused it.
-                if (typeof gw.baseUrl === "string" && gw.baseUrl.trim()) {
+                const stored = new Map(claudeGateways(cfg).map((gw) => [gw.id, gw]));
+                const seen = new Set();
+                gatewaysPatch = [];
+                for (const raw of rawGateways) {
+                    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+                        return json(res, 400, { error: "each claudeGateways entry must be an object" });
+                    }
+                    const gw = raw;
+                    for (const field of ["id", "label", "baseUrl", "authToken"]) {
+                        if (Object.prototype.hasOwnProperty.call(gw, field) && typeof gw[field] !== "string") {
+                            return json(res, 400, { error: `claudeGateways[].${field} must be a string` });
+                        }
+                    }
+                    const id = typeof gw.id === "string" ? gw.id.trim() : "";
+                    // Restricted because it becomes an instance id, which is a routing
+                    // key stored on every bot that selects it and part of a filesystem
+                    // path in places — a free-form string would leak into both.
+                    if (!/^[a-z0-9][a-z0-9-]{0,31}$/.test(id)) {
+                        return json(res, 400, {
+                            error: "claudeGateways[].id must be 1-32 chars of a-z, 0-9 or - and start alphanumeric",
+                        });
+                    }
+                    if (seen.has(id))
+                        return json(res, 400, { error: `duplicate claudeGateways id: ${id}` });
+                    seen.add(id);
+                    const baseUrl = typeof gw.baseUrl === "string" ? gw.baseUrl.trim() : "";
+                    if (!baseUrl)
+                        return json(res, 400, { error: `claudeGateways[${id}].baseUrl is required` });
+                    // Deliberately stricter than the DeepSeek endpoint check, which only
+                    // warns about plaintext: this token rides an Authorization header on
+                    // every turn, and the driver's own decodeConfig refuses http off
+                    // loopback. Accepting it here would persist a value that turns the
+                    // instance into a shadow at load time, with the error nowhere near
+                    // the field that caused it.
                     let parsed;
                     try {
-                        parsed = new URL(gw.baseUrl.trim());
+                        parsed = new URL(baseUrl);
                     }
                     catch {
-                        return json(res, 400, { error: `claudeGateway.baseUrl is not a URL: ${gw.baseUrl}` });
+                        return json(res, 400, { error: `claudeGateways[${id}].baseUrl is not a URL: ${baseUrl}` });
                     }
                     const loopback = parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost" || parsed.hostname === "[::1]";
                     if (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && loopback)) {
-                        return json(res, 400, { error: "claudeGateway.baseUrl must be https (or http on loopback)" });
+                        return json(res, 400, {
+                            error: `claudeGateways[${id}].baseUrl must be https (or http on loopback)`,
+                        });
                     }
-                }
-                if (Object.prototype.hasOwnProperty.call(gw, "models")) {
-                    if (!Array.isArray(gw.models) || gw.models.some((m) => typeof m !== "string")) {
-                        return json(res, 400, { error: "claudeGateway.models must be an array of strings" });
+                    if (Object.prototype.hasOwnProperty.call(gw, "models")) {
+                        if (!Array.isArray(gw.models) || gw.models.some((m) => typeof m !== "string")) {
+                            return json(res, 400, { error: `claudeGateways[${id}].models must be an array of strings` });
+                        }
                     }
+                    const models = (gw.models ?? [])
+                        .map((m) => m.trim())
+                        .filter(Boolean);
+                    const authToken = typeof gw.authToken === "string" && gw.authToken.trim()
+                        ? gw.authToken.trim()
+                        : gw.authToken === ""
+                            ? undefined // an explicit empty string is "clear this token"
+                            : stored.get(id)?.authToken;
+                    gatewaysPatch.push({
+                        id,
+                        ...(typeof gw.label === "string" && gw.label.trim() ? { label: gw.label.trim() } : {}),
+                        baseUrl,
+                        ...(authToken ? { authToken } : {}),
+                        ...(models.length ? { models } : {}),
+                    });
                 }
             }
             const patch = {};
-            for (const key of ["xai", "composio", "box", "opencodeGo", "deepseekHarness", "claudeGateway", "tts", "profile"]) {
+            if (gatewaysPatch)
+                patch.claudeGateways = gatewaysPatch;
+            for (const key of ["xai", "composio", "box", "opencodeGo", "deepseekHarness", "tts", "profile"]) {
                 if (body[key] && typeof body[key] === "object")
                     patch[key] = body[key];
             }
