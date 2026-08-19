@@ -60,7 +60,16 @@ export function saveConfig(patch) {
     catch {
         /* first write */
     }
-    for (const key of ["xai", "composio", "box", "opencodeGo", "deepseekHarness", "tts", "profile"]) {
+    for (const key of [
+        "xai",
+        "composio",
+        "box",
+        "opencodeGo",
+        "deepseekHarness",
+        "claudeGateway",
+        "tts",
+        "profile",
+    ]) {
         if (patch[key] && typeof patch[key] === "object") {
             disk[key] = { ...disk[key], ...patch[key] };
         }
@@ -122,6 +131,19 @@ export function instanceConfigs(cfg) {
         // the driver config rather than the environment. The instance's own
         // `config` still wins: someone who hand-edited config.json for one bot
         // meant it, and the Settings form is the default for bots that have not.
+        // Same rule for the Claude CLI's gateway: endpoint and model list are
+        // settings, the token is a credential the driver reads from its config
+        // and puts in the child's environment. Applied only when a base URL is
+        // actually set, so a stray token can never be sent to Anthropic.
+        if (entry.driver === "claudeAgent" && cfg.claudeGateway?.baseUrl) {
+            const { baseUrl, authToken, models } = cfg.claudeGateway;
+            entry.config = {
+                baseUrl,
+                ...(authToken ? { authToken } : {}),
+                ...(models?.length ? { models } : {}),
+                ...(typeof entry.config === "object" && entry.config !== null ? entry.config : {}),
+            };
+        }
         if (entry.driver === "deepseek-harness" && cfg.deepseekHarness) {
             const { baseUrl, telemetry, sandboxMode, runtimeStrategy } = cfg.deepseekHarness;
             entry.config = {

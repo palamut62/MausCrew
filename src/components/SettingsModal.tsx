@@ -5,7 +5,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Key, Monitor, SpeakerHigh, User, X } from "@phosphor-icons/react";
 import { useStore, type AppSettingsSection } from "@/state/store";
-import { ApiKeyRow, ClaudeGatewayOptions, DeepSeekOptions } from "./ApiKeys";
+import { ApiKeyRow, DeepSeekOptions } from "./ApiKeys";
+import { ClaudeGateways } from "./ClaudeGateways";
 import { useUpdaterState } from "@/lib/updater";
 import { LocalComputerSection } from "./LocalComputerSection";
 import { Card } from "./SettingsPrimitives";
@@ -227,13 +228,16 @@ export function SettingsModal() {
                         inside its row rather than as free-floating settings */}
                     <DeepSeekOptions />
                   </div>
-                  <div>
-                    <ApiKeyRow section="claudeGateway" />
-                    {/* same reasoning: the endpoint decides where this token
-                        goes, so it lives with the token, not apart from it */}
-                    <ClaudeGatewayOptions />
-                  </div>
                 </div>
+              </Card>
+            )}
+
+            {section === "connections" && (
+              <Card
+                title="Claude gateways"
+                subtitle="Run the Claude Code engine against another provider. Each gateway is its own engine in the model picker."
+              >
+                <ClaudeGateways />
               </Card>
             )}
 
