@@ -47,7 +47,12 @@ mac:
       arch: arm64
     - target: zip
       arch: arm64
-  icon: build/icon.icns
+  # A 1024px master, not a prebuilt .icns: iconutil only runs on macOS, so a
+  # checked-in .icns silently goes stale the moment the brand changes on any
+  # other machine. electron-builder converts PNG → icns itself on every
+  # platform. build/icon.iconset/ is kept in sync as the iconutil source for
+  # anyone who wants to hand-build one.
+  icon: build/icon-1024.png
   category: public.app-category.productivity
   hardenedRuntime: true
   gatekeeperAssess: false
