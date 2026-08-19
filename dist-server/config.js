@@ -5,6 +5,20 @@ import { readFileSync, mkdirSync, existsSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { writeFileAtomic } from "./atomic.js";
+/** The instance id a gateway occupies. Prefixed so it cannot collide with a
+ * built-in or with a hand-written `instances` entry. */
+export function gatewayInstanceId(id) {
+    return `claude-${id}`;
+}
+/** One list from both the current and the legacy shape, so a config written
+ * before gateways were plural still produces its instance. */
+export function claudeGateways(cfg) {
+    const list = (cfg.claudeGateways ?? []).filter((gw) => gw?.id && gw.baseUrl);
+    if (!list.some((gw) => gw.id === "default") && cfg.claudeGateway?.baseUrl) {
+        list.unshift({ id: "default", ...cfg.claudeGateway, baseUrl: cfg.claudeGateway.baseUrl });
+    }
+    return list;
+}
 // MAUSCREW_DATA_DIR isolates test/soak rigs from the user's real fleet.
 // OMB_DATA_DIR remains a compatibility alias for existing scripts.
 export const DATA_DIR = process.env.MAUSCREW_DATA_DIR ?? process.env.OMB_DATA_DIR ?? join(homedir(), ".mauscrew");
@@ -74,6 +88,14 @@ export function saveConfig(patch) {
             disk[key] = { ...disk[key], ...patch[key] };
         }
     }
+    // A list is replaced, not merged: removing a gateway is expressed by it
+    // being absent from the array, which a per-key merge would silently undo.
+    // The legacy single-gateway key is dropped once the list has taken over,
+    // so the two shapes cannot disagree about what is configured.
+    if (patch.claudeGateways) {
+        disk.claudeGateways = patch.claudeGateways;
+        delete disk.claudeGateway;
+    }
     mkdirSync(DATA_DIR, { recursive: true });
     writeFileAtomic(p, JSON.stringify(disk, null, 2), { mode: 0o600 });
 }
@@ -131,19 +153,6 @@ export function instanceConfigs(cfg) {
         // the driver config rather than the environment. The instance's own
         // `config` still wins: someone who hand-edited config.json for one bot
         // meant it, and the Settings form is the default for bots that have not.
-        // Same rule for the Claude CLI's gateway: endpoint and model list are
-        // settings, the token is a credential the driver reads from its config
-        // and puts in the child's environment. Applied only when a base URL is
-        // actually set, so a stray token can never be sent to Anthropic.
-        if (entry.driver === "claudeAgent" && cfg.claudeGateway?.baseUrl) {
-            const { baseUrl, authToken, models } = cfg.claudeGateway;
-            entry.config = {
-                baseUrl,
-                ...(authToken ? { authToken } : {}),
-                ...(models?.length ? { models } : {}),
-                ...(typeof entry.config === "object" && entry.config !== null ? entry.config : {}),
-            };
-        }
         if (entry.driver === "deepseek-harness" && cfg.deepseekHarness) {
             const { baseUrl, telemetry, sandboxMode, runtimeStrategy } = cfg.deepseekHarness;
             entry.config = {
@@ -155,5 +164,37 @@ export function instanceConfigs(cfg) {
             };
         }
     }
+    // Gateways are appended, never merged into the built-in `claude` entry:
+    // one `claude` CLI process talks to one endpoint, so two endpoints are two
+    // engines. Appending also puts them at the end of the picker rail, after
+    // the engines that ship with the app, and leaves the plain claude.ai
+    // sign-in working beside them.
+    //
+    // A hand-written `instances` entry with the same id wins — that map is the
+    // escape hatch, and Settings should not overwrite it.
+    for (const gateway of claudeGateways(cfg)) {
+        const instanceId = gatewayInstanceId(gateway.id);
+        if (map[instanceId])
+            continue;
+        map[instanceId] = {
+            driver: "claudeAgent",
+            displayName: gateway.label?.trim() || gatewayHost(gateway.baseUrl),
+            config: {
+                baseUrl: gateway.baseUrl,
+                ...(gateway.authToken ? { authToken: gateway.authToken } : {}),
+                ...(gateway.models?.length ? { models: gateway.models } : {}),
+            },
+        };
+    }
     return map;
+}
+/** A readable fallback name: the endpoint's host, which is what distinguishes
+ * two gateways when the user did not bother to name them. */
+function gatewayHost(baseUrl) {
+    try {
+        return new URL(baseUrl).host;
+    }
+    catch {
+        return baseUrl;
+    }
 }

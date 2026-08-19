@@ -74,7 +74,7 @@ export function ModelPicker({ bot, className }: { bot: Bot; className?: string }
         className="flex items-center gap-1.5 rounded-md border border-accent bg-raised/60 py-1 pl-2 pr-2.5 text-[13px] text-ink hover:bg-raised"
         title={active ? `${active.displayName} · ${modelLabel(active, selection.model)}` : selection.model}
       >
-        {active && <ProviderMark driverKind={active.driverKind} size={14} />}
+        {active && <ProviderMark driverKind={active.driverKind} gateway={active.gateway} displayName={active.displayName} size={14} />}
         <span className="max-w-[160px] truncate font-mono tracking-tight">{modelLabel(active, selection.model)}</span>
         <CaretDown size={14} weight="bold" className="text-ink-secondary" />
       </button>
@@ -108,7 +108,7 @@ export function ModelPicker({ bot, className }: { bot: Bot; className?: string }
                     unavailable && "opacity-40",
                   )}
                 >
-                  <ProviderMark driverKind={instance.driverKind} size={18} />
+                  <ProviderMark driverKind={instance.driverKind} gateway={instance.gateway} displayName={instance.displayName} size={18} />
                 </button>
               );
             })}
