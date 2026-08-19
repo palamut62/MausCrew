@@ -39,6 +39,41 @@ describe("ClaudeDriver.decodeConfig", () => {
   it.skipIf(process.platform !== "win32")("names permission pipes per harness process", () => {
     expect(permissionSocketPath("thread-abc")).toBe(`\\\\.\\pipe\\mauscrew-perm-${process.pid}-thread-a`);
   });
+
+  it("carries an Anthropic-compatible gateway through", () => {
+    expect(
+      ClaudeDriver.decodeConfig({
+        baseUrl: "https://api.deepseek.com/anthropic",
+        authToken: "tok",
+        models: ["deepseek-v4-pro", "deepseek-v4-flash"],
+      }),
+    ).toEqual({
+      cli: "claude",
+      permissionMode: "acceptEdits",
+      baseUrl: "https://api.deepseek.com/anthropic",
+      authToken: "tok",
+      models: ["deepseek-v4-pro", "deepseek-v4-flash"],
+    });
+  });
+
+  it("allows http only on loopback, where a local gateway lives", () => {
+    expect(ClaudeDriver.decodeConfig({ baseUrl: "http://127.0.0.1:8317" }).baseUrl).toBe("http://127.0.0.1:8317");
+    expect(ClaudeDriver.decodeConfig({ baseUrl: "http://localhost:8317" }).baseUrl).toBe("http://localhost:8317");
+    // plaintext to a remote host would put the token and the whole
+    // conversation on the wire
+    expect(() => ClaudeDriver.decodeConfig({ baseUrl: "http://api.example.com" })).toThrow(/https/);
+  });
+
+  it("rejects a malformed gateway URL instead of failing at spawn time", () => {
+    expect(() => ClaudeDriver.decodeConfig({ baseUrl: "api.deepseek.com" })).toThrow(/not a URL/);
+  });
+
+  it("treats an empty gateway as absent, so a cleared field restores claude.ai", () => {
+    const config = ClaudeDriver.decodeConfig({ baseUrl: "", authToken: "", models: [] });
+    expect(config.baseUrl).toBeUndefined();
+    expect(config.authToken).toBeUndefined();
+    expect(config.models).toBeUndefined();
+  });
 });
 
 describe("ClaudeDriver turns (fake CLI)", () => {
