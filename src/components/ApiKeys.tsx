@@ -6,7 +6,7 @@ import { ArrowSquareOut, Check, Question, Spinner, Warning } from "@phosphor-ico
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import { cn } from "@/lib/cn";
 
-export type ConfigSection = "composio" | "box" | "opencodeGo" | "deepseekHarness";
+export type ConfigSection = "composio" | "box" | "opencodeGo" | "deepseekHarness" | "claudeGateway";
 
 const SECTIONS: Record<
   ConfigSection,
@@ -21,6 +21,10 @@ const SECTIONS: Record<
   deepseekHarness: {
     body: (v) => ({ deepseekHarness: { apiKey: v } }),
     flag: (c) => c.deepseekHarness?.configured ?? false,
+  },
+  claudeGateway: {
+    body: (v) => ({ claudeGateway: { authToken: v } }),
+    flag: (c) => c.claudeGateway?.configured ?? false,
   },
 };
 
@@ -69,6 +73,16 @@ const CREDENTIALS: Record<
     href: "https://platform.deepseek.com/api_keys",
     linkLabel: "Create or copy a DeepSeek API key",
     optional: true,
+  },
+  claudeGateway: {
+    label: "Gateway token",
+    placeholder: "Paste the token this gateway expects",
+    description:
+      "Sent as the bearer token to the endpoint below. Only used once an endpoint is set, so it is never sent to Anthropic.",
+    href: "https://docs.claude.com/en/docs/claude-code/settings",
+    linkLabel: "Open Claude Code settings docs",
+    optional: true,
+    warning: "Every turn's full conversation goes to this endpoint. Only use a gateway you trust.",
   },
 };
 
@@ -371,6 +385,147 @@ export function DeepSeekOptions() {
           Off is enforced as a hard opt-out before the runtime loads. Note that DeepSeek may still send an anonymous
           user id with API requests, which this switch does not control.
         </div>
+      </div>
+
+      {error && <div className="text-[12px] text-danger">{error}</div>}
+    </div>
+  );
+}
+
+/** Where the `claude` CLI sends its turns, and which model ids the picker
+ * offers for it.
+ *
+ * The CLI is a native host process, so it can spawn the computer and
+ * permission proxies over stdio — which is why pointing it at another
+ * Anthropic-compatible gateway buys that whole toolchain for a non-Anthropic
+ * model. Kept beside the token row because the endpoint decides where the
+ * token goes, and that warning is only useful next to the field holding it.
+ */
+export function ClaudeGatewayOptions() {
+  const { state, dispatch } = useStore();
+  const saved = state.config?.claudeGateway;
+  // null means "not edited yet", so a save elsewhere does not clobber typing
+  const [baseUrl, setBaseUrl] = useState<string | null>(null);
+  const [models, setModels] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const baseUrlId = useId();
+  const modelsId = useId();
+
+  const shownUrl = baseUrl ?? saved?.baseUrl ?? "";
+  const shownModels = models ?? (saved?.models ?? []).join(", ");
+  const trimmed = shownUrl.trim();
+  const dirty = baseUrl !== null || models !== null;
+
+  const put = () => {
+    setSaving(true);
+    setError(null);
+    api("/api/config", {
+      method: "PUT",
+      body: JSON.stringify({
+        claudeGateway: {
+          baseUrl: trimmed,
+          models: shownModels
+            .split(",")
+            .map((m) => m.trim())
+            .filter(Boolean),
+        },
+      }),
+    })
+      .then((status: ConfigStatus) => {
+        dispatch({ type: "configStatus", config: status });
+        setBaseUrl(null);
+        setModels(null);
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setSaving(false));
+  };
+
+  // Advisory only — the server answers 400 and is the real gate. This exists
+  // so the consequence is read before Save, not after. Plain HTTP off
+  // loopback is refused outright rather than warned about: the token rides an
+  // Authorization header on every single turn.
+  const plaintext = /^http:\/\//i.test(trimmed) && !/^http:\/\/(localhost|127\.0\.0\.1)\b/i.test(trimmed);
+  const remote = Boolean(trimmed) && !/^https?:\/\/(localhost|127\.0\.0\.1)\b/i.test(trimmed);
+  const noModels = Boolean(trimmed) && !shownModels.trim();
+
+  return (
+    <div className="mt-3 space-y-3">
+      <div>
+        <label htmlFor={baseUrlId} className="mb-1.5 block text-[13px] text-ink-secondary">
+          Gateway endpoint
+        </label>
+        <input
+          id={baseUrlId}
+          type="url"
+          inputMode="url"
+          value={shownUrl}
+          onChange={(e) => setBaseUrl(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && put()}
+          placeholder="Empty — use the Claude Code login (default)"
+          autoComplete="off"
+          className="w-full rounded-lg border border-hairline bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
+        />
+        <div className="mt-1.5 text-[11px] leading-[1.45] text-ink-secondary">
+          Any endpoint speaking the Anthropic API — for example{" "}
+          <code className="text-ink">https://api.deepseek.com/anthropic</code>, OpenRouter, or a proxy on
+          127.0.0.1. Leave empty to keep the normal Claude sign-in.
+        </div>
+      </div>
+
+      <div>
+        <label htmlFor={modelsId} className="mb-1.5 block text-[13px] text-ink-secondary">
+          Models this gateway serves
+        </label>
+        <input
+          id={modelsId}
+          value={shownModels}
+          onChange={(e) => setModels(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && put()}
+          placeholder="deepseek-v4-pro, deepseek-v4-flash"
+          autoComplete="off"
+          className="w-full rounded-lg border border-hairline bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
+        />
+        <div className="mt-1.5 text-[11px] leading-[1.45] text-ink-secondary">
+          Comma-separated ids, first one is the default. Replaces the Claude model list, which a third-party gateway
+          does not serve.
+        </div>
+      </div>
+
+      {plaintext && (
+        <div className="flex gap-1.5 rounded-lg border border-danger/25 bg-danger/10 px-2 py-1.5 text-[11px] leading-[1.4] text-danger">
+          <Warning size={13} weight="bold" className="mt-px shrink-0" aria-hidden="true" />
+          <span>Plain HTTP to a remote host is refused — the token would travel unencrypted. Use https.</span>
+        </div>
+      )}
+      {!plaintext && remote && (
+        <div className="flex gap-1.5 rounded-lg border border-warning/25 bg-warning/10 px-2 py-1.5 text-[11px] leading-[1.4] text-warning">
+          <Warning size={13} weight="bold" className="mt-px shrink-0" aria-hidden="true" />
+          <span>
+            Your gateway token and every turn's full conversation will be sent to this host. Only use an endpoint you
+            trust.
+          </span>
+        </div>
+      )}
+      {noModels && (
+        <div className="flex gap-1.5 rounded-lg border border-warning/25 bg-warning/10 px-2 py-1.5 text-[11px] leading-[1.4] text-warning">
+          <Warning size={13} weight="bold" className="mt-px shrink-0" aria-hidden="true" />
+          <span>Without model ids the picker still offers Claude models, which this gateway will reject.</span>
+        </div>
+      )}
+
+      <div className="flex items-center gap-2">
+        <button
+          onClick={put}
+          disabled={saving || !dirty}
+          className="flex w-[72px] shrink-0 items-center justify-center gap-1.5 rounded-lg bg-raised py-2 text-[13px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {saving ? <Spinner size={13} weight="fill" className="animate-spin" /> : <><Check size={13} weight="fill" />Save</>}
+        </button>
+        <span className="text-[11px] text-ink-secondary">
+          Applies to every Claude-engine bot. Vision matters: a gateway model that cannot read images cannot use the
+          computer or Local VM.
+        </span>
       </div>
 
       {error && <div className="text-[12px] text-danger">{error}</div>}

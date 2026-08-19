@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Key, Monitor, SpeakerHigh, User, X } from "@phosphor-icons/react";
 import { useStore, type AppSettingsSection } from "@/state/store";
-import { ApiKeyRow, DeepSeekOptions } from "./ApiKeys";
+import { ApiKeyRow, ClaudeGatewayOptions, DeepSeekOptions } from "./ApiKeys";
 import { useUpdaterState } from "@/lib/updater";
 import { LocalComputerSection } from "./LocalComputerSection";
 import { Card } from "./SettingsPrimitives";
@@ -226,6 +226,12 @@ export function SettingsModal() {
                     {/* endpoint and telemetry belong to this key, so they sit
                         inside its row rather than as free-floating settings */}
                     <DeepSeekOptions />
+                  </div>
+                  <div>
+                    <ApiKeyRow section="claudeGateway" />
+                    {/* same reasoning: the endpoint decides where this token
+                        goes, so it lives with the token, not apart from it */}
+                    <ClaudeGatewayOptions />
                   </div>
                 </div>
               </Card>

@@ -32,6 +32,12 @@ export interface AppConfig {
     sandboxMode?: "read-only" | "workspace-write" | "danger-full-access";
     runtimeStrategy?: "system" | "managed" | "bundled";
   };
+  /** Anthropic-compatible gateway for the `claude` CLI: DeepSeek's /anthropic
+   * endpoint, a local CLIProxyAPI, OpenRouter. `authToken` is the credential
+   * and is never echoed back; `baseUrl` and `models` are settings, echoed so
+   * the UI can warn about where the token is sent. Empty `baseUrl` means the
+   * CLI's own claude.ai login, which stays the default. */
+  claudeGateway?: { baseUrl?: string; authToken?: string; models?: string[] };
   /** Voice (ElevenLabs). `key` is the credential and is never echoed back;
    * `voice` is the chosen voice id, which is a setting, not a secret. */
   tts?: { key?: string; voice?: string };
@@ -95,7 +101,16 @@ export function saveConfig(patch: Partial<AppConfig>): void {
   } catch {
     /* first write */
   }
-  for (const key of ["xai", "composio", "box", "opencodeGo", "deepseekHarness", "tts", "profile"] as const) {
+  for (const key of [
+    "xai",
+    "composio",
+    "box",
+    "opencodeGo",
+    "deepseekHarness",
+    "claudeGateway",
+    "tts",
+    "profile",
+  ] as const) {
     if (patch[key] && typeof patch[key] === "object") {
       disk[key] = { ...(disk[key] as object), ...patch[key] };
     }
@@ -160,6 +175,20 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
     // the driver config rather than the environment. The instance's own
     // `config` still wins: someone who hand-edited config.json for one bot
     // meant it, and the Settings form is the default for bots that have not.
+    // Same rule for the Claude CLI's gateway: endpoint and model list are
+    // settings, the token is a credential the driver reads from its config
+    // and puts in the child's environment. Applied only when a base URL is
+    // actually set, so a stray token can never be sent to Anthropic.
+    if (entry.driver === "claudeAgent" && cfg.claudeGateway?.baseUrl) {
+      const { baseUrl, authToken, models } = cfg.claudeGateway;
+      entry.config = {
+        baseUrl,
+        ...(authToken ? { authToken } : {}),
+        ...(models?.length ? { models } : {}),
+        ...(typeof entry.config === "object" && entry.config !== null ? entry.config : {}),
+      };
+    }
+
     if (entry.driver === "deepseek-harness" && cfg.deepseekHarness) {
       const { baseUrl, telemetry, sandboxMode, runtimeStrategy } = cfg.deepseekHarness;
       entry.config = {
