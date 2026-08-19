@@ -185,11 +185,17 @@ export interface ConfigStatus {
     sandboxMode: "read-only" | "workspace-write" | "danger-full-access";
     runtimeStrategy: "system" | "managed" | "bundled";
   };
-  /** Anthropic-compatible gateway the `claude` CLI talks to instead of
-   * api.anthropic.com. `configured` = a token is saved and never echoed;
-   * `baseUrl` and `models` come back so the form can show where the token
-   * goes and which model ids the picker will offer. */
-  claudeGateway?: { configured: boolean; baseUrl: string; models: string[] };
+  /** Anthropic-compatible gateways for the `claude` CLI, one picker entry
+   * each. `instanceId` is the routing key the model picker uses; `configured`
+   * stands in for the token, which the server never echoes. */
+  claudeGateways?: {
+    id: string;
+    instanceId: string;
+    label: string;
+    baseUrl: string;
+    models: string[];
+    configured: boolean;
+  }[];
   /** Voice (ElevenLabs). `configured` = a key is saved; `ready` = a key AND
    * a voice, which is what it takes to actually speak. The key itself is
    * never echoed back. */
@@ -1326,7 +1332,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               box: frame.box,
               opencodeGo: frame.opencodeGo,
               deepseekHarness: frame.deepseekHarness,
-              claudeGateway: frame.claudeGateway,
+              claudeGateways: frame.claudeGateways,
               tts: frame.tts,
               profile: frame.profile,
             },

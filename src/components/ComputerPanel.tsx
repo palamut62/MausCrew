@@ -20,6 +20,19 @@ async function api(path: string, init?: RequestInit): Promise<any> {
   return body;
 }
 
+/** Park a frame on the harness server and open it by URL, which is the only
+ * handoff a browser will accept from here (see the server route). Failure is
+ * silent by design: the preview the user is looking at still works, and a
+ * dialog over it would be the more annoying outcome. */
+async function openFrameFullSize(dataUrl: string) {
+  try {
+    const { url } = await api("/api/frames", { method: "POST", body: JSON.stringify({ dataUrl }) });
+    window.open(url, "_blank", "noopener,noreferrer");
+  } catch {
+    /* frame expired, too large, or the server is restarting */
+  }
+}
+
 type Phase =
   | "checking"
   | "unconfigured"
@@ -340,7 +353,20 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
         </div>
         <div className="flex aspect-[16/10] w-full items-center justify-center overflow-hidden rounded-xl bg-card">
           {frameSrc ? (
-            <img src={frameSrc} alt={`${bot.name}'s screen`} className="h-full w-full object-contain" />
+            // The preview is thumbnail-sized and a desktop screenshot is the
+            // one thing you need to read closely, so clicking opens the frame
+            // at full size in the browser. It goes through the server rather
+            // than window.open(dataUrl): Electron sends window.open to
+            // shell.openExternal, and no browser will open another process's
+            // data URL.
+            <button
+              type="button"
+              onClick={() => void openFrameFullSize(frameSrc)}
+              title="Open this screen full size in your browser"
+              className="h-full w-full cursor-zoom-in"
+            >
+              <img src={frameSrc} alt={`${bot.name}'s screen`} className="h-full w-full object-contain" />
+            </button>
           ) : (
             <div className="flex flex-col items-center gap-2 px-6 text-center text-ink-secondary">
               {phase === "checking" || phase === "starting" || phase === "local" || phase === "vm" ? (
