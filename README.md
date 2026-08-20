@@ -300,6 +300,19 @@ exposes only `/health` and secret `/hooks/...` endpoints; it never exposes the a
 MausCrew must remain running to accept a delivery. For public internet delivery, proxy only this
 dedicated receiver through a hosted relay or a tool such as Tailscale Funnel.
 
+## Mobile remote access
+
+MausCrew can be used as an installable mobile web app while every provider,
+credential and agent process stays on the desktop. Open **Settings → Mobile**,
+run the displayed Tailscale Serve command, save the resulting HTTPS address,
+then create a one-time pairing link. Paired phones can use chat, tasks, live
+events and approval cards; provider credentials and device administration stay
+desktop-only. The harness continues listening only on loopback and rejects every
+remote host other than the exact configured HTTPS origin.
+
+See [`docs/mobile-remote.md`](docs/mobile-remote.md) for setup, revocation and
+the security boundary.
+
 ## Status
 
 Early but real — the loop works end to end: message → agent → streamed reply → tools → approvals →

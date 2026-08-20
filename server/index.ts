@@ -61,6 +61,15 @@ import { LocalVmIdleTimer } from "./local-vm-idle.ts";
 import { LocalVmLease } from "./local-vm-lease.ts";
 import { RoutineManager, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts";
 import {
+  authenticateRemoteToken,
+  claimPairing,
+  cookieToken,
+  createPairing,
+  listRemoteDevices,
+  revokeRemoteDevice,
+  type RemoteDevice,
+} from "./remote-access.ts";
+import {
   createWorkspaceSkill,
   deleteWorkspaceSkill,
   listWorkspaceSkills,
@@ -1470,6 +1479,17 @@ function isAllowedOrigin(origin: string | undefined | null): boolean {
   }
 }
 
+function configuredRemoteUrl(): URL | null {
+  if (!cfg.remoteAccess?.enabled || !cfg.remoteAccess.publicUrl) return null;
+  try {
+    const parsed = new URL(cfg.remoteAccess.publicUrl);
+    if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.pathname !== "/") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
   const path = url.pathname;
@@ -1477,13 +1497,70 @@ const server = createServer(async (req, res) => {
   /** scratch for route matches, shared by every `path.match` below */
   let m: RegExpMatchArray | null = null;
   try {
-    // loopback-host + loopback-origin gate before any route (DNS rebinding / CSRF)
-    if (!isLoopbackHost(req.headers.host)) {
-      return json(res, 403, { error: "forbidden: loopback host required" });
-    }
+    // Local requests keep the original DNS-rebinding boundary. A configured
+    // HTTPS reverse-proxy host is the only second ingress; every API request
+    // through it (except the one-time claim) needs a paired-device cookie.
+    const localRequest = isLoopbackHost(req.headers.host);
+    const remoteUrl = configuredRemoteUrl();
+    const remoteRequest = !localRequest && remoteUrl?.host.toLowerCase() === req.headers.host?.toLowerCase();
+    if (!localRequest && !remoteRequest) return json(res, 403, { error: "forbidden: untrusted host" });
     const origin = req.headers.origin;
-    if (origin && !isAllowedOrigin(origin)) {
+    if (localRequest && origin && !isAllowedOrigin(origin)) {
       return json(res, 403, { error: "forbidden: cross-origin request" });
+    }
+    if (remoteRequest && origin && origin !== remoteUrl!.origin) {
+      return json(res, 403, { error: "forbidden: cross-origin request" });
+    }
+
+    let remoteDevice: RemoteDevice | null = null;
+    const claimRoute = method === "POST" && path === "/api/remote/claim";
+    if (remoteRequest && path.startsWith("/api/") && !claimRoute) {
+      remoteDevice = authenticateRemoteToken(cookieToken(req.headers.cookie));
+      if (!remoteDevice) return json(res, 401, { error: "pairing required" });
+      // Provider credentials and remote-device administration remain local.
+      if ((path === "/api/config" && method !== "GET") || path.startsWith("/api/remote/pairings") || path.startsWith("/api/remote/devices")) {
+        return json(res, 403, { error: "this setting can only be changed on the desktop" });
+      }
+    }
+
+    if (method === "POST" && path === "/api/remote/claim") {
+      if (!remoteRequest) return json(res, 400, { error: "open the pairing link on the remote device" });
+      const body = await readBody(req);
+      const claimed = claimPairing(String(body.code ?? ""), String(body.name ?? ""), req.socket.remoteAddress ?? "unknown");
+      if (claimed === "rate-limited") return json(res, 429, { error: "too many pairing attempts; try again shortly" });
+      if (!claimed) return json(res, 401, { error: "pairing code is invalid or expired" });
+      const data = JSON.stringify({ device: claimed.device });
+      res.writeHead(200, {
+        "content-type": "application/json",
+        "cache-control": "no-store",
+        "set-cookie": `mauscrew_remote=${encodeURIComponent(claimed.token)}; Path=/; Max-Age=2592000; HttpOnly; Secure; SameSite=Strict`,
+      });
+      return res.end(data);
+    }
+    if (method === "GET" && path === "/api/remote/session") {
+      return json(res, 200, { remote: remoteRequest, device: remoteDevice });
+    }
+    if (path === "/api/remote/status" && method === "GET") {
+      if (!localRequest) return json(res, 403, { error: "desktop only" });
+      return json(res, 200, {
+        enabled: cfg.remoteAccess?.enabled === true,
+        publicUrl: cfg.remoteAccess?.publicUrl ?? "",
+        localPort: PORT,
+        devices: listRemoteDevices(),
+      });
+    }
+    if (path === "/api/remote/pairings" && method === "POST") {
+      if (!localRequest) return json(res, 403, { error: "desktop only" });
+      if (!configuredRemoteUrl()) return json(res, 409, { error: "save a valid HTTPS remote address first" });
+      const pairing = createPairing();
+      return json(res, 201, { ...pairing, url: `${configuredRemoteUrl()!.origin}/pair?code=${encodeURIComponent(pairing.code)}` });
+    }
+    m = path.match(/^\/api\/remote\/devices\/([\w-]+)$/);
+    if (m && method === "DELETE") {
+      if (!localRequest) return json(res, 403, { error: "desktop only" });
+      return revokeRemoteDevice(m[1])
+        ? json(res, 200, { ok: true })
+        : json(res, 404, { error: "no such device" });
     }
     // ── internal peer-agent comms (localhost + shared token only) ──────
     // The agents-proxy (spawned inside a bot's agent process) calls these to
@@ -2533,6 +2610,40 @@ const server = createServer(async (req, res) => {
           return json(res, 400, { error: "deepseekHarness.runtimeStrategy must be system, managed or bundled" });
         }
       }
+      const rawRemote = body.remoteAccess;
+      if (
+        rawRemote !== undefined
+        && (rawRemote === null || typeof rawRemote !== "object" || Array.isArray(rawRemote))
+      ) {
+        return json(res, 400, { error: "remoteAccess must be an object" });
+      }
+      if (rawRemote) {
+        if (typeof rawRemote.enabled !== "boolean") {
+          return json(res, 400, { error: "remoteAccess.enabled must be a boolean" });
+        }
+        if (typeof rawRemote.publicUrl !== "string") {
+          return json(res, 400, { error: "remoteAccess.publicUrl must be a string" });
+        }
+        if (rawRemote.enabled) {
+          let remoteUrl: URL;
+          try {
+            remoteUrl = new URL(rawRemote.publicUrl);
+          } catch {
+            return json(res, 400, { error: "remoteAccess.publicUrl must be a valid URL" });
+          }
+          if (
+            remoteUrl.protocol !== "https:"
+            || remoteUrl.username
+            || remoteUrl.password
+            || remoteUrl.pathname !== "/"
+            || remoteUrl.search
+            || remoteUrl.hash
+          ) {
+            return json(res, 400, { error: "remoteAccess.publicUrl must be an HTTPS origin without a path" });
+          }
+          rawRemote.publicUrl = remoteUrl.origin;
+        }
+      }
       // The whole list arrives at once, because removing a gateway is
       // expressed by its absence. Tokens are the exception: the form never
       // receives them, so an entry that sends no token keeps the stored one
@@ -2614,7 +2725,7 @@ const server = createServer(async (req, res) => {
       }
       const patch: Record<string, object> = {};
       if (gatewaysPatch) patch.claudeGateways = gatewaysPatch;
-      for (const key of ["xai", "composio", "box", "opencodeGo", "deepseekHarness", "tts", "profile"] as const) {
+      for (const key of ["xai", "composio", "box", "opencodeGo", "deepseekHarness", "tts", "profile", "remoteAccess"] as const) {
         if (body[key] && typeof body[key] === "object") patch[key] = body[key];
       }
       if (!Object.keys(patch).length) return json(res, 400, { error: "nothing to save" });
@@ -2667,7 +2778,7 @@ const server = createServer(async (req, res) => {
       // provider keys change the fleet; a profile or voice edit must not
       // kill in-flight turns with a pointless reload — no driver reads
       // either, and picking a voice mid-turn should be free
-      if (Object.keys(patch).some((k) => k !== "profile" && k !== "tts")) await reloadProviders();
+      if (Object.keys(patch).some((k) => k !== "profile" && k !== "tts" && k !== "remoteAccess")) await reloadProviders();
       const status = configStatus();
       broadcast({ kind: "config", ...status });
       return json(res, 200, status);

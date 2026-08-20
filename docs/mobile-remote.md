@@ -1,0 +1,46 @@
+# Mobile remote access
+
+MausCrew Remote is a PWA served by the same local harness as the desktop app.
+The desktop owns agents, provider sessions, workspaces and credentials. A paired
+phone is an authenticated client; it does not receive provider keys or native
+session cursors.
+
+## Set up with Tailscale Serve
+
+1. Install Tailscale on the computer and phone, and sign both into the same
+   tailnet.
+2. Keep MausCrew running. Open **Settings → Mobile**.
+3. Run the command shown in the panel. It uses the actual harness port selected
+   by the desktop app, for example:
+
+   ```powershell
+   tailscale serve --bg localhost:8799
+   ```
+
+4. Copy the HTTPS address printed by Tailscale, including its full
+   `https://...ts.net` host, into **HTTPS address** and select **Enable**.
+5. Select **Create pairing link**, copy the link to the phone, and approve the
+   connection there. The code is single-use and expires after ten minutes.
+6. In the mobile browser, use **Add to Home Screen** to install the PWA.
+
+Tailscale Serve terminates HTTPS and proxies to the loopback-only server. Its
+current syntax and HTTPS behavior are documented in the official
+[Tailscale Serve CLI reference](https://tailscale.com/docs/reference/tailscale-cli/serve).
+Do not replace Serve with a public router port-forward.
+
+## Security boundary
+
+- The harness remains bound to `127.0.0.1`; remote access does not open a LAN
+  listener.
+- Only the exact configured HTTPS host and Origin are accepted.
+- Pairing exchanges a short-lived, single-use code for a random 256-bit token.
+- The token is stored in a `Secure`, `HttpOnly`, `SameSite=Strict` cookie and
+  cannot be read by browser JavaScript.
+- Stored device records contain only a SHA-256 token digest, not the token.
+- Pairing claims are rate-limited. A device can be revoked immediately from
+  **Settings → Mobile**.
+- Provider credential changes, new pairings and device administration are
+  rejected on remote sessions.
+
+The initial release uses a 30-day browser session. Re-pair the phone after that
+period or revoke it sooner from the desktop.

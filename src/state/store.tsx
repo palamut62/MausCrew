@@ -234,7 +234,7 @@ export interface InstanceInfo {
   gateway?: boolean;
 }
 
-export type AppSettingsSection = "general" | "connections" | "voice" | "computer";
+export type AppSettingsSection = "general" | "connections" | "voice" | "computer" | "remote";
 
 interface AppState {
   bots: Bot[];

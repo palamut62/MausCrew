@@ -47,6 +47,32 @@ const statusWithHeaders = (headers: Record<string, string>): Promise<number> =>
     req.end();
   });
 
+const requestWithHeaders = (
+  method: string,
+  path: string,
+  headers: Record<string, string>,
+  body?: unknown,
+): Promise<{ status: number; body: any; headers: Record<string, string | string[] | undefined> }> =>
+  new Promise((resolve, reject) => {
+    const data = body === undefined ? "" : JSON.stringify(body);
+    const req = request(
+      {
+        hostname: "127.0.0.1",
+        port: PORT,
+        path,
+        method,
+        headers: { ...headers, ...(data ? { "content-type": "application/json", "content-length": Buffer.byteLength(data) } : {}) },
+      },
+      (res) => {
+        let raw = "";
+        res.on("data", (chunk) => (raw += chunk));
+        res.on("end", () => resolve({ status: res.statusCode ?? 0, body: raw ? JSON.parse(raw) : {}, headers: res.headers }));
+      },
+    );
+    req.on("error", reject);
+    req.end(data);
+  });
+
 beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "mauscrew-api-test-"));
   staticDir = join(home, "static");
@@ -132,6 +158,28 @@ describe("harness HTTP API", () => {
     expect(await statusWithHeaders({ host: `127.0.0.2:${PORT}` })).toBe(200);
     expect(await statusWithHeaders({ host: `[::1]:${PORT}` })).toBe(200);
     expect(await statusWithHeaders({ origin: `http://[::1]:${PORT}` })).toBe(200);
+  });
+
+  it("requires one-time desktop pairing on the configured remote HTTPS host", async () => {
+    const host = "mauscrew-test.example";
+    const origin = `https://${host}`;
+    expect((await api("PUT", "/api/config", { remoteAccess: { enabled: true, publicUrl: origin } })).status).toBe(200);
+
+    const pairing = await api("POST", "/api/remote/pairings", {});
+    expect(pairing.status).toBe(201);
+    expect((await requestWithHeaders("GET", "/api/bots", { host, origin })).status).toBe(401);
+
+    const claimed = await requestWithHeaders("POST", "/api/remote/claim", { host, origin }, {
+      code: pairing.body.code,
+      name: "Integration phone",
+    });
+    expect(claimed.status).toBe(200);
+    const setCookie = claimed.headers["set-cookie"];
+    const cookie = (Array.isArray(setCookie) ? setCookie[0] : String(setCookie)).split(";", 1)[0];
+    expect(cookie).toMatch(/^mauscrew_remote=/);
+    expect((await requestWithHeaders("GET", "/api/bots", { host, origin, cookie })).status).toBe(200);
+    expect((await requestWithHeaders("PUT", "/api/config", { host, origin, cookie }, { profile: { name: "remote" } })).status).toBe(403);
+    expect((await requestWithHeaders("GET", "/api/bots", { host, origin: "https://evil.example", cookie })).status).toBe(403);
   });
 
   it("identifies itself on /api/health", async () => {
