@@ -78,13 +78,22 @@ const MODELS = {
 };
 /** A gateway instance advertises what its gateway serves, not Claude's
  * catalog. Ids are shown verbatim: only the operator knows what
- * `deepseek-v4-pro` or `gpt-5.6-sol` should be called. */
+ * `deepseek-v4-pro` or `gpt-5.6-sol` should be called.
+ *
+ * A gateway that named no models gets an EMPTY catalog rather than Claude's.
+ * Offering "Claude Sonnet 5" on someone's DeepSeek endpoint is an invitation
+ * to pick a model that endpoint will reject — an error one turn later and
+ * nowhere near the picker that caused it. Empty is honest, and `extensible`
+ * keeps a hand-written selection working. */
 function modelsFor(config) {
-    if (!config.models?.length)
+    if (!config.baseUrl)
         return MODELS;
+    if (!config.models?.length)
+        return { default: "", options: [], extensible: true };
     return {
         default: config.models[0],
         options: config.models.map((id) => ({ id, label: id })),
+        extensible: true,
     };
 }
 // proxy entry files live next to this one as .ts in dev (node type
@@ -556,7 +565,12 @@ export const ClaudeDriver = {
             // would report "signed out" for a perfectly working gateway instance and
             // the UI would refuse to run it.
             const authenticated = config.baseUrl && config.authToken ? true : await claudeSignedIn(config.cli, env);
-            return { state: "available", version, authenticated };
+            // Available, working, and unusable until it is told what to run — the
+            // one state that looks fine everywhere else, so it is said out loud.
+            const reason = config.baseUrl && !config.models?.length
+                ? "No model ids yet — add them in Settings → Claude gateways."
+                : undefined;
+            return { state: "available", version, authenticated, ...(reason ? { reason } : {}) };
         };
         return {
             instanceId,
