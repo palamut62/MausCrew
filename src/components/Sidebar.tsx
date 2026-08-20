@@ -9,6 +9,7 @@ import { useUpdaterState } from "@/lib/updater";
 import { cn } from "@/lib/cn";
 import { downloadSelectedTeam } from "@/lib/team-files";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
+import { SidebarUpdateCard } from "./UpdateBanner";
 
 /** "Milind Soni" → "MS", "milind" → "M", "you@x.dev" → "Y", unset → "?" */
 function profileInitials(profile?: { name?: string; email?: string }): string {
@@ -27,7 +28,7 @@ function profileInitials(profile?: { name?: string; email?: string }): string {
 /** Manual update check, next to the settings gear. Packaged app only (no
  * bridge in dev/browser). One button, state-dependent: check → download →
  * restart, with a brief "up to date" tick when a check finds nothing so a
- * click is never silent. The bottom-left popup handles the loud cases. */
+ * click is never silent. Actionable states are shown in the sidebar card. */
 function UpdateButton() {
   const s = useUpdaterState();
   const [checkedAt, setCheckedAt] = useState(0);
@@ -45,6 +46,7 @@ function UpdateButton() {
     return () => clearTimeout(timer);
   }, [upToDate]);
   if (!updater) return null;
+  if (["available", "downloading", "downloaded", "installing", "error"].includes(status)) return null;
 
   const working =
     pending || status === "checking" || status === "downloading" || status === "installing";
@@ -1064,6 +1066,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
 
       {/* Footer */}
       <div className="px-3 pb-3 pt-2">
+        <SidebarUpdateCard />
         <button
           onClick={() => dispatch({ type: "showRoutines" })}
           className={cn(

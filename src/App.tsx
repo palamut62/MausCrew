@@ -10,7 +10,6 @@ import { SettingsPanel } from "@/components/SettingsPanel";
 import { PluginsPanel } from "@/components/PluginsPanel";
 import { ComputerPanel } from "@/components/ComputerPanel";
 import { SettingsModal } from "@/components/SettingsModal";
-import { UpdateBanner } from "@/components/UpdateBanner";
 import { DesktopCapabilitiesProvider } from "@/components/DesktopCapabilities";
 import { RoutinesPage } from "@/components/RoutinesPage";
 import { NoEngines } from "@/components/NoEngines";
@@ -78,8 +77,6 @@ function Shell() {
 
   return (
     <div className="flex h-full flex-col">
-      {/* fixed-position popup, bottom-left — outside the layout flow */}
-      <UpdateBanner />
       <div className="relative flex min-h-0 flex-1">
       <button
         type="button"
