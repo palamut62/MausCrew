@@ -2358,7 +2358,17 @@ const server = createServer(async (req, res) => {
             // Windows never pushes PATH changes into a live process, so without
             // this the answer is frozen at boot and "check again" is a no-op.
             resetPathCache();
-            return json(res, 200, { instances: await registry.describe() });
+            // A gateway rides the claudeAgent driver, so driverKind alone would have
+            // the picker draw it as Claude — same mark, same name shape, no way to
+            // tell "DeepSeek through Claude Code" from Claude itself. The config is
+            // the one place that knows, so the flag is computed here rather than
+            // re-derived from the id in the renderer.
+            const gatewayIds = new Set(claudeGateways(cfg).map((gw) => gatewayInstanceId(gw.id)));
+            const instances = (await registry.describe()).map((instance) => ({
+                ...instance,
+                ...(gatewayIds.has(instance.instanceId) ? { gateway: true } : {}),
+            }));
+            return json(res, 200, { instances });
         }
         // ── app config (API keys — never echoed back, booleans only) ──
         if (method === "GET" && path === "/api/config") {
