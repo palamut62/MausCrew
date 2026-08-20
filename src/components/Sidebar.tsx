@@ -861,7 +861,7 @@ function BotListItem({ bot, onMenu }: { bot: Bot; onMenu: (menu: MenuState) => v
   );
 }
 
-export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function Sidebar({ open, onClose, onOpenDirectory }: { open: boolean; onClose: () => void; onOpenDirectory: () => void }) {
   const { state, dispatch } = useStore();
   const { capabilities } = useDesktopCapabilities();
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -983,6 +983,16 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                 >
                   <BotIcon size={16} weight="bold" className="text-ink-secondary" />
                   New Bot
+                </button>
+                <button
+                  onClick={() => {
+                    setPlusOpen(false);
+                    onOpenDirectory();
+                  }}
+                  className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
+                >
+                  <MagnifyingGlass size={16} weight="bold" className="text-ink-secondary" />
+                  Ready-made Bots
                 </button>
                 <button
                   onClick={() => {

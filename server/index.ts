@@ -1834,6 +1834,37 @@ const server = createServer(async (req, res) => {
       });
     }
 
+    // Public prompt catalog. Keep the third-party origin on the server side so
+    // the renderer is not coupled to CORS policy, and forward only the small,
+    // documented query surface rather than acting as an open proxy.
+    if (method === "GET" && path === "/api/bot-directory") {
+      const upstream = new URL("https://api.botdirectory.ai/api/bots");
+      for (const key of ["q", "category", "integration", "sort", "page", "limit"] as const) {
+        const value = url.searchParams.get(key)?.trim();
+        if (value) upstream.searchParams.set(key, value.slice(0, 200));
+      }
+      const requestedLimit = Number(upstream.searchParams.get("limit") ?? 24);
+      upstream.searchParams.set("limit", String(Math.min(50, Math.max(1, Number.isFinite(requestedLimit) ? requestedLimit : 24))));
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10_000);
+      try {
+        const response = await fetch(upstream, {
+          headers: { accept: "application/json", "user-agent": "MausCrew/0.1" },
+          signal: controller.signal,
+        });
+        if (!response.ok) return json(res, 502, { error: `Bot Directory returned HTTP ${response.status}` });
+        const payload = await response.json();
+        return json(res, 200, payload);
+      } catch (error) {
+        const message = error instanceof Error && error.name === "AbortError"
+          ? "Bot Directory timed out"
+          : "Bot Directory is unavailable";
+        return json(res, 502, { error: message });
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
+
     // scrollback: the page before a message the client already holds
     m = path.match(/^\/api\/threads\/([\w-]+)\/messages$/);
     if (m && method === "GET") {
