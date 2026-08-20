@@ -13,6 +13,7 @@ import { SettingsModal } from "@/components/SettingsModal";
 import { DesktopCapabilitiesProvider } from "@/components/DesktopCapabilities";
 import { RoutinesPage } from "@/components/RoutinesPage";
 import { NoEngines } from "@/components/NoEngines";
+import { BotDirectoryPanel } from "@/components/BotDirectoryPanel";
 
 function Shell() {
   const { state, dispatch } = useStore();
@@ -22,6 +23,7 @@ function Shell() {
   // turn the aside into a containing block for its fixed descendants (see
   // Sidebar.tsx's className comment).
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [directoryOpen, setDirectoryOpen] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const group = state.groups.find((g) => g.id === state.selectedId);
   const bot = group ? undefined : (state.bots.find((b) => b.id === state.selectedId) ?? state.bots[0]);
@@ -97,6 +99,7 @@ function Shell() {
       )}
       <Sidebar
         open={drawerOpen}
+        onOpenDirectory={() => setDirectoryOpen(true)}
         onClose={() => {
           setDrawerOpen(false);
           menuButtonRef.current?.focus();
@@ -127,6 +130,7 @@ function Shell() {
       {state.computerOpen && bot && <ComputerPanel bot={bot} />}
       {state.appSettingsOpen && <SettingsModal />}
       {state.pluginsOpen && <PluginsPanel />}
+      {directoryOpen && <BotDirectoryPanel onClose={() => setDirectoryOpen(false)} />}
       </div>
     </div>
   );
