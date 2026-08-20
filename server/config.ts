@@ -37,6 +37,9 @@ export function claudeGateways(cfg: AppConfig): ClaudeGateway[] {
 }
 
 export interface AppConfig {
+  /** Optional HTTPS address exposed by a local trusted reverse proxy such as
+   * Tailscale Serve. The harness itself remains bound to loopback. */
+  remoteAccess?: { enabled?: boolean; publicUrl?: string };
   xai?: { key?: string; url?: string };
   /** Project key used for Sessions, catalog and agent tools. userId/sessionId
    * are non-secret local identifiers used to reuse one Composio Session. */
@@ -148,6 +151,7 @@ export function saveConfig(patch: Partial<AppConfig>): void {
     "claudeGateway",
     "tts",
     "profile",
+    "remoteAccess",
   ] as const) {
     if (patch[key] && typeof patch[key] === "object") {
       disk[key] = { ...(disk[key] as object), ...patch[key] };

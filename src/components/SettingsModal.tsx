@@ -3,7 +3,7 @@
 // is the stuff shared by every bot: who you are, your keys, and the
 // machine your bots can borrow.
 import { useEffect, useRef, useState } from "react";
-import { Key, Monitor, SpeakerHigh, User, X } from "@phosphor-icons/react";
+import { DeviceMobile, Key, Monitor, SpeakerHigh, User, X } from "@phosphor-icons/react";
 import { useStore, type AppSettingsSection } from "@/state/store";
 import { ApiKeyRow, DeepSeekOptions } from "./ApiKeys";
 import { ClaudeGateways } from "./ClaudeGateways";
@@ -12,12 +12,14 @@ import { LocalComputerSection } from "./LocalComputerSection";
 import { Card } from "./SettingsPrimitives";
 import { VoiceSettings } from "./VoiceSettings";
 import { cn } from "@/lib/cn";
+import { RemoteAccessSection } from "./RemoteAccessSection";
 
 const SECTIONS: Array<{ id: AppSettingsSection; label: string; icon: typeof User }> = [
   { id: "general", label: "General", icon: User },
   { id: "connections", label: "Connections", icon: Key },
   { id: "computer", label: "Local VM", icon: Monitor },
   { id: "voice", label: "Voice", icon: SpeakerHigh },
+  { id: "remote", label: "Mobile", icon: DeviceMobile },
 ];
 
 /** Name + email, persisted to /api/config {profile} on blur. */
@@ -154,11 +156,11 @@ export function SettingsModal() {
         aria-modal="true"
         aria-labelledby="app-settings-title"
         tabIndex={-1}
-        className="flex h-[560px] w-full max-w-[860px] overflow-hidden rounded-xl border border-hairline bg-panel outline-none"
+        className="flex h-[560px] w-full max-w-[860px] overflow-hidden rounded-xl border border-hairline bg-panel outline-none max-md:h-full max-md:flex-col max-md:rounded-none"
       >
         {/* section nav */}
-        <nav className="flex w-[190px] shrink-0 flex-col gap-0.5 border-r border-hairline p-3">
-          <div id="app-settings-title" className="px-2 pb-2 pt-1 text-[15px] font-semibold text-ink">
+        <nav className="flex w-[190px] shrink-0 flex-col gap-0.5 border-r border-hairline p-3 max-md:w-full max-md:flex-row max-md:overflow-x-auto max-md:border-r-0 max-md:border-b">
+          <div id="app-settings-title" className="px-2 pb-2 pt-1 text-[15px] font-semibold text-ink max-md:hidden">
             Settings
           </div>
           {SECTIONS.map(({ id, label, icon: Icon }) => (
@@ -175,7 +177,7 @@ export function SettingsModal() {
               {label}
             </button>
           ))}
-          <div className="mt-auto border-t border-hairline px-2 pt-3 text-[10.5px] leading-relaxed text-ink-secondary">
+          <div className="mt-auto border-t border-hairline px-2 pt-3 text-[10.5px] leading-relaxed text-ink-secondary max-md:hidden">
             <div>Product Owner</div>
             <div className="font-medium text-ink">Umut Çelik</div>
             <div className="mt-1 flex gap-2">
@@ -244,6 +246,7 @@ export function SettingsModal() {
             {section === "voice" && <VoiceSettings />}
 
             {section === "computer" && <LocalComputerSection />}
+            {section === "remote" && <RemoteAccessSection />}
           </div>
         </div>
       </div>
