@@ -83,6 +83,7 @@ export function saveConfig(patch) {
         "claudeGateway",
         "tts",
         "profile",
+        "remoteAccess",
     ]) {
         if (patch[key] && typeof patch[key] === "object") {
             disk[key] = { ...disk[key], ...patch[key] };
