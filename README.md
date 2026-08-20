@@ -8,14 +8,14 @@
 
 <sub>An open-source version of **Grok Bot** — bring-your-own-agent, local-first, on the models you already have.</sub>
 
-Every bot in the sidebar is a real agent — Claude or Codex running locally under the hood — with its own
-personality, its own model, its own cloud computer, and its own connected apps.
+Every bot in the sidebar is a real agent — Claude, Codex, Grok, or DeepSeek Harness running locally under
+the hood — with its own personality, its own model, its own cloud computer, and its own connected apps.
 Talk to them like contacts. Watch them work. Approve what matters.
 
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
 ![Electron](https://img.shields.io/badge/Electron-macOS%20%C2%B7%20Windows%20%C2%B7%20Ubuntu-2B2E3A?logo=electron&logoColor=9FEAF9)
-![Agents](https://img.shields.io/badge/agents-Claude%20·%20Codex-d97757)
+![Agents](https://img.shields.io/badge/agents-Claude%20·%20Codex%20·%20Grok%20·%20DeepSeek-d97757)
 ![PRs](https://img.shields.io/badge/PRs-welcome-38d591)
 
 <br>
@@ -42,8 +42,12 @@ it keeps the idea (AI as a *messaging app*: a roster of bots you chat with, each
 memory of its thread, model, computer, and apps) and rebuilds it open, local-first, and on the agents you
 already have:
 
-- **Bring your own agents.** Bots run on the `claude`, `codex`, and `grok` CLIs installed on your own machine
-  — your existing logins and subscriptions, no new accounts, no proxy in the middle.
+- **Bring your own agents.** Bots run on the `claude`, `codex`, and `grok` CLIs installed on your own machine,
+  or on DeepSeek's own runtime via DeepSeek Harness — your existing logins and subscriptions, no new
+  accounts, no proxy in the middle.
+- **Any Anthropic-compatible gateway.** Point the Claude engine at Anthropic directly, or configure one or
+  more Anthropic-compatible gateways from Settings; each configured gateway shows up as its own engine in
+  the model picker with its own model list, instead of masquerading as Claude.
 - **Local first.** One small harness server on `127.0.0.1` owns every agent process. Transcripts, keys, and
   events live in `~/.mauscrew`, not a cloud.
 - **Agents with hands.** Each bot can get a real computer — a cloud Linux desktop it drives while you watch
@@ -149,21 +153,22 @@ flowchart LR
         BROKER[Permission broker]
     end
     subgraph agents ["Agents on your computer"]
-        CL[claude CLI]
+        CL[claude CLI / gateways]
         CX[codex CLI]
         GR[grok CLI]
+        DS[DeepSeek Harness runtime]
     end
     UI -- "HTTP commands" --> server
     BUS -- "one SSE stream" --> UI
-    REG --> CL & CX & GR
-    CL & CX & GR -- "permission requests" --> BROKER
+    REG --> CL & CX & GR & DS
+    CL & CX & GR & DS -- "permission requests" --> BROKER
     server -- "Box API" --> BOX[("Cloud computer<br/>box.ascii.dev")]
     server -- "Composio Session" --> APPS[("Gmail · Slack · GitHub · …")]
 ```
 
 | Layer | Where | What it does |
 |---|---|---|
-| Drivers | `server/drivers/` | One per provider: Claude, Codex, and Grok Build over their local CLIs (stream-JSON / JSON-RPC / ACP), plus a cloud-computer agent. Unknown drivers degrade to "unavailable", never crash the fleet. |
+| Drivers | `server/drivers/` | One per provider: Claude (direct or any configured Anthropic-compatible gateway, each its own engine), Codex, and Grok Build over their local CLIs (stream-JSON / JSON-RPC / ACP); DeepSeek Harness drives DeepSeek's own JSON-RPC runtime directly (no CLI); plus a cloud-computer agent. Unknown drivers degrade to "unavailable", never crash the fleet. |
 | Harness | `server/harness/` | Registry (configs → live instances) and the fan-in event bus every client folds. |
 | API | `server/index.ts` | Bots, turns, approvals, model catalog, computer lifecycle, connectors, config — HTTP + SSE. |
 | Voice | `server/tts/` | ElevenLabs, bring your own key. Runs on the harness so the key never reaches the UI; markdown is rewritten into something worth hearing before it is spoken. |
@@ -186,7 +191,8 @@ pnpm dev:desktop   # Electron shell; keep the two commands above running
 
 Requirements: **macOS, Windows, or Ubuntu 24.04 x64**, **Node 24+**, **pnpm**, and at least one agent CLI — [`claude`](https://claude.com/claude-code),
 [`codex`](https://github.com/openai/codex), or [`grok`](https://x.ai/cli) — installed and logged in. They appear
-in the model picker automatically.
+in the model picker automatically. DeepSeek Harness needs no CLI — see below — and Claude can also be pointed
+at any Anthropic-compatible gateway from **Settings → API Keys**.
 
 ### DeepSeek Harness (optional engine)
 
