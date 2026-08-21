@@ -3,9 +3,18 @@
 // Composio API key is configured, a curated set otherwise. Icons resolve
 // logo → favicon → monogram.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowClockwise, Spinner, X } from "@phosphor-icons/react";
+import { ArrowClockwise, ArrowSquareOut, Check, Copy, Spinner, X } from "@phosphor-icons/react";
 import { api, useStore } from "@/state/store";
 import { cn } from "@/lib/cn";
+
+const COMPOSIO_OAUTH_CALLBACK_URL = "https://backend.composio.dev/api/v3.1/toolkits/auth/callback";
+const COMPOSIO_AUTH_CONFIGS_URL = "https://dashboard.composio.dev";
+const X_DEVELOPER_CONSOLE_URL = "https://developer.x.com/en/portal/dashboard";
+
+function needsCustomOAuthSetup(slug: string, message: string): boolean {
+  return ["twitter", "x", "x-twitter"].includes(slug.trim().toLowerCase())
+    && /custom OAuth Auth Config|does not manage auth|auth_config_override/i.test(message);
+}
 
 interface ToolkitCard {
   slug: string;
@@ -48,6 +57,8 @@ export function PluginsPanel() {
   const [busySlug, setBusySlug] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [setupSlug, setSetupSlug] = useState<string | null>(null);
+  const [callbackCopied, setCallbackCopied] = useState(false);
   const [search, setSearch] = useState("");
 
   const refreshStatus = useCallback((slugs: string[]): Promise<Record<string, { connected: boolean }>> => {
@@ -124,6 +135,7 @@ export function PluginsPanel() {
   const connect = (slug: string) => {
     setBusySlug(slug);
     setError(null);
+    setSetupSlug(null);
     api(`/api/connectors/${slug}/authorize`, { method: "POST" })
       .then(({ url }) => {
         window.open(url);
@@ -137,8 +149,21 @@ export function PluginsPanel() {
           });
         }, 5000);
       })
-      .catch((e) => setError(e.message))
+      .catch((e) => {
+        const message = e instanceof Error ? e.message : String(e);
+        setError(message);
+        if (needsCustomOAuthSetup(slug, message)) setSetupSlug("twitter");
+      })
       .finally(() => setBusySlug(null));
+  };
+
+  const copyCallbackUrl = () => {
+    navigator.clipboard.writeText(COMPOSIO_OAUTH_CALLBACK_URL)
+      .then(() => {
+        setCallbackCopied(true);
+        window.setTimeout(() => setCallbackCopied(false), 2000);
+      })
+      .catch(() => setCallbackCopied(false));
   };
 
   const disconnect = (slug: string) => {
@@ -220,19 +245,71 @@ export function PluginsPanel() {
             to browse the full catalog.
           </div>
         )}
-        {error && (
+        {error && setupSlug !== "twitter" && (
           <div className="mt-2 rounded-lg border border-danger/25 bg-danger/10 px-3 py-2 text-[12px] leading-relaxed text-danger">
             {error}
-            {/custom OAuth Auth Config/i.test(error) && (
+          </div>
+        )}
+        {error && setupSlug === "twitter" && (
+          <div className="mt-3 rounded-xl border border-warning/30 bg-warning/10 p-4 text-[12px] leading-relaxed text-ink">
+            <div className="text-[14px] font-semibold">X OAuth setup required</div>
+            <p className="mt-1 text-ink-secondary">
+              X does not provide Composio-managed OAuth. Create one X developer app and one Twitter Auth Config
+              in the same Composio project as your saved project key.
+            </p>
+            <ol className="mt-3 list-decimal space-y-2 pl-5 text-ink-secondary">
+              <li>
+                Open the X Developer Console, create or select an app, and enable OAuth 2.0. Use a confidential
+                web app so X provides a Client ID and Client Secret.
+              </li>
+              <li>
+                Add this exact callback URI to the X app:
+                <div className="mt-1 flex min-w-0 items-center gap-2 rounded-lg border border-hairline bg-inset px-2.5 py-2">
+                  <code className="min-w-0 flex-1 break-all text-[11px] text-ink">{COMPOSIO_OAUTH_CALLBACK_URL}</code>
+                  <button
+                    type="button"
+                    onClick={copyCallbackUrl}
+                    className="shrink-0 rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+                    aria-label="Copy Composio callback URL"
+                    title="Copy callback URL"
+                  >
+                    {callbackCopied ? <Check size={15} weight="bold" /> : <Copy size={15} weight="bold" />}
+                  </button>
+                </div>
+              </li>
+              <li>
+                In Composio, create an Auth Config for <strong className="text-ink">Twitter</strong>, choose
+                <strong className="text-ink"> OAuth2</strong>, enable your own developer credentials, then enter
+                the X Client ID and Client Secret.
+              </li>
+              <li>Return here and choose Retry. MausCrew will find the enabled Auth Config automatically.</li>
+            </ol>
+            <div className="mt-4 flex flex-wrap gap-2">
               <a
-                href="https://docs.composio.dev/docs/auth-configuration/custom-auth-configs"
+                href={X_DEVELOPER_CONSOLE_URL}
                 target="_blank"
                 rel="noreferrer"
-                className="ml-1 underline hover:text-ink"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-raised px-3 py-2 font-medium text-ink hover:bg-raised-hover"
               >
-                Open setup guide
+                X Developer Console <ArrowSquareOut size={13} weight="bold" />
               </a>
-            )}
+              <a
+                href={COMPOSIO_AUTH_CONFIGS_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-raised px-3 py-2 font-medium text-ink hover:bg-raised-hover"
+              >
+                Composio Auth Configs <ArrowSquareOut size={13} weight="bold" />
+              </a>
+              <button
+                type="button"
+                onClick={() => connect("twitter")}
+                disabled={busySlug === "twitter"}
+                className="rounded-lg bg-accent px-3 py-2 font-semibold text-app hover:brightness-110 disabled:opacity-50"
+              >
+                {busySlug === "twitter" ? "Checking…" : "Retry X connection"}
+              </button>
+            </div>
           </div>
         )}
 

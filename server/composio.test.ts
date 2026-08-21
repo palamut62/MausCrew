@@ -13,7 +13,7 @@ import {
 let api: Server;
 let base = "";
 const calls: Array<{ method: string; path: string; query: string; body: any }> = [];
-let twitterAuthConfigs = [{ id: "ac_twitter", is_disabled: false }];
+let twitterAuthConfigs = [{ id: "ac_twitter", status: "ENABLED", is_enabled_for_tool_router: true }];
 
 beforeAll(async () => {
   api = createServer(async (req, res) => {
@@ -54,7 +54,7 @@ beforeAll(async () => {
         ],
       }));
     }
-    if (req.method === "GET" && url.pathname === "/api/v3/auth_configs") {
+    if (req.method === "GET" && url.pathname === "/api/v3.1/auth_configs") {
       res.writeHead(200, { "content-type": "application/json" });
       return res.end(JSON.stringify({ items: twitterAuthConfigs }));
     }
@@ -143,6 +143,11 @@ describe.sequential("Composio Sessions", () => {
         && call.path.endsWith("/link")
         && call.body.toolkit === "twitter",
     )?.body).toEqual({ toolkit: "twitter", auth_config_override: "ac_twitter" });
+    expect(calls.some(
+      (call) => call.method === "GET"
+        && call.path === "/api/v3.1/auth_configs"
+        && call.query.includes("toolkit_slug=twitter"),
+    )).toBe(true);
     await expect(removeService(cfg, "github")).resolves.toEqual({ removed: 1 });
     expect(calls.some(
       (call) => call.method === "DELETE"
