@@ -57,8 +57,10 @@ export interface OptionCardData {
 export interface Message {
   id: string;
   role: "bot" | "user";
-  kind: "text" | "options" | "activity" | "screen";
+  kind: "text" | "options" | "activity" | "screen" | "structured";
   text?: string;
+  /** Validated built-in component request; never executable React or JS. */
+  ui?: { component: string; props: Record<string, unknown> };
   card?: OptionCardData;
   /** activity messages: tool name + outcome. `spoken` is the same chip as
    * a phrase a voice can read ("reading a file") — computed once here so

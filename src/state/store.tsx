@@ -49,8 +49,9 @@ export interface OptionCardData {
 export interface Message {
   id: string;
   role: "bot" | "user";
-  kind: "text" | "options" | "activity" | "screen";
+  kind: "text" | "options" | "activity" | "screen" | "structured";
   text?: string;
+  ui?: { component: string; props: Record<string, unknown> };
   card?: OptionCardData;
   /** activity messages: tool name + outcome. `spoken` is the server's
    * narration of the same chip ("reading a file"), used by call mode. */
