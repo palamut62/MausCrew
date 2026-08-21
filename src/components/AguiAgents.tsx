@@ -138,6 +138,9 @@ export function AguiAgents() {
       )}
       <div className="text-[10.5px] leading-relaxed text-ink-secondary">
         AG-UI auth values are encrypted with the operating system credential store in the desktop app and are never returned to this form.
+        <span className="mt-1 block">
+          Tools executed inside a remote AG-UI service remain under that service&apos;s control. Register tools through MausCrew MCP when local policy and approval must apply.
+        </span>
       </div>
     </div>
   );
