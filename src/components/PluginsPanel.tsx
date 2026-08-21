@@ -152,7 +152,7 @@ export function PluginsPanel() {
       .catch((e) => {
         const message = e instanceof Error ? e.message : String(e);
         setError(message);
-        if (needsCustomOAuthSetup(slug, message)) setSetupSlug("twitter");
+        if (needsCustomOAuthSetup(slug, message)) setSetupSlug(slug);
       })
       .finally(() => setBusySlug(null));
   };
@@ -245,12 +245,12 @@ export function PluginsPanel() {
             to browse the full catalog.
           </div>
         )}
-        {error && setupSlug !== "twitter" && (
+        {error && !setupSlug && (
           <div className="mt-2 rounded-lg border border-danger/25 bg-danger/10 px-3 py-2 text-[12px] leading-relaxed text-danger">
             {error}
           </div>
         )}
-        {error && setupSlug === "twitter" && (
+        {error && setupSlug && (
           <div className="mt-3 rounded-xl border border-warning/30 bg-warning/10 p-4 text-[12px] leading-relaxed text-ink">
             <div className="text-[14px] font-semibold">X OAuth setup required</div>
             <p className="mt-1 text-ink-secondary">
@@ -303,11 +303,11 @@ export function PluginsPanel() {
               </a>
               <button
                 type="button"
-                onClick={() => connect("twitter")}
-                disabled={busySlug === "twitter"}
+                onClick={() => connect(setupSlug)}
+                disabled={busySlug === setupSlug}
                 className="rounded-lg bg-accent px-3 py-2 font-semibold text-app hover:brightness-110 disabled:opacity-50"
               >
-                {busySlug === "twitter" ? "Checking…" : "Retry X connection"}
+                {busySlug === setupSlug ? "Checking…" : "Retry X connection"}
               </button>
             </div>
           </div>
