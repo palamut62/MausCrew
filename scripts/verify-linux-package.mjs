@@ -74,18 +74,18 @@ try {
     "applications",
     "com.mauscrew.app.desktop",
   );
-  const scalableIcon = path.join(
+  const packagedIcon = path.join(
     extracted,
     "usr",
     "share",
     "icons",
     "hicolor",
-    "scalable",
+    "1024x1024",
     "apps",
-    "mauscrew.svg",
+    "mauscrew.png",
   );
   requireFile(desktopFile);
-  requireFile(scalableIcon);
+  requireFile(packagedIcon);
   const desktop = readFileSync(desktopFile, "utf8");
   for (const expected of [
     "Name=MausCrew",
