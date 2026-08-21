@@ -10,6 +10,8 @@
 //                                          immediately, the peer runs after your
 //                                          current turn finishes, the user sees
 //                                          the peer's reply as its own turn
+//   create_bot(name, title, description) → propose a durable specialist; the
+//                                          harness creates it only after approval
 //
 // Speaks raw JSON-RPC 2.0 over stdio (no MCP SDK — house style, matches
 // computer-proxy / permission-proxy). All state comes from env, injected by
@@ -58,6 +60,20 @@ const TOOLS = [
         reason: { type: "string", description: "Optional one-line reason for the delegation (shown to the user as a chip)." },
       },
       required: ["bot_id", "message"],
+    },
+  },
+  {
+    name: "create_bot",
+    description:
+      "Create a durable specialist bot when work has a genuinely distinct long-lived owner, tools, approval boundary, or recurring responsibility. Do not use this for one-off subtasks. The user must approve every creation.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Short unique teammate name." },
+        title: { type: "string", description: "Focused job title, such as Bug Reproduction." },
+        description: { type: "string", description: "Operational responsibilities, expected output, and approval boundaries." },
+      },
+      required: ["name", "title", "description"],
     },
   },
 ];
@@ -121,6 +137,20 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
     // Fire-and-forget by contract: the harness returns immediately, the
     // peer turn runs after our current turn finishes.
     return { text: typeof r.message === "string" ? r.message : "Delegation queued." };
+  }
+  if (name === "create_bot") {
+    const botName = String(args.name ?? "").trim();
+    const title = String(args.title ?? "").trim();
+    const description = String(args.description ?? "").trim();
+    if (!botName || !title || !description) {
+      return { text: "create_bot needs name, title, and description.", isError: true };
+    }
+    const r = await api(`/api/internal/create-bot`, {
+      method: "POST",
+      body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, name: botName, title, description, depth: DEPTH }),
+    });
+    if (r.error) return { text: `Couldn't create the bot: ${r.error}`, isError: true };
+    return { text: `Created @${r.name ?? botName} as a durable teammate [id: ${r.botId ?? "unknown"}].` };
   }
   return { text: `Unknown tool: ${name}`, isError: true };
 }

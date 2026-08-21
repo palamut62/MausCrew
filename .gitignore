@@ -16,3 +16,21 @@ output/
 # Guard against malformed Windows temp paths accidentally materialized as a
 # single repository-relative directory by cross-platform runtime tests.
 C*Users*AppData*Local*Temp*/
+
+# Local AI-agent instructions are never published with application source.
+CLAUDE.md
+.claude/
+AGENTS.md
+.codex/
+GEMINI.md
+.gemini/
+.cursor/
+.cursorrules
+.windsurf/
+.windsurfrules
+.aider*
+.opencode/
+opencode.json
+.github/copilot-instructions.md
+.specstory/
+.continue/

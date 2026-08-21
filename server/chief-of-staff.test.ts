@@ -19,6 +19,8 @@ describe("chiefOfStaffSystemPrompt", () => {
     expect(prompt).not.toContain("Secret");
     expect(prompt).not.toContain("Atlas —");
     expect(prompt).toContain("Use ask_bot");
+    expect(prompt).toContain("create_bot");
+    expect(prompt).toContain("one-off subtask");
   });
 
   it("does not promise delegation when the engine cannot mount agent tools", () => {
