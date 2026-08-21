@@ -35,6 +35,9 @@ let secureCredentials = {};
 let mainWindow = null;
 let tray = null;
 let quitRequested = false;
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+
+if (!hasSingleInstanceLock) app.quit();
 
 const CREDENTIALS_FILE = path.join(app.getPath("userData"), "credentials.bin");
 
@@ -311,6 +314,10 @@ function showMainWindow() {
   return createWindow();
 }
 
+app.on("second-instance", () => {
+  if (app.isReady()) showMainWindow();
+});
+
 function createTray() {
   if (tray) return tray;
   try {
@@ -460,6 +467,7 @@ ipcMain.handle("credential:set", async (_event, name, value) => {
 });
 
 app.whenReady().then(async () => {
+  if (!hasSingleInstanceLock) return;
   if (process.platform === "darwin") app.dock.setIcon(APP_ICON);
   if (app.isPackaged) {
     migrateLegacySecureCredentials();
