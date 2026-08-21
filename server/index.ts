@@ -106,6 +106,7 @@ import { WebhookManager } from "./webhooks.ts";
 const PORT = Number(process.env.MAUSCREW_PORT || 8799);
 const WEBHOOK_PORT = Number(process.env.MAUSCREW_WEBHOOK_PORT || PORT + 1);
 const STATIC_DIR = process.env.MAUSCREW_STATIC_DIR || null;
+const LOCAL_VM_DISABLED = process.env.MAUSCREW_DISABLE_LOCAL_VM === "1";
 const MIME: Record<string, string> = {
   ".html": "text/html",
   ".js": "text/javascript",
@@ -441,11 +442,13 @@ const localVmIdle = new LocalVmIdleTimer(
 
 // A running VM may have survived an app/server restart. Start its idle
 // backstop even if nobody opens Settings or begins a turn this session.
-void containerComputerStatus()
-  .then((status) => {
-    if (status.container === "running") localVmIdle.touch();
-  })
-  .catch(() => null);
+if (!LOCAL_VM_DISABLED) {
+  void containerComputerStatus()
+    .then((status) => {
+      if (status.container === "running") localVmIdle.touch();
+    })
+    .catch(() => null);
+}
 
 async function localVmReadyForTurn() {
   let status = await containerComputerStatus();
@@ -1093,6 +1096,7 @@ async function startTurn(
       // Explicit destinations are strict. In particular, Local VM must never
       // fall through to host CUA and accidentally click on the user's Mac.
       if (wants === "vm") {
+        if (LOCAL_VM_DISABLED) throw new Error("the Local VM is disabled for this harness process");
         if (!mountsComputerMcp || instance.driverKind === "boxAgent") {
           throw new Error("this model engine cannot use the Local VM — choose Claude or an ACP engine, or select another computer destination");
         }
@@ -1128,6 +1132,7 @@ async function startTurn(
       // machine-local bot into a billing error when its VM is already ready.
       if (
         wants === undefined &&
+        !LOCAL_VM_DISABLED &&
         mountsComputerMcp &&
         instance.driverKind !== "boxAgent" &&
         !localVmLifecycleBusy &&

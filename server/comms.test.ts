@@ -81,6 +81,7 @@ describe("comms e2e (fake ACP fleet)", () => {
   let child: ChildProcess;
   let home: string;
   let stderr = "";
+  let stdout = "";
 
   const api = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
     const res = await fetch(`${BASE}${path}`, {
@@ -155,10 +156,14 @@ describe("comms e2e (fake ACP fleet)", () => {
         HOME: home,
         USERPROFILE: home,
         MAUSCREW_PORT: String(PORT),
+        // Peer-comms tests exercise provider and MCP routing, not the host's
+        // real Docker state. A stopped developer VM must not add a 75s boot.
+        MAUSCREW_DISABLE_LOCAL_VM: "1",
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
     child.stderr!.on("data", (c) => (stderr += c));
+    child.stdout!.on("data", (c) => (stdout = (stdout + String(c)).slice(-20_000)));
 
     const deadline = Date.now() + 20_000;
     for (;;) {
@@ -197,7 +202,7 @@ describe("comms e2e (fake ACP fleet)", () => {
       // deterministic roster: hide the seeded bot, add Asker + Helper
       const seeded = (await api("GET", "/api/bots")).body.bots[0];
       await api("PATCH", `/api/bots/${seeded.id}`, { hidden: true });
-      const selection = { instanceId: "grok", model: "fake-model" };
+      const selection = { instanceId: "grok", model: "grok-4.6" };
       const helper = (await api("POST", "/api/bots")).body.bot;
       await api("PATCH", `/api/bots/${helper.id}`, { name: "Helper", modelSelection: selection });
       const asker = (await api("POST", "/api/bots")).body.bot;
@@ -217,7 +222,7 @@ describe("comms e2e (fake ACP fleet)", () => {
         if (settled && !askerBot.busy) break;
         if (Date.now() > deadline) {
           throw new Error(
-            `A never got the peer reply. messages: ${JSON.stringify(askerBot.messages.slice(-6))}\nstderr: ${stderr.slice(-2000)}`,
+            `A never got the peer reply. messages: ${JSON.stringify(askerBot.messages.slice(-6))}\nstdout: ${stdout.slice(-4000)}\nstderr: ${stderr.slice(-2000)}`,
           );
         }
         await new Promise((r) => setTimeout(r, 250));
@@ -269,8 +274,8 @@ describe("comms e2e (fake ACP fleet)", () => {
     async () => {
       const seeded = (await api("GET", "/api/bots")).body.bots[0];
       await api("PATCH", `/api/bots/${seeded.id}`, { hidden: true });
-      const helperSelection = { instanceId: "grok", model: "fake-model" };
-      const askerSelection = { instanceId: "askerDelegate", model: "fake-model" };
+      const helperSelection = { instanceId: "grok", model: "grok-4.6" };
+      const askerSelection = { instanceId: "askerDelegate", model: "grok-4.6" };
       const helper = (await api("POST", "/api/bots")).body.bot;
       await api("PATCH", `/api/bots/${helper.id}`, { name: "Helper", modelSelection: helperSelection });
       const asker = (await api("POST", "/api/bots")).body.bot;
@@ -378,12 +383,12 @@ describe("comms e2e (fake ACP fleet)", () => {
       const helper = (await api("POST", "/api/bots")).body.bot;
       await api("PATCH", `/api/bots/${helper.id}`, {
         name: "Helper",
-        modelSelection: { instanceId: "helperEmpty", model: "fake-model" },
+        modelSelection: { instanceId: "helperEmpty", model: "grok-4.6" },
       });
       const asker = (await api("POST", "/api/bots")).body.bot;
       await api("PATCH", `/api/bots/${asker.id}`, {
         name: "Asker",
-        modelSelection: { instanceId: "askerDelegate", model: "fake-model" },
+        modelSelection: { instanceId: "askerDelegate", model: "grok-4.6" },
       });
 
       const send = await api("POST", `/api/bots/${asker.id}/messages`, { text: "hey @Helper please pick this up" });
@@ -428,12 +433,12 @@ describe("comms e2e (fake ACP fleet)", () => {
       const helper = (await api("POST", "/api/bots")).body.bot;
       await api("PATCH", `/api/bots/${helper.id}`, {
         name: "Helper",
-        modelSelection: { instanceId: "helperHang", model: "fake-model" },
+        modelSelection: { instanceId: "helperHang", model: "grok-4.6" },
       });
       const asker = (await api("POST", "/api/bots")).body.bot;
       await api("PATCH", `/api/bots/${asker.id}`, {
         name: "Asker",
-        modelSelection: { instanceId: "askerDelegate", model: "fake-model" },
+        modelSelection: { instanceId: "askerDelegate", model: "grok-4.6" },
       });
 
       const send = await api("POST", `/api/bots/${asker.id}/messages`, { text: "hey @Helper please pick this up" });
@@ -492,12 +497,12 @@ describe("comms e2e (fake ACP fleet)", () => {
       const helper = (await api("POST", "/api/bots")).body.bot;
       await api("PATCH", `/api/bots/${helper.id}`, {
         name: "Helper",
-        modelSelection: { instanceId: "helperCrash", model: "fake-model" },
+        modelSelection: { instanceId: "helperCrash", model: "grok-4.6" },
       });
       const asker = (await api("POST", "/api/bots")).body.bot;
       await api("PATCH", `/api/bots/${asker.id}`, {
         name: "Asker",
-        modelSelection: { instanceId: "askerDelegate", model: "fake-model" },
+        modelSelection: { instanceId: "askerDelegate", model: "grok-4.6" },
       });
 
       const send = await api("POST", `/api/bots/${asker.id}/messages`, { text: "hey @Helper please pick this up" });
@@ -523,7 +528,7 @@ describe("comms e2e (fake ACP fleet)", () => {
         if (Date.now() > deadline) {
           throw new Error(
             `no failed terminal chip in channel. channel tail: ${JSON.stringify(channel?.messages?.slice(-6))}\n` +
-              `stderr: ${stderr.slice(-2000)}`,
+              `stdout: ${stdout.slice(-4000)}\nstderr: ${stderr.slice(-2000)}`,
           );
         }
         await new Promise((r) => setTimeout(r, 250));
@@ -552,7 +557,7 @@ describe("comms e2e (fake ACP fleet)", () => {
       const asker = (await api("POST", "/api/bots")).body.bot;
       await api("PATCH", `/api/bots/${asker.id}`, {
         name: "Asker",
-        modelSelection: { instanceId: "askerDelegate", model: "fake-model" },
+        modelSelection: { instanceId: "askerDelegate", model: "grok-4.6" },
       });
 
       const send = await api("POST", `/api/bots/${asker.id}/messages`, { text: "hey @Helper please pick this up" });
@@ -593,7 +598,7 @@ describe("comms e2e (fake ACP fleet)", () => {
     const creator = (await api("POST", "/api/bots")).body.bot;
     await api("PATCH", `/api/bots/${creator.id}`, {
       name: "Chief",
-      modelSelection: { instanceId: "creator", model: "fake-model" },
+      modelSelection: { instanceId: "creator", model: "grok-4.6" },
     });
     const before = (await api("GET", "/api/bots")).body.bots.length;
     expect((await api("POST", `/api/bots/${creator.id}/messages`, { text: "Build a durable research role" })).status).toBe(202);
@@ -642,7 +647,7 @@ describe("comms e2e (fake ACP fleet)", () => {
     async () => {
       const seeded = (await api("GET", "/api/bots")).body.bots[0];
       await api("PATCH", `/api/bots/${seeded.id}`, { hidden: true });
-      const selection = { instanceId: "grok", model: "fake-model" };
+      const selection = { instanceId: "grok", model: "grok-4.6" };
       const helper = (await api("POST", "/api/bots")).body.bot;
       await api("PATCH", `/api/bots/${helper.id}`, { name: "Helper", modelSelection: selection });
       const asker = (await api("POST", "/api/bots")).body.bot;
@@ -733,7 +738,7 @@ describe("comms e2e (fake ACP fleet)", () => {
   it("refuses ask_bot with a denial chip and never starts B when the user denies", async () => {
     const seeded = (await api("GET", "/api/bots")).body.bots[0];
     await api("PATCH", `/api/bots/${seeded.id}`, { hidden: true });
-    const selection = { instanceId: "grok", model: "fake-model" };
+    const selection = { instanceId: "grok", model: "grok-4.6" };
     const helper = (await api("POST", "/api/bots")).body.bot;
     await api("PATCH", `/api/bots/${helper.id}`, { name: "Helper", modelSelection: selection });
     const asker = (await api("POST", "/api/bots")).body.bot;
@@ -825,8 +830,8 @@ describe("comms e2e (fake ACP fleet)", () => {
     // A runs delegate-peer and hands off to B, which runs ask-peer. If the
     // depth guard broke, B's depth-1 turn would call ask_bot and its reply
     // would carry the "one hop" refusal — the regression signal.
-    const selection = { instanceId: "grok", model: "fake-model" };
-    const askerSelection = { instanceId: "askerDelegate", model: "fake-model" };
+    const selection = { instanceId: "grok", model: "grok-4.6" };
+    const askerSelection = { instanceId: "askerDelegate", model: "grok-4.6" };
     const helper = (await api("POST", "/api/bots")).body.bot;
     await api("PATCH", `/api/bots/${helper.id}`, { name: "Helper", modelSelection: selection });
     const asker = (await api("POST", "/api/bots")).body.bot;
