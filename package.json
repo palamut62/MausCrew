@@ -46,6 +46,7 @@
     "package": "pnpm package:mac"
   },
   "dependencies": {
+    "@ag-ui/client": "0.0.58",
     "@phosphor-icons/react": "^2.1.10",
     "@trycua/cua-driver": "0.20.0",
     "clsx": "^2.1.1",

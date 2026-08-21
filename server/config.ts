@@ -40,6 +40,15 @@ export interface AppConfig {
   /** Optional HTTPS address exposed by a local trusted reverse proxy such as
    * Tailscale Serve. The harness itself remains bound to loopback. */
   remoteAccess?: { enabled?: boolean; publicUrl?: string };
+  /** Remote agents that speak the open AG-UI HTTP/SSE protocol. Auth values
+   * are held by Electron safeStorage; this list contains metadata only. */
+  aguiAgents?: Array<{
+    id: string;
+    label: string;
+    endpoint: string;
+    authHeader?: string;
+    authConfigured?: boolean;
+  }>;
   xai?: { key?: string; url?: string };
   /** Project key used for Sessions, catalog and agent tools. userId/sessionId
    * are non-secret local identifiers used to reuse one Composio Session. */
@@ -165,6 +174,7 @@ export function saveConfig(patch: Partial<AppConfig>): void {
     disk.claudeGateways = patch.claudeGateways;
     delete disk.claudeGateway;
   }
+  if (patch.aguiAgents) disk.aguiAgents = patch.aguiAgents;
   mkdirSync(DATA_DIR, { recursive: true });
   writeFileAtomic(p, JSON.stringify(disk, null, 2), { mode: 0o600 });
 }
@@ -258,7 +268,27 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
       },
     };
   }
+  for (const agent of cfg.aguiAgents ?? []) {
+    const instanceId = `agui-${agent.id}`;
+    if (map[instanceId]) continue;
+    const authEnv = aguiAuthEnv(agent.id);
+    map[instanceId] = {
+      driver: "agui",
+      displayName: agent.label.trim() || gatewayHost(agent.endpoint),
+      environment: process.env[authEnv] ? { [authEnv]: process.env[authEnv]! } : {},
+      config: {
+        endpoint: agent.endpoint,
+        authHeader: agent.authHeader || "Authorization",
+        authEnv,
+        allowPrivateHosts: true,
+      },
+    };
+  }
   return map;
+}
+
+export function aguiAuthEnv(id: string): string {
+  return `MAUSCREW_AGUI_AUTH_${id.replace(/[^A-Za-z0-9]/g, "_").toUpperCase()}`;
 }
 
 /** A readable fallback name: the endpoint's host, which is what distinguishes

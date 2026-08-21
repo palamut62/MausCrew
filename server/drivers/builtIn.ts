@@ -12,6 +12,7 @@ import { KimiAgentDriver } from "./acp/kimi.ts";
 import { DroidAgentDriver } from "./acp/droid.ts";
 import { OpenCodeGoDriver } from "./acp/opencode-go.ts";
 import { DeepSeekHarnessDriver } from "./deepseek-harness.ts";
+import { AguiDriver } from "./agui.ts";
 
 export const BUILT_IN_DRIVERS: readonly AnyProviderDriver[] = [
   GrokDriver,
@@ -26,4 +27,5 @@ export const BUILT_IN_DRIVERS: readonly AnyProviderDriver[] = [
   BoxAgentDriver,
   // appended last so the existing engine ordering in the UI is unchanged
   DeepSeekHarnessDriver,
+  AguiDriver,
 ];
