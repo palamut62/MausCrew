@@ -50,8 +50,8 @@ already have:
   the model picker with its own model list, instead of masquerading as Claude.
 - **Local first.** One small harness server on `127.0.0.1` owns every agent process. Transcripts, keys, and
   events live in `~/.mauscrew`, not a cloud.
-- **Agents with hands.** Each bot can get a real computer — a cloud Linux desktop it drives while you watch
-  live, or your own Mac — plus 500+ apps through Composio.
+- **Agents with hands.** Each bot can get a real computer — a cloud Linux desktop, a separate Local VM,
+  or your own supported desktop — plus 500+ apps through Composio.
 
 ## Features
 
@@ -71,8 +71,8 @@ providers dimmed with the reason. Switch a bot's model mid-conversation.
 
 ### 🖥️ Every bot gets a computer
 
-Open the Computer panel and the bot's cloud desktop spins up on its own — live screen preview while it
-works, "Open desktop" to take over in your browser, or point the bot at *this Mac* instead.
+Open the Computer panel and choose where the bot works: a cloud desktop, the isolated Local VM, or this
+computer. Live previews let you follow along, and "Open desktop" lets you take over when supported.
 
 <img src="docs/screenshots/computer-panel.png" alt="Computer panel with live screen preview" width="100%">
 
