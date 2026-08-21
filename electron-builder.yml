@@ -47,12 +47,9 @@ mac:
       arch: arm64
     - target: zip
       arch: arm64
-  # A 1024px master, not a prebuilt .icns: iconutil only runs on macOS, so a
-  # checked-in .icns silently goes stale the moment the brand changes on any
-  # other machine. electron-builder converts PNG → icns itself on every
-  # platform. build/icon.iconset/ is kept in sync as the iconutil source for
-  # anyone who wants to hand-build one.
-  icon: build/icon-1024.png
+  # The supplied mint blob icon set includes a native multi-resolution ICNS.
+  # Keep build/icon.iconset/ in sync for anyone rebuilding the source artwork.
+  icon: build/icon.icns
   category: public.app-category.productivity
   hardenedRuntime: true
   gatekeeperAssess: false
@@ -113,9 +110,7 @@ linux:
       arch: x64
     - target: deb
       arch: x64
-  # Keep the vector source in the freedesktop scalable icon hierarchy. A
-  # lone 1024px PNG is not indexed by GNOME's hicolor theme on Ubuntu 24.04.
-  icon: build/icon.svg
+  icon: build/icon-1024.png
   category: Utility
   executableName: mauscrew
   synopsis: Your own team of AI bots, in a chat app

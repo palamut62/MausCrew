@@ -18,6 +18,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEV_URL = process.env.ELECTRON_START_URL ?? "http://127.0.0.1:5199";
 let SERVER_PORT = 8799;
 const APP_ICON = path.join(__dirname, "resources/app-icon.png");
+const TRAY_ICON = path.join(__dirname, "resources/tray-icon.png");
 
 // GNOME groups the window with its installed desktop entry only when both
 // identities match. This must run before Electron becomes ready.
@@ -349,7 +350,7 @@ app.on("second-instance", () => {
 function createTray() {
   if (tray) return tray;
   try {
-    tray = new Tray(APP_ICON);
+    tray = new Tray(TRAY_ICON);
     tray.setToolTip("MausCrew");
     tray.setContextMenu(Menu.buildFromTemplate([
       { label: "Open MausCrew", click: () => showMainWindow() },
