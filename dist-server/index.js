@@ -37,6 +37,7 @@ import { RoutineManager } from "./routines.js";
 import { authenticateRemoteToken, claimPairing, cookieToken, createPairing, listRemoteDevices, revokeRemoteDevice, } from "./remote-access.js";
 import { createWorkspaceSkill, deleteWorkspaceSkill, listWorkspaceSkills, SkillStoreError, updateWorkspaceSkill, } from "./skills.js";
 import { createTeamManifest, parseTeamManifest } from "./team-manifest.js";
+import { verifyTailscaleServe } from "./tailscale-serve.js";
 import { listenWebhookIngress, webhookCredential } from "./webhook-ingress.js";
 import { WebhookManager } from "./webhooks.js";
 const PORT = Number(process.env.MAUSCREW_PORT || 8799);
@@ -867,9 +868,40 @@ async function startTurn(botId, text, opts) {
                 integrations.localComputer = cua;
                 computerKind = "local";
             }
+            // Auto prefers the ready, isolated Local VM. A configured Box token can
+            // point at an account without a paid plan, and that must not divert a
+            // machine-local bot into a billing error when its VM is already ready.
+            if (wants === undefined &&
+                mountsComputerMcp &&
+                instance.driverKind !== "boxAgent" &&
+                !localVmLifecycleBusy &&
+                localVmLease.claim(threadId, bot.id, localVmOwnerBusy)) {
+                let keepLease = false;
+                try {
+                    const localVm = await containerComputerStatus();
+                    if (localVm.ready && localVm.runtime) {
+                        localVmActiveThread = threadId;
+                        localVmIdle.touch();
+                        integrations.localComputer = containerComputerMcp(localVm.runtime);
+                        computerKind = "vm";
+                        keepLease = true;
+                    }
+                }
+                catch {
+                    // Auto remains a fallback chain. Explicit Local VM above still
+                    // reports setup/status errors instead of silently changing target.
+                }
+                finally {
+                    if (!keepLease)
+                        localVmLease.release(threadId);
+                }
+            }
             // Cloud is also strict when explicitly selected. Auto (unset) reuses an
-            // existing cloud box, then falls back to host CUA without provisioning.
-            if ((wants === "cloud" || wants === undefined) && box.boxConfigured(cfg)) {
+            // existing cloud box only when the ready Local VM did not win, then
+            // falls back to host CUA without provisioning.
+            if (!integrations.localComputer &&
+                (wants === "cloud" || wants === undefined) &&
+                box.boxConfigured(cfg)) {
                 if (!mountsCloudComputer && wants === "cloud") {
                     throw new Error("this model engine cannot use computer tools — choose Claude, an ACP engine, or the Computer engine");
                 }
@@ -1454,10 +1486,14 @@ const server = createServer(async (req, res) => {
         if (path === "/api/remote/pairings" && method === "POST") {
             if (!localRequest)
                 return json(res, 403, { error: "desktop only" });
-            if (!configuredRemoteUrl())
+            const publicUrl = configuredRemoteUrl();
+            if (!publicUrl)
                 return json(res, 409, { error: "save a valid HTTPS remote address first" });
+            const ingress = await verifyTailscaleServe(publicUrl, PORT);
+            if (!ingress.ok)
+                return json(res, 409, { error: ingress.error });
             const pairing = createPairing();
-            return json(res, 201, { ...pairing, url: `${configuredRemoteUrl().origin}/pair?code=${encodeURIComponent(pairing.code)}` });
+            return json(res, 201, { ...pairing, url: `${publicUrl.origin}/pair?code=${encodeURIComponent(pairing.code)}` });
         }
         m = path.match(/^\/api\/remote\/devices\/([\w-]+)$/);
         if (m && method === "DELETE") {

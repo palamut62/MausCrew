@@ -3,7 +3,7 @@
 // via SSE frames or a ~4s screenshot poll; local ("This Mac") → frames
 // come from the Electron main process (desktopCapturer over the preload
 // bridge — box endpoints are never touched); off → parked. Auto (unset)
-// prefers the cloud box when one exists, else local inside the app.
+// prefers a ready Local VM, then an existing cloud box, then this computer.
 import { useEffect, useRef, useState } from "react";
 import { ArrowSquareOut, CalendarDot, CalendarDots, Gear, Monitor, Moon, Plus, Power, Spinner, X } from "@phosphor-icons/react";
 import { useStore, type Bot } from "@/state/store";
@@ -115,10 +115,12 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
       : bot.computer === "local"
         ? "this computer"
         : bot.computer === "off"
-          ? null
-          : phase === "ready"
-            ? "the cloud box selected by Auto"
-            : "this computer selected by Auto";
+           ? null
+          : phase === "vm"
+            ? "the Local VM selected by Auto"
+            : phase === "ready"
+              ? "the cloud box selected by Auto"
+              : "this computer selected by Auto";
 
   // resolve the mode on open; box endpoints are only ever hit on the
   // cloud path, so local/off can never render a JSON error as an image
@@ -168,9 +170,22 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
       return;
     }
     if (bot.computer !== "cloud" && !capabilitiesReady) return;
-    // cloud, or auto (cloud box wins when one exists, else local in-app)
-    api(`/api/bots/${bot.id}/computer`)
-      .then((status) => {
+    // Cloud, or Auto: a ready isolated VM wins before any Box request. This
+    // keeps a stale/free Box credential from turning local use into billing.
+    const resolveComputer = async () => {
+      if (!bot.computer && vmSupported) {
+        try {
+          const localVm = await api("/api/local-computer");
+          if (!alive) return;
+          if (localVm.ready) {
+            setPhase("vm");
+            return;
+          }
+        } catch {
+          // Auto continues through its existing fallbacks.
+        }
+      }
+      const status = await api(`/api/bots/${bot.id}/computer`);
         if (!alive) return;
         const autoLocal = bot.computer !== "cloud" && capabilitiesReady && localAvailable && computerToolSupported;
         if (!status.configured) {
@@ -187,7 +202,8 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
           setBoxState(r.state ?? null);
           setPhase("ready");
         });
-      })
+    };
+    void resolveComputer()
       .catch((e) => {
         if (!alive) return;
         setError(e.message);
@@ -455,8 +471,8 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
             <div className="mt-0.5 text-[13px] text-ink-secondary">
               {!bot.computer &&
                 (localAvailable
-                  ? "Auto uses a cloud box when one exists, otherwise this computer. "
-                  : "Auto uses a cloud box when one is configured; otherwise computer use stays off. ")}
+                  ? "Auto uses a ready Local VM first, then an existing cloud box, then this computer. "
+                  : "Auto uses a ready Local VM first, then an existing cloud box. ")}
               Pick where this bot's computer lives. <b className="text-ink">Local VM</b> is a Cua-controlled Linux desktop
               in a container on this machine — free and separate from your own desktop. Set it up in App
               Gear → Local VM.
