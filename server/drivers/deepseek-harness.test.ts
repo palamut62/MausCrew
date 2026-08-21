@@ -844,3 +844,76 @@ describe.skipIf(!LIVE_BUNDLED_SANDBOX)("DeepSeekHarnessDriver real sandbox", () 
     }
   }, 180_000);
 });
+
+// Dynamic Cordis (P4-14) was tested against fakes only — the composition and
+// approval plumbing, never the real model actually reaching for
+// `cordis_run`. This is the live half: a real turn on the bundled/native
+// runtime that must ask the model to define and execute a package, approve
+// that one-time call through the real mailbox, and check the numeric answer
+// only that package could have produced — so a model that just guessed
+// cannot pass silently.
+describe.skipIf(!LIVE_BUNDLED_SANDBOX)("DeepSeekHarnessDriver real Dynamic Cordis", () => {
+  it("defines and runs a package via cordis_run, approved through the live mailbox", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "mauscrew-dsh-cordis-"));
+    const config = decodeConfig({
+      runtime: { mode: "wsl", distribution: "Ubuntu", strategy: "bundled" },
+    });
+    const instance = await createDeepSeekInstance({
+      instanceId: "live-dynamic-cordis",
+      displayName: undefined,
+      environment: { DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY! },
+      enabled: true,
+      config,
+    });
+    const recorder = recordEvents(instance.adapter);
+    const threadId = "t-live-dynamic-cordis";
+    const cordisRunApprovals: string[] = [];
+    const stopApproving = instance.adapter.onEvent((event) => {
+      if (event.type !== "request.opened" || event.threadId !== threadId || !event.requestId) return;
+      if (event.tool === "cordis_run") cordisRunApprovals.push(event.requestId);
+      // Approve every card this turn opens — a model may look before it
+      // leaps, and what is under test is the mount and the answer, not the
+      // exact number of tool calls it takes to get there.
+      void instance.adapter.respondToRequest(threadId, event.requestId, { behavior: "allow" });
+    });
+    try {
+      await instance.adapter.sendTurn({
+        threadId,
+        cwd: scratch,
+        runtimeFeatures: { dynamicCordis: true },
+        text:
+          "Use the cordis_run tool to define and execute a brand-new package that computes 19 * 37 " +
+          "and prints only the result. Do not compute it yourself or in your head — the printed " +
+          "output of that package is the only source for your final answer. Reply with exactly that number and nothing else.",
+      });
+      const done = (await recorder.until((e) => e.type === "turn.completed", 180_000)) as { ok: boolean };
+      expect(
+        done.ok,
+        JSON.stringify(
+          recorder.events.map((event) => ({
+            type: event.type,
+            ...(event.type === "turn.completed" ? { stopReason: event.stopReason } : {}),
+            ...(event.type === "runtime.error" ? { message: event.message } : {}),
+            ...(event.type === "request.opened" ? { tool: event.tool } : {}),
+          })),
+        ),
+      ).toBe(true);
+
+      // The approval broker actually saw and gated a cordis_run call — proof
+      // the runtime mounted dsh-cordis-host-runner/dsh-tool-cordis for real,
+      // not just that dynamicCordis was requested.
+      expect(cordisRunApprovals.length).toBeGreaterThan(0);
+
+      const finalText = recorder.events
+        .filter((event) => event.type === "item.completed" && event.itemType === "assistant_text")
+        .map((event) => ("text" in event ? event.text : ""))
+        .join("\n");
+      expect(finalText).toContain("703");
+    } finally {
+      stopApproving();
+      recorder.stop();
+      await instance.dispose();
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  }, 240_000);
+});

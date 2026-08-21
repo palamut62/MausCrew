@@ -1,0 +1,10 @@
+{
+  "name": "MausCrew Remote",
+  "short_name": "MausCrew",
+  "description": "Securely control and follow your local AI agent team.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#060708",
+  "theme_color": "#060708",
+  "icons": [{ "src": "/app-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}

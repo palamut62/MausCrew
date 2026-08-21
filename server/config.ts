@@ -8,7 +8,38 @@ import { join } from "node:path";
 import { writeFileAtomic } from "./atomic.ts";
 import type { InstanceConfigMap } from "./contracts.ts";
 
+export interface ClaudeGateway {
+  /** Stable routing key — `claude-<id>` is the instance a bot points at. */
+  id: string;
+  /** Shown on the picker rail. Falls back to the endpoint's host. */
+  label?: string;
+  baseUrl: string;
+  authToken?: string;
+  /** Model ids this endpoint serves. Empty means the Claude list, which a
+   * third-party gateway will reject — the UI warns about exactly that. */
+  models?: string[];
+}
+
+/** The instance id a gateway occupies. Prefixed so it cannot collide with a
+ * built-in or with a hand-written `instances` entry. */
+export function gatewayInstanceId(id: string): string {
+  return `claude-${id}`;
+}
+
+/** One list from both the current and the legacy shape, so a config written
+ * before gateways were plural still produces its instance. */
+export function claudeGateways(cfg: AppConfig): ClaudeGateway[] {
+  const list = (cfg.claudeGateways ?? []).filter((gw) => gw?.id && gw.baseUrl);
+  if (!list.some((gw) => gw.id === "default") && cfg.claudeGateway?.baseUrl) {
+    list.unshift({ id: "default", ...cfg.claudeGateway, baseUrl: cfg.claudeGateway.baseUrl });
+  }
+  return list;
+}
+
 export interface AppConfig {
+  /** Optional HTTPS address exposed by a local trusted reverse proxy such as
+   * Tailscale Serve. The harness itself remains bound to loopback. */
+  remoteAccess?: { enabled?: boolean; publicUrl?: string };
   xai?: { key?: string; url?: string };
   /** Project key used for Sessions, catalog and agent tools. userId/sessionId
    * are non-secret local identifiers used to reuse one Composio Session. */
@@ -32,6 +63,22 @@ export interface AppConfig {
     sandboxMode?: "read-only" | "workspace-write" | "danger-full-access";
     runtimeStrategy?: "system" | "managed" | "bundled";
   };
+  /** Anthropic-compatible gateways for the `claude` CLI: DeepSeek's
+   * /anthropic endpoint, OpenRouter, Kimi, a local CLIProxyAPI. Several are
+   * allowed because the CLI speaks to one endpoint per process, so each
+   * gateway is its own engine in the picker rather than a mode of one.
+   *
+   * Each becomes an extra `claudeAgent` instance, added to the fleet rather
+   * than replacing the plain `claude` entry — signing in to claude.ai and
+   * running DeepSeek through the same CLI are not mutually exclusive, and
+   * the earlier single-gateway shape made them so.
+   *
+   * `authToken` is the credential and is never echoed back. `id` is a stable
+   * routing key: bots store `instanceId`, so it must survive a rename. */
+  claudeGateways?: ClaudeGateway[];
+  /** Superseded by `claudeGateways`; still read so a config written by an
+   * older build keeps working, and migrated on first save. */
+  claudeGateway?: { baseUrl?: string; authToken?: string; models?: string[] };
   /** Voice (ElevenLabs). `key` is the credential and is never echoed back;
    * `voice` is the chosen voice id, which is a setting, not a secret. */
   tts?: { key?: string; voice?: string };
@@ -95,10 +142,28 @@ export function saveConfig(patch: Partial<AppConfig>): void {
   } catch {
     /* first write */
   }
-  for (const key of ["xai", "composio", "box", "opencodeGo", "deepseekHarness", "tts", "profile"] as const) {
+  for (const key of [
+    "xai",
+    "composio",
+    "box",
+    "opencodeGo",
+    "deepseekHarness",
+    "claudeGateway",
+    "tts",
+    "profile",
+    "remoteAccess",
+  ] as const) {
     if (patch[key] && typeof patch[key] === "object") {
       disk[key] = { ...(disk[key] as object), ...patch[key] };
     }
+  }
+  // A list is replaced, not merged: removing a gateway is expressed by it
+  // being absent from the array, which a per-key merge would silently undo.
+  // The legacy single-gateway key is dropped once the list has taken over,
+  // so the two shapes cannot disagree about what is configured.
+  if (patch.claudeGateways) {
+    disk.claudeGateways = patch.claudeGateways;
+    delete disk.claudeGateway;
   }
   mkdirSync(DATA_DIR, { recursive: true });
   writeFileAtomic(p, JSON.stringify(disk, null, 2), { mode: 0o600 });
@@ -171,5 +236,37 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
       };
     }
   }
+
+  // Gateways are appended, never merged into the built-in `claude` entry:
+  // one `claude` CLI process talks to one endpoint, so two endpoints are two
+  // engines. Appending also puts them at the end of the picker rail, after
+  // the engines that ship with the app, and leaves the plain claude.ai
+  // sign-in working beside them.
+  //
+  // A hand-written `instances` entry with the same id wins — that map is the
+  // escape hatch, and Settings should not overwrite it.
+  for (const gateway of claudeGateways(cfg)) {
+    const instanceId = gatewayInstanceId(gateway.id);
+    if (map[instanceId]) continue;
+    map[instanceId] = {
+      driver: "claudeAgent",
+      displayName: gateway.label?.trim() || gatewayHost(gateway.baseUrl),
+      config: {
+        baseUrl: gateway.baseUrl,
+        ...(gateway.authToken ? { authToken: gateway.authToken } : {}),
+        ...(gateway.models?.length ? { models: gateway.models } : {}),
+      },
+    };
+  }
   return map;
+}
+
+/** A readable fallback name: the endpoint's host, which is what distinguishes
+ * two gateways when the user did not bother to name them. */
+function gatewayHost(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).host;
+  } catch {
+    return baseUrl;
+  }
 }

@@ -10,6 +10,13 @@ import { dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { approvalKey, autoDecision, requiresOneTimeApproval } from "./auto-approve.ts";
+import {
+  cancelBotCreationApprovalsFor,
+  createApprovedBot,
+  dismissStaleBotCreationCards,
+  requestBotCreationApproval,
+  resolveBotCreation,
+} from "./bot-creation-approval.ts";
 import * as box from "./box.ts";
 import * as composio from "./composio.ts";
 import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts";
@@ -21,7 +28,18 @@ import {
   setupCommands,
   type LifecycleAction,
 } from "./container-computer.ts";
-import { ensureDirs, instanceConfigs, loadConfig, saveConfig, EVENTS_DIR, NATIVE_DIR, type AppConfig } from "./config.ts";
+import {
+  claudeGateways,
+  ensureDirs,
+  gatewayInstanceId,
+  instanceConfigs,
+  loadConfig,
+  saveConfig,
+  EVENTS_DIR,
+  NATIVE_DIR,
+  type AppConfig,
+  type ClaudeGateway,
+} from "./config.ts";
 import { resetPathCache } from "./env-path.ts";
 import { buildNotification, type Notification } from "./notify.ts";
 import { isEffortLevel, type ModelSelection, type RuntimeEvent, type SubagentActivity } from "./contracts.ts";
@@ -50,6 +68,15 @@ import { LocalVmIdleTimer } from "./local-vm-idle.ts";
 import { LocalVmLease } from "./local-vm-lease.ts";
 import { RoutineManager, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts";
 import {
+  authenticateRemoteToken,
+  claimPairing,
+  cookieToken,
+  createPairing,
+  listRemoteDevices,
+  revokeRemoteDevice,
+  type RemoteDevice,
+} from "./remote-access.ts";
+import {
   createWorkspaceSkill,
   deleteWorkspaceSkill,
   listWorkspaceSkills,
@@ -57,6 +84,7 @@ import {
   updateWorkspaceSkill,
 } from "./skills.ts";
 import { createTeamManifest, parseTeamManifest } from "./team-manifest.ts";
+import { verifyTailscaleServe } from "./tailscale-serve.ts";
 import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./webhook-ingress.ts";
 import { WebhookManager } from "./webhooks.ts";
 
@@ -246,6 +274,12 @@ const sseClients = new Set<SseClient>();
  * inside the SSE `id:` field, which means a browser EventSource resumes
  * correctly through its own Last-Event-ID with no client code at all. */
 const STREAM_ID = randomUUID().slice(0, 8);
+
+/** Full-size frames parked for the browser to fetch by URL (POST /api/frames).
+ * In memory and short-lived on purpose: these are pictures of the user's
+ * desktop, so they should not outlive the moment they were opened. */
+const parkedFrames = new Map<string, { mime: string; bytes: Buffer; at: number }>();
+const PARKED_FRAME_TTL_MS = 10 * 60 * 1000;
 const REPLAY_MAX = 500;
 let lastSeq = 0;
 const replayBuffer: Array<{ seq: number; kind: string; frame: string | null }> = [];
@@ -929,9 +963,42 @@ async function startTurn(
         computerKind = "local";
       }
 
+      // Auto prefers the ready, isolated Local VM. A configured Box token can
+      // point at an account without a paid plan, and that must not divert a
+      // machine-local bot into a billing error when its VM is already ready.
+      if (
+        wants === undefined &&
+        mountsComputerMcp &&
+        instance.driverKind !== "boxAgent" &&
+        !localVmLifecycleBusy &&
+        localVmLease.claim(threadId, bot.id, localVmOwnerBusy)
+      ) {
+        let keepLease = false;
+        try {
+          const localVm = await containerComputerStatus();
+          if (localVm.ready && localVm.runtime) {
+            localVmActiveThread = threadId;
+            localVmIdle.touch();
+            integrations.localComputer = containerComputerMcp(localVm.runtime);
+            computerKind = "vm";
+            keepLease = true;
+          }
+        } catch {
+          // Auto remains a fallback chain. Explicit Local VM above still
+          // reports setup/status errors instead of silently changing target.
+        } finally {
+          if (!keepLease) localVmLease.release(threadId);
+        }
+      }
+
       // Cloud is also strict when explicitly selected. Auto (unset) reuses an
-      // existing cloud box, then falls back to host CUA without provisioning.
-      if ((wants === "cloud" || wants === undefined) && box.boxConfigured(cfg)) {
+      // existing cloud box only when the ready Local VM did not win, then
+      // falls back to host CUA without provisioning.
+      if (
+        !integrations.localComputer &&
+        (wants === "cloud" || wants === undefined) &&
+        box.boxConfigured(cfg)
+      ) {
         if (!mountsCloudComputer && wants === "cloud") {
           throw new Error("this model engine cannot use computer tools — choose Claude, an ACP engine, or the Computer engine");
         }
@@ -1163,7 +1230,8 @@ const approvalBus: ApprovalBus = { store, broadcast };
 // answered, and the composer stays disabled behind it — settle them at boot.
 {
   const stale = dismissStalePeerCards(approvalBus);
-  if (stale) console.log(`peer approvals: dismissed ${stale} card(s) left by a previous run`);
+  const staleCreations = dismissStaleBotCreationCards(approvalBus);
+  if (stale || staleCreations) console.log(`approvals: dismissed ${stale + staleCreations} card(s) left by a previous run`);
 }
 
 async function runGroupMemberTurn(
@@ -1310,6 +1378,18 @@ function configStatus() {
       sandboxMode: cfg.deepseekHarness?.sandboxMode ?? "workspace-write",
       runtimeStrategy: cfg.deepseekHarness?.runtimeStrategy ?? "bundled",
     },
+    // Same split for the Claude gateways: token configured-or-not, endpoint,
+    // label and model list echoed so the form can show what each is pointed
+    // at. instanceId is echoed too — it is what the picker routes by, and
+    // deriving it a second time in the renderer is how the two drift apart.
+    claudeGateways: claudeGateways(cfg).map((gw) => ({
+      id: gw.id,
+      instanceId: gatewayInstanceId(gw.id),
+      label: gw.label ?? "",
+      baseUrl: gw.baseUrl,
+      models: gw.models ?? [],
+      configured: Boolean(gw.authToken),
+    })),
     // the chosen voice is a setting, not a secret; the key is reported the
     // same configured-or-not way as every other credential
     tts: tts.describeVoice(cfg),
@@ -1441,6 +1521,17 @@ function isAllowedOrigin(origin: string | undefined | null): boolean {
   }
 }
 
+function configuredRemoteUrl(): URL | null {
+  if (!cfg.remoteAccess?.enabled || !cfg.remoteAccess.publicUrl) return null;
+  try {
+    const parsed = new URL(cfg.remoteAccess.publicUrl);
+    if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.pathname !== "/") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
   const path = url.pathname;
@@ -1448,13 +1539,73 @@ const server = createServer(async (req, res) => {
   /** scratch for route matches, shared by every `path.match` below */
   let m: RegExpMatchArray | null = null;
   try {
-    // loopback-host + loopback-origin gate before any route (DNS rebinding / CSRF)
-    if (!isLoopbackHost(req.headers.host)) {
-      return json(res, 403, { error: "forbidden: loopback host required" });
-    }
+    // Local requests keep the original DNS-rebinding boundary. A configured
+    // HTTPS reverse-proxy host is the only second ingress; every API request
+    // through it (except the one-time claim) needs a paired-device cookie.
+    const localRequest = isLoopbackHost(req.headers.host);
+    const remoteUrl = configuredRemoteUrl();
+    const remoteRequest = !localRequest && remoteUrl?.host.toLowerCase() === req.headers.host?.toLowerCase();
+    if (!localRequest && !remoteRequest) return json(res, 403, { error: "forbidden: untrusted host" });
     const origin = req.headers.origin;
-    if (origin && !isAllowedOrigin(origin)) {
+    if (localRequest && origin && !isAllowedOrigin(origin)) {
       return json(res, 403, { error: "forbidden: cross-origin request" });
+    }
+    if (remoteRequest && origin && origin !== remoteUrl!.origin) {
+      return json(res, 403, { error: "forbidden: cross-origin request" });
+    }
+
+    let remoteDevice: RemoteDevice | null = null;
+    const claimRoute = method === "POST" && path === "/api/remote/claim";
+    if (remoteRequest && path.startsWith("/api/") && !claimRoute) {
+      remoteDevice = authenticateRemoteToken(cookieToken(req.headers.cookie));
+      if (!remoteDevice) return json(res, 401, { error: "pairing required" });
+      // Provider credentials and remote-device administration remain local.
+      if ((path === "/api/config" && method !== "GET") || path.startsWith("/api/remote/pairings") || path.startsWith("/api/remote/devices")) {
+        return json(res, 403, { error: "this setting can only be changed on the desktop" });
+      }
+    }
+
+    if (method === "POST" && path === "/api/remote/claim") {
+      if (!remoteRequest) return json(res, 400, { error: "open the pairing link on the remote device" });
+      const body = await readBody(req);
+      const claimed = claimPairing(String(body.code ?? ""), String(body.name ?? ""), req.socket.remoteAddress ?? "unknown");
+      if (claimed === "rate-limited") return json(res, 429, { error: "too many pairing attempts; try again shortly" });
+      if (!claimed) return json(res, 401, { error: "pairing code is invalid or expired" });
+      const data = JSON.stringify({ device: claimed.device });
+      res.writeHead(200, {
+        "content-type": "application/json",
+        "cache-control": "no-store",
+        "set-cookie": `mauscrew_remote=${encodeURIComponent(claimed.token)}; Path=/; Max-Age=2592000; HttpOnly; Secure; SameSite=Strict`,
+      });
+      return res.end(data);
+    }
+    if (method === "GET" && path === "/api/remote/session") {
+      return json(res, 200, { remote: remoteRequest, device: remoteDevice });
+    }
+    if (path === "/api/remote/status" && method === "GET") {
+      if (!localRequest) return json(res, 403, { error: "desktop only" });
+      return json(res, 200, {
+        enabled: cfg.remoteAccess?.enabled === true,
+        publicUrl: cfg.remoteAccess?.publicUrl ?? "",
+        localPort: PORT,
+        devices: listRemoteDevices(),
+      });
+    }
+    if (path === "/api/remote/pairings" && method === "POST") {
+      if (!localRequest) return json(res, 403, { error: "desktop only" });
+      const publicUrl = configuredRemoteUrl();
+      if (!publicUrl) return json(res, 409, { error: "save a valid HTTPS remote address first" });
+      const ingress = await verifyTailscaleServe(publicUrl, PORT);
+      if (!ingress.ok) return json(res, 409, { error: ingress.error });
+      const pairing = createPairing();
+      return json(res, 201, { ...pairing, url: `${publicUrl.origin}/pair?code=${encodeURIComponent(pairing.code)}` });
+    }
+    m = path.match(/^\/api\/remote\/devices\/([\w-]+)$/);
+    if (m && method === "DELETE") {
+      if (!localRequest) return json(res, 403, { error: "desktop only" });
+      return revokeRemoteDevice(m[1])
+        ? json(res, 200, { ok: true })
+        : json(res, 404, { error: "no such device" });
     }
     // ── internal peer-agent comms (localhost + shared token only) ──────
     // The agents-proxy (spawned inside a bot's agent process) calls these to
@@ -1586,6 +1737,38 @@ const server = createServer(async (req, res) => {
             ? `Queued for review — @${targetName} will only pick it up if the user approves after your turn finishes.`
             : `Delegation queued — @${targetName} will pick it up after your current turn finishes.`,
         });
+      }
+      if (method === "POST" && path === "/api/internal/create-bot") {
+        const body = await readBody(req);
+        const fromBotId = String(body.fromBotId ?? "");
+        const from = store.bot(fromBotId);
+        if (!from) return json(res, 404, { error: "unknown sender" });
+        const sourceThreadId = String(body.fromThreadId ?? from.threadId);
+        if (!store.taskByThread(from.id, sourceThreadId)) return json(res, 403, { error: "source thread does not belong to sender" });
+        if ((Number(body.depth ?? 0) || 0) !== 0) return json(res, 403, { error: "delegated bots cannot create more bots" });
+        if (store.bots.length >= 50) return json(res, 409, { error: "the workspace already has the maximum of 50 bots" });
+
+        const name = String(body.name ?? "").trim();
+        const title = String(body.title ?? "").trim();
+        const description = String(body.description ?? "").trim();
+        if (!name || !title || !description) return json(res, 400, { error: "name, title, and description required" });
+        if (name.length > 48 || title.length > 80 || description.length > 800) {
+          return json(res, 400, { error: "bot profile is too long" });
+        }
+        if (store.bots.some((bot) => bot.name.localeCompare(name, undefined, { sensitivity: "accent" }) === 0)) {
+          return json(res, 409, { error: `a bot named ${name} already exists` });
+        }
+
+        const verdict = await requestBotCreationApproval(approvalBus, from, { name, title, description }, sourceThreadId);
+        if (verdict !== "allow") return json(res, 200, { error: "denied by user" });
+        if (!store.bot(fromBotId)) return json(res, 404, { error: "requesting bot no longer exists" });
+        if (store.bots.length >= 50) return json(res, 409, { error: "the workspace already has the maximum of 50 bots" });
+        if (store.bots.some((bot) => bot.name.localeCompare(name, undefined, { sensitivity: "accent" }) === 0)) {
+          return json(res, 409, { error: `a bot named ${name} already exists` });
+        }
+        const bot = createApprovedBot(approvalBus, { name, title, description }, await defaultSelection());
+        broadcast({ kind: "bot", bot: publicBot(bot) });
+        return json(res, 201, { botId: bot.id, name: bot.name });
       }
       return json(res, 404, { error: "unknown internal endpoint" });
     }
@@ -1726,6 +1909,37 @@ const server = createServer(async (req, res) => {
         bots: store.bots.map((bot) => ({ ...publicBot(bot), ...messagePage(bot.threadId, limit) })),
         groups: store.groups.map((g) => ({ ...g, ...messagePage(g.threadId, limit) })),
       });
+    }
+
+    // Public prompt catalog. Keep the third-party origin on the server side so
+    // the renderer is not coupled to CORS policy, and forward only the small,
+    // documented query surface rather than acting as an open proxy.
+    if (method === "GET" && path === "/api/bot-directory") {
+      const upstream = new URL("https://api.botdirectory.ai/api/bots");
+      for (const key of ["q", "category", "integration", "sort", "page", "limit"] as const) {
+        const value = url.searchParams.get(key)?.trim();
+        if (value) upstream.searchParams.set(key, value.slice(0, 200));
+      }
+      const requestedLimit = Number(upstream.searchParams.get("limit") ?? 24);
+      upstream.searchParams.set("limit", String(Math.min(50, Math.max(1, Number.isFinite(requestedLimit) ? requestedLimit : 24))));
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10_000);
+      try {
+        const response = await fetch(upstream, {
+          headers: { accept: "application/json", "user-agent": "MausCrew/0.1" },
+          signal: controller.signal,
+        });
+        if (!response.ok) return json(res, 502, { error: `Bot Directory returned HTTP ${response.status}` });
+        const payload = await response.json();
+        return json(res, 200, payload);
+      } catch (error) {
+        const message = error instanceof Error && error.name === "AbortError"
+          ? "Bot Directory timed out"
+          : "Bot Directory is unavailable";
+        return json(res, 502, { error: message });
+      } finally {
+        clearTimeout(timeout);
+      }
     }
 
     // scrollback: the page before a message the client already holds
@@ -2123,6 +2337,7 @@ const server = createServer(async (req, res) => {
       // a peer approval naming this bot can never be meaningfully answered
       // now, and its caller would otherwise wait out the 15-minute timeout
       cancelPeerApprovalsFor(bot.id);
+      cancelBotCreationApprovalsFor(bot.id);
       discardDelegations(commsBus, bot.threadId);
       store.deleteBot(bot.id);
       for (const dir of [EVENTS_DIR, NATIVE_DIR]) {
@@ -2220,6 +2435,7 @@ const server = createServer(async (req, res) => {
       if (resolvePeerComms(approvalBus, String(body.requestId), body.behavior)) {
         return json(res, 200, { ok: true });
       }
+      if (resolveBotCreation(String(body.requestId), body.behavior)) return json(res, 200, { ok: true });
       const instance = registry.get(bot.modelSelection.instanceId);
       if (!instance) return json(res, 409, { error: "provider unavailable" });
       await instance.adapter.respondToRequest(bot.threadId, String(body.requestId), {
@@ -2242,6 +2458,7 @@ const server = createServer(async (req, res) => {
       if (resolvePeerComms(approvalBus, String(body.requestId), body.behavior)) {
         return json(res, 200, { ok: true });
       }
+      if (resolveBotCreation(String(body.requestId), body.behavior)) return json(res, 200, { ok: true });
       const instance = registry.get(owner.modelSelection.instanceId);
       if (!instance) return json(res, 409, { error: "provider unavailable" });
       await instance.adapter.respondToRequest(threadId, String(body.requestId), {
@@ -2357,6 +2574,46 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { image: await containerComputerScreenshot() });
     }
 
+    // ── full-size frame handoff ────────────────────────────────────────
+    // The panel preview is a thumbnail, and a desktop screenshot is exactly
+    // the thing you need to look at closely. The renderer cannot hand a data
+    // URL to the browser — Electron routes window.open through
+    // shell.openExternal, and no browser will open a blob or data URL from
+    // another process — so the frame is parked here and opened by real URL.
+    if (method === "POST" && path === "/api/frames") {
+      const body = await readBody(req);
+      const dataUrl = typeof body.dataUrl === "string" ? body.dataUrl : "";
+      const match = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
+      if (!match) return json(res, 400, { error: "dataUrl must be a base64 image data URL" });
+      const bytes = Buffer.from(match[2], "base64");
+      if (bytes.byteLength > 32 * 1024 * 1024) return json(res, 413, { error: "frame too large" });
+      const id = randomUUID();
+      parkedFrames.set(id, { mime: match[1], bytes, at: Date.now() });
+      // Bounded on both axes so a long session cannot accumulate desktops in
+      // memory: oldest evicted past the cap, and everything expires anyway.
+      for (const [key, frame] of parkedFrames) {
+        if (parkedFrames.size <= 8 && Date.now() - frame.at < PARKED_FRAME_TTL_MS) break;
+        parkedFrames.delete(key);
+      }
+      return json(res, 200, { url: `/frames/${id}` });
+    }
+    if (method === "GET" && path.startsWith("/frames/")) {
+      const frame = parkedFrames.get(path.slice("/frames/".length));
+      if (!frame || Date.now() - frame.at > PARKED_FRAME_TTL_MS) {
+        res.writeHead(404, { "content-type": "text/plain" });
+        return res.end("this frame has expired — take a new screenshot");
+      }
+      res.writeHead(200, {
+        "content-type": frame.mime,
+        "content-length": String(frame.bytes.byteLength),
+        // A screenshot of someone's desktop is not something to leave in the
+        // browser cache or hand to a referrer.
+        "cache-control": "no-store",
+        "referrer-policy": "no-referrer",
+      });
+      return res.end(frame.bytes);
+    }
+
     // identity handshake for the packaged app's port fallback: the forked
     // child proves it is OURS by echoing its pid (a stray dev server has
     // the same API shape but a different pid)
@@ -2371,7 +2628,17 @@ const server = createServer(async (req, res) => {
       // Windows never pushes PATH changes into a live process, so without
       // this the answer is frozen at boot and "check again" is a no-op.
       resetPathCache();
-      return json(res, 200, { instances: await registry.describe() });
+      // A gateway rides the claudeAgent driver, so driverKind alone would have
+      // the picker draw it as Claude — same mark, same name shape, no way to
+      // tell "DeepSeek through Claude Code" from Claude itself. The config is
+      // the one place that knows, so the flag is computed here rather than
+      // re-derived from the id in the renderer.
+      const gatewayIds = new Set(claudeGateways(cfg).map((gw) => gatewayInstanceId(gw.id)));
+      const instances = (await registry.describe()).map((instance) => ({
+        ...instance,
+        ...(gatewayIds.has(instance.instanceId) ? { gateway: true } : {}),
+      }));
+      return json(res, 200, { instances });
     }
 
     // ── app config (API keys — never echoed back, booleans only) ──
@@ -2454,8 +2721,122 @@ const server = createServer(async (req, res) => {
           return json(res, 400, { error: "deepseekHarness.runtimeStrategy must be system, managed or bundled" });
         }
       }
+      const rawRemote = body.remoteAccess;
+      if (
+        rawRemote !== undefined
+        && (rawRemote === null || typeof rawRemote !== "object" || Array.isArray(rawRemote))
+      ) {
+        return json(res, 400, { error: "remoteAccess must be an object" });
+      }
+      if (rawRemote) {
+        if (typeof rawRemote.enabled !== "boolean") {
+          return json(res, 400, { error: "remoteAccess.enabled must be a boolean" });
+        }
+        if (typeof rawRemote.publicUrl !== "string") {
+          return json(res, 400, { error: "remoteAccess.publicUrl must be a string" });
+        }
+        if (rawRemote.enabled) {
+          let remoteUrl: URL;
+          try {
+            remoteUrl = new URL(rawRemote.publicUrl);
+          } catch {
+            return json(res, 400, { error: "remoteAccess.publicUrl must be a valid URL" });
+          }
+          if (
+            remoteUrl.protocol !== "https:"
+            || remoteUrl.username
+            || remoteUrl.password
+            || remoteUrl.pathname !== "/"
+            || remoteUrl.search
+            || remoteUrl.hash
+          ) {
+            return json(res, 400, { error: "remoteAccess.publicUrl must be an HTTPS origin without a path" });
+          }
+          rawRemote.publicUrl = remoteUrl.origin;
+        }
+      }
+      // The whole list arrives at once, because removing a gateway is
+      // expressed by its absence. Tokens are the exception: the form never
+      // receives them, so an entry that sends no token keeps the stored one
+      // — otherwise every unrelated edit would silently clear the secret.
+      const rawGateways = body.claudeGateways;
+      let gatewaysPatch: ClaudeGateway[] | undefined;
+      if (rawGateways !== undefined) {
+        if (!Array.isArray(rawGateways)) {
+          return json(res, 400, { error: "claudeGateways must be an array" });
+        }
+        const stored = new Map(claudeGateways(cfg).map((gw) => [gw.id, gw]));
+        const seen = new Set<string>();
+        gatewaysPatch = [];
+        for (const raw of rawGateways as unknown[]) {
+          if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+            return json(res, 400, { error: "each claudeGateways entry must be an object" });
+          }
+          const gw = raw as Record<string, unknown>;
+          for (const field of ["id", "label", "baseUrl", "authToken"] as const) {
+            if (Object.prototype.hasOwnProperty.call(gw, field) && typeof gw[field] !== "string") {
+              return json(res, 400, { error: `claudeGateways[].${field} must be a string` });
+            }
+          }
+          const id = typeof gw.id === "string" ? gw.id.trim() : "";
+          // Restricted because it becomes an instance id, which is a routing
+          // key stored on every bot that selects it and part of a filesystem
+          // path in places — a free-form string would leak into both.
+          if (!/^[a-z0-9][a-z0-9-]{0,31}$/.test(id)) {
+            return json(res, 400, {
+              error: "claudeGateways[].id must be 1-32 chars of a-z, 0-9 or - and start alphanumeric",
+            });
+          }
+          if (seen.has(id)) return json(res, 400, { error: `duplicate claudeGateways id: ${id}` });
+          seen.add(id);
+
+          const baseUrl = typeof gw.baseUrl === "string" ? gw.baseUrl.trim() : "";
+          if (!baseUrl) return json(res, 400, { error: `claudeGateways[${id}].baseUrl is required` });
+          // Deliberately stricter than the DeepSeek endpoint check, which only
+          // warns about plaintext: this token rides an Authorization header on
+          // every turn, and the driver's own decodeConfig refuses http off
+          // loopback. Accepting it here would persist a value that turns the
+          // instance into a shadow at load time, with the error nowhere near
+          // the field that caused it.
+          let parsed: URL;
+          try {
+            parsed = new URL(baseUrl);
+          } catch {
+            return json(res, 400, { error: `claudeGateways[${id}].baseUrl is not a URL: ${baseUrl}` });
+          }
+          const loopback =
+            parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost" || parsed.hostname === "[::1]";
+          if (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && loopback)) {
+            return json(res, 400, {
+              error: `claudeGateways[${id}].baseUrl must be https (or http on loopback)`,
+            });
+          }
+          if (Object.prototype.hasOwnProperty.call(gw, "models")) {
+            if (!Array.isArray(gw.models) || gw.models.some((m) => typeof m !== "string")) {
+              return json(res, 400, { error: `claudeGateways[${id}].models must be an array of strings` });
+            }
+          }
+          const models = ((gw.models as string[] | undefined) ?? [])
+            .map((m) => m.trim())
+            .filter(Boolean);
+          const authToken =
+            typeof gw.authToken === "string" && gw.authToken.trim()
+              ? gw.authToken.trim()
+              : gw.authToken === ""
+                ? undefined // an explicit empty string is "clear this token"
+                : stored.get(id)?.authToken;
+          gatewaysPatch.push({
+            id,
+            ...(typeof gw.label === "string" && gw.label.trim() ? { label: gw.label.trim() } : {}),
+            baseUrl,
+            ...(authToken ? { authToken } : {}),
+            ...(models.length ? { models } : {}),
+          });
+        }
+      }
       const patch: Record<string, object> = {};
-      for (const key of ["xai", "composio", "box", "opencodeGo", "deepseekHarness", "tts", "profile"] as const) {
+      if (gatewaysPatch) patch.claudeGateways = gatewaysPatch;
+      for (const key of ["xai", "composio", "box", "opencodeGo", "deepseekHarness", "tts", "profile", "remoteAccess"] as const) {
         if (body[key] && typeof body[key] === "object") patch[key] = body[key];
       }
       if (!Object.keys(patch).length) return json(res, 400, { error: "nothing to save" });
@@ -2508,7 +2889,7 @@ const server = createServer(async (req, res) => {
       // provider keys change the fleet; a profile or voice edit must not
       // kill in-flight turns with a pointless reload — no driver reads
       // either, and picking a voice mid-turn should be free
-      if (Object.keys(patch).some((k) => k !== "profile" && k !== "tts")) await reloadProviders();
+      if (Object.keys(patch).some((k) => k !== "profile" && k !== "tts" && k !== "remoteAccess")) await reloadProviders();
       const status = configStatus();
       broadcast({ kind: "config", ...status });
       return json(res, 200, status);

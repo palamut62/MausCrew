@@ -220,7 +220,21 @@ export function PluginsPanel() {
             to browse the full catalog.
           </div>
         )}
-        {error && <div className="mt-2 text-[12px] text-danger">{error}</div>}
+        {error && (
+          <div className="mt-2 rounded-lg border border-danger/25 bg-danger/10 px-3 py-2 text-[12px] leading-relaxed text-danger">
+            {error}
+            {/custom OAuth Auth Config/i.test(error) && (
+              <a
+                href="https://docs.composio.dev/docs/auth-configuration/custom-auth-configs"
+                target="_blank"
+                rel="noreferrer"
+                className="ml-1 underline hover:text-ink"
+              >
+                Open setup guide
+              </a>
+            )}
+          </div>
+        )}
 
         <input
           value={search}

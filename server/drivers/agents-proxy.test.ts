@@ -20,6 +20,8 @@ let lastAskBody: any = null;
 let askResponse: unknown = { botName: "Helper", text: "hi from helper" };
 let lastDelegateBody: any = null;
 let delegateResponse: unknown = { queued: true, message: "Delegation queued." };
+let lastCreateBody: any = null;
+let createResponse: unknown = { botId: "bot-researcher", name: "Researcher" };
 
 let child: ChildProcess;
 const pending = new Map<number, (msg: any) => void>();
@@ -72,6 +74,16 @@ beforeAll(async () => {
       });
       return;
     }
+    if (req.method === "POST" && req.url === "/api/internal/create-bot") {
+      let data = "";
+      req.on("data", (c) => (data += c));
+      req.on("end", () => {
+        lastCreateBody = JSON.parse(data);
+        res.writeHead(201, { "content-type": "application/json" });
+        res.end(JSON.stringify(createResponse));
+      });
+      return;
+    }
     res.writeHead(404, { "content-type": "application/json" });
     res.end(JSON.stringify({ error: "unknown" }));
   });
@@ -114,7 +126,7 @@ describe("agents-proxy MCP surface", () => {
     const init = await rpc("initialize", { protocolVersion: "2024-11-05" });
     expect(init.result.serverInfo.name).toContain("agents");
     const list = await rpc("tools/list");
-    expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual(["list_bots", "ask_bot", "delegate_bot"]);
+    expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual(["list_bots", "ask_bot", "delegate_bot", "create_bot"]);
   });
 
   it("list_bots renders the roster and authenticates with the shared token", async () => {
@@ -176,6 +188,23 @@ describe("agents-proxy MCP surface", () => {
     const res = await callTool("delegate_bot", { bot_id: "bot-helper", message: "take this" });
     expect(res.result.isError).toBe(true);
     expect(res.result.content[0].text).toContain("do this one yourself");
+  });
+
+  it("proposes a durable bot with its complete role profile", async () => {
+    createResponse = { botId: "bot-researcher", name: "Researcher" };
+    const res = await callTool("create_bot", {
+      name: "Researcher",
+      title: "Evidence researcher",
+      description: "Find primary sources and preserve links.",
+    });
+    expect(res.result.content[0].text).toContain("Created @Researcher");
+    expect(lastCreateBody).toMatchObject({
+      fromBotId: "bot-asker",
+      fromThreadId: "thread-asker-routine",
+      name: "Researcher",
+      title: "Evidence researcher",
+      depth: 0,
+    });
   });
 
   it("rejects unknown tools with -32602", async () => {

@@ -185,6 +185,17 @@ export interface ConfigStatus {
     sandboxMode: "read-only" | "workspace-write" | "danger-full-access";
     runtimeStrategy: "system" | "managed" | "bundled";
   };
+  /** Anthropic-compatible gateways for the `claude` CLI, one picker entry
+   * each. `instanceId` is the routing key the model picker uses; `configured`
+   * stands in for the token, which the server never echoes. */
+  claudeGateways?: {
+    id: string;
+    instanceId: string;
+    label: string;
+    baseUrl: string;
+    models: string[];
+    configured: boolean;
+  }[];
   /** Voice (ElevenLabs). `configured` = a key is saved; `ready` = a key AND
    * a voice, which is what it takes to actually speak. The key itself is
    * never echoed back. */
@@ -217,9 +228,13 @@ export interface InstanceInfo {
   models: { default: string; options: Array<{ id: string; label: string }> };
   capabilities?: { computerMcp?: boolean; agentsMcp?: boolean; effortLevels?: readonly EffortLevel[] };
   install?: EngineInstall;
+  /** A user-added Anthropic-compatible gateway rather than a built-in engine.
+   * It rides the claudeAgent driver, so this is what stops the UI from
+   * presenting somebody's DeepSeek endpoint as Claude. */
+  gateway?: boolean;
 }
 
-export type AppSettingsSection = "general" | "connections" | "voice" | "computer";
+export type AppSettingsSection = "general" | "connections" | "voice" | "computer" | "remote";
 
 interface AppState {
   bots: Bot[];
@@ -245,6 +260,8 @@ interface AppState {
   provisioning: Record<string, boolean>;
   connected: boolean;
   error: string | null;
+  /** Approval decisions currently being sent, keyed by threadId:requestId. */
+  pendingDecisions: Record<string, "allow" | "always-allow" | "deny">;
   mascotMotion: {
     botId: string;
     nonce: number;
@@ -301,6 +318,7 @@ type Action =
       /** remember this exact grant (the server's allowKey) for the bot */
       alwaysAllow?: { botId: string; key: string };
     }
+  | { type: "decisionFailed"; threadId: string; requestId: string }
   | { type: "newTask"; botId: string }
   | { type: "switchTask"; botId: string; threadId: string }
   | { type: "taskSwitched"; bot: Bot }
@@ -480,7 +498,20 @@ function reducer(state: AppState, action: Action): AppState {
     case "dismissCard":
       return patchCard(state, action.botId, action.messageId, { dismissed: true });
     case "decideRequest":
-      return state; // the server's request.resolved patch settles the card
+      return {
+        ...state,
+        pendingDecisions: {
+          ...state.pendingDecisions,
+          [`${action.threadId}:${action.requestId}`]:
+            action.behavior === "allow" ? (action.alwaysAllow ? "always-allow" : "allow") : "deny",
+        },
+      };
+    case "decisionFailed": {
+      const key = `${action.threadId}:${action.requestId}`;
+      if (!(key in state.pendingDecisions)) return state;
+      const { [key]: _failed, ...pendingDecisions } = state.pendingDecisions;
+      return { ...state, pendingDecisions };
+    }
     case "botAdded":
       return withMascotMotion({
         ...state,
@@ -780,6 +811,7 @@ const initialState: AppState = {
   provisioning: {},
   connected: false,
   error: null,
+  pendingDecisions: {},
   mascotMotion: null,
 };
 
@@ -924,6 +956,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           }).catch(showError);
           break;
         case "decideRequest": {
+          const decisionFailed = (e: unknown) => {
+            rawDispatch({ type: "decisionFailed", threadId: action.threadId, requestId: action.requestId });
+            showError(e);
+          };
           const respond = () =>
             api(`/api/threads/${action.threadId}/respond`, {
               method: "POST",
@@ -932,7 +968,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 behavior: action.behavior,
                 message: action.message,
               }),
-            }).catch(showError);
+            }).catch(decisionFailed);
           if (action.alwaysAllow) {
             const bot = stateRef.current.bots.find((b) => b.id === action.alwaysAllow!.botId);
             const next = [...new Set([...(bot?.alwaysAllow ?? []), action.alwaysAllow.key])];
@@ -1321,6 +1357,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               box: frame.box,
               opencodeGo: frame.opencodeGo,
               deepseekHarness: frame.deepseekHarness,
+              claudeGateways: frame.claudeGateways,
               tts: frame.tts,
               profile: frame.profile,
             },

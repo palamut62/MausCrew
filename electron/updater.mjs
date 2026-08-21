@@ -67,9 +67,8 @@ export function startUpdater(mainWindow) {
 
   updaterCoordinator = createUpdaterCoordinator(autoUpdater, setState);
 
-  // first check ~15s after launch (let the app settle), then hourly — both
-  // silent on failure, hence the arrow: a bare `check` would receive the
-  // timer's argument as `manual` and start reporting errors again.
-  setTimeout(() => void updaterCoordinator?.check(), 15_000).unref?.();
+  // Check as soon as the packaged app starts, then hourly. Automatic checks
+  // stay silent on failure; a manual sidebar check still reports its error.
+  void updaterCoordinator.check();
   setInterval(() => void updaterCoordinator?.check(), 60 * 60 * 1000).unref?.();
 }

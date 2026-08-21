@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { instanceConfigs, type AppConfig } from "./config.ts";
+import { claudeGateways, gatewayInstanceId, instanceConfigs, type AppConfig } from "./config.ts";
 
 describe("OpenCode Go configuration", () => {
   it("injects the key only into OpenCode Go instances", () => {
@@ -75,5 +75,52 @@ describe("DeepSeek Harness configuration", () => {
     expect(instances.deepseek.environment).toEqual({ DEEPSEEK_API_KEY: "sk" });
     // appended last — the existing engine order in the picker stays put
     expect(Object.keys(instances).at(-1)).toBe("deepseek");
+  });
+});
+
+describe("Claude gateways", () => {
+  it("adds one instance per gateway without touching the built-in claude entry", () => {
+    const instances = instanceConfigs({
+      claudeGateways: [
+        { id: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com/anthropic", authToken: "sk", models: ["deepseek-v4-pro"] },
+        { id: "openrouter", baseUrl: "https://openrouter.ai/api/v1" },
+      ],
+    });
+
+    // The plain claude.ai sign-in and a gateway are not alternatives — the
+    // whole point of a list is that both work at once.
+    expect(instances.claude.config).toBeUndefined();
+    expect(instances["claude-deepseek"].driver).toBe("claudeAgent");
+    expect(instances["claude-deepseek"].displayName).toBe("DeepSeek");
+    expect(instances["claude-deepseek"].config).toEqual({
+      baseUrl: "https://api.deepseek.com/anthropic",
+      authToken: "sk",
+      models: ["deepseek-v4-pro"],
+    });
+    // unnamed gateways fall back to the host, so two are still tellable apart
+    expect(instances["claude-openrouter"].displayName).toBe("openrouter.ai");
+    // appended, so they land at the end of the picker rail
+    expect(Object.keys(instances).slice(-2)).toEqual(["claude-deepseek", "claude-openrouter"]);
+  });
+
+  it("migrates the older single-gateway config into the list", () => {
+    const cfg: AppConfig = { claudeGateway: { baseUrl: "https://api.deepseek.com/anthropic", authToken: "sk" } };
+    expect(claudeGateways(cfg)).toEqual([
+      { id: "default", baseUrl: "https://api.deepseek.com/anthropic", authToken: "sk" },
+    ]);
+    expect(instanceConfigs(cfg)[gatewayInstanceId("default")]).toBeDefined();
+  });
+
+  it("skips a gateway with no endpoint rather than creating a broken engine", () => {
+    const instances = instanceConfigs({ claudeGateways: [{ id: "empty", baseUrl: "" }] });
+    expect(instances["claude-empty"]).toBeUndefined();
+  });
+
+  it("lets a hand-written instance of the same id win", () => {
+    const instances = instanceConfigs({
+      claudeGateways: [{ id: "deepseek", baseUrl: "https://api.deepseek.com/anthropic" }],
+      instances: { "claude-deepseek": { driver: "claudeAgent", config: { baseUrl: "https://mine.example" } } },
+    });
+    expect((instances["claude-deepseek"].config as { baseUrl: string }).baseUrl).toBe("https://mine.example");
   });
 });

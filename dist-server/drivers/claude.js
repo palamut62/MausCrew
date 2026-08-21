@@ -46,11 +46,23 @@ export function claudeSignedIn(cli, env, run = execCli) {
  * Keeping the probe and turn environments identical prevents setup from
  * claiming an API-key login that the turn itself would deliberately remove.
  */
-function claudeEnvironment() {
+function claudeEnvironment(config) {
     const env = { ...process.env, PATH: augmentedPath(), NPM_CONFIG_LOGLEVEL: "error" };
     delete env.ANTHROPIC_API_KEY;
     delete env.CLAUDECODE;
     delete env.CLAUDE_CODE_ENTRYPOINT;
+    // The gateway variables are stripped for the same reason as the API key, and
+    // it matters more here: an inherited ANTHROPIC_BASE_URL silently reroutes a
+    // subscription instance to somebody else's endpoint, sending its whole
+    // conversation there while still looking like plain Claude in the UI. Only
+    // an instance that opted in via config gets them back, one line below.
+    delete env.ANTHROPIC_BASE_URL;
+    delete env.ANTHROPIC_AUTH_TOKEN;
+    if (config?.baseUrl) {
+        env.ANTHROPIC_BASE_URL = config.baseUrl;
+        if (config.authToken)
+            env.ANTHROPIC_AUTH_TOKEN = config.authToken;
+    }
     return env;
 }
 const DRIVER_KIND = "claudeAgent";
@@ -64,6 +76,26 @@ const MODELS = {
         { id: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
     ],
 };
+/** A gateway instance advertises what its gateway serves, not Claude's
+ * catalog. Ids are shown verbatim: only the operator knows what
+ * `deepseek-v4-pro` or `gpt-5.6-sol` should be called.
+ *
+ * A gateway that named no models gets an EMPTY catalog rather than Claude's.
+ * Offering "Claude Sonnet 5" on someone's DeepSeek endpoint is an invitation
+ * to pick a model that endpoint will reject — an error one turn later and
+ * nowhere near the picker that caused it. Empty is honest, and `extensible`
+ * keeps a hand-written selection working. */
+function modelsFor(config) {
+    if (!config.baseUrl)
+        return MODELS;
+    if (!config.models?.length)
+        return { default: "", options: [], extensible: true };
+    return {
+        default: config.models[0],
+        options: config.models.map((id) => ({ id, label: id })),
+        extensible: true,
+    };
+}
 // proxy entry files live next to this one as .ts in dev (node type
 // stripping) and .js in the compiled dist-server the packaged app ships
 const proxyPath = (basename) => {
@@ -183,9 +215,36 @@ function decodeConfig(raw) {
     if (mode !== undefined && mode !== "acceptEdits" && mode !== "auto" && mode !== "bypassPermissions") {
         throw new Error(`claude: invalid permissionMode ${JSON.stringify(mode)}`);
     }
+    // A malformed gateway URL must fail here rather than at spawn time: the CLI
+    // treats an unparseable base URL as a network error, which reads as "the
+    // provider is down" instead of "this setting is wrong".
+    let baseUrl;
+    if (o.baseUrl !== undefined && o.baseUrl !== "") {
+        if (typeof o.baseUrl !== "string")
+            throw new Error(`claude: invalid baseUrl ${JSON.stringify(o.baseUrl)}`);
+        let parsed;
+        try {
+            parsed = new URL(o.baseUrl);
+        }
+        catch {
+            throw new Error(`claude: baseUrl is not a URL: ${o.baseUrl}`);
+        }
+        // http is allowed only for loopback — that is the local-gateway case
+        // (CLIProxyAPI on 127.0.0.1). Anywhere else it would put the token and the
+        // whole conversation on the wire in clear text.
+        const loopback = parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost" || parsed.hostname === "[::1]";
+        if (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && loopback)) {
+            throw new Error(`claude: baseUrl must be https (or http on loopback): ${o.baseUrl}`);
+        }
+        baseUrl = o.baseUrl;
+    }
+    const models = Array.isArray(o.models) ? o.models.filter((m) => typeof m === "string" && m !== "") : undefined;
     return {
         cli: typeof o.cli === "string" ? o.cli : "claude",
         permissionMode: mode ?? "acceptEdits",
+        baseUrl,
+        authToken: typeof o.authToken === "string" && o.authToken !== "" ? o.authToken : undefined,
+        models: models?.length ? models : undefined,
     };
 }
 function firstText(content) {
@@ -350,7 +409,7 @@ export const ClaudeDriver = {
                 args.push("--mcp-config", mcpConfigPath);
                 args.push("--allowedTools", allowed.join(","));
             }
-            const env = claudeEnvironment();
+            const env = claudeEnvironment(config);
             const child = spawnCli(config.cli, args, {
                 cwd: turn.cwd ?? homedir(),
                 env,
@@ -495,21 +554,30 @@ export const ClaudeDriver = {
             return { turnId };
         };
         const snapshot = async () => {
-            const env = claudeEnvironment();
+            const env = claudeEnvironment(config);
             const version = await new Promise((resolve) => {
                 execCli(config.cli, ["--version"], { timeout: 8000, env }, (err, stdout) => resolve(err ? null : stdout.trim()));
             });
             if (!version)
                 return { state: "unavailable", reason: `\`${config.cli}\` CLI not found` };
-            const authenticated = await claudeSignedIn(config.cli, env);
-            return { state: "available", version, authenticated };
+            // A configured gateway token IS this instance's credential. `claude auth
+            // status` only ever reports on the claude.ai login, so asking it here
+            // would report "signed out" for a perfectly working gateway instance and
+            // the UI would refuse to run it.
+            const authenticated = config.baseUrl && config.authToken ? true : await claudeSignedIn(config.cli, env);
+            // Available, working, and unusable until it is told what to run — the
+            // one state that looks fine everywhere else, so it is said out loud.
+            const reason = config.baseUrl && !config.models?.length
+                ? "No model ids yet — add them in Settings → Claude gateways."
+                : undefined;
+            return { state: "available", version, authenticated, ...(reason ? { reason } : {}) };
         };
         return {
             instanceId,
             driverKind: DRIVER_KIND,
             displayName: input.displayName,
             enabled: input.enabled,
-            models: MODELS,
+            models: modelsFor(config),
             snapshot,
             adapter: {
                 provider: DRIVER_KIND,
