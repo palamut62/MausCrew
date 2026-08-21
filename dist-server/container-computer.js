@@ -193,7 +193,7 @@ function statusProblem(status) {
     if (status.persistence === "unsafe")
         return "The existing Local VM is missing its durable workspace; recreate it";
     if (status.container === "stopped")
-        return "This desktop image cannot safely resume; recreate the Local VM";
+        return "The Local VM is stopped and will be safely recreated on demand";
     if (status.desktop_error)
         return `The Local VM desktop failed to start: ${status.desktop_error}`;
     if (!status.desktopReady)
@@ -479,9 +479,19 @@ export async function containerComputerAction(action, runner = sh, platform = pr
         throw Object.assign(new Error("Prepare the Cua desktop image before creating the Local VM"), { status: 409 });
     }
     if (action === "start") {
-        throw Object.assign(new Error("This desktop image cannot safely resume; remove and recreate the Local VM"), {
-            status: 409,
-        });
+        if (before.container !== "stopped") {
+            throw Object.assign(new Error("The Local VM is not stopped"), { status: 409 });
+        }
+        const safelyManaged = before.imageMatches &&
+            before.managed &&
+            before.network === "loopback" &&
+            before.security === "hardened" &&
+            before.persistence === "durable";
+        if (!safelyManaged) {
+            throw Object.assign(new Error("The stopped Local VM does not pass the safety checks; remove it before creating a replacement"), {
+                status: 409,
+            });
+        }
     }
     if (action === "stop" && before.container !== "running") {
         throw Object.assign(new Error("The Local VM is not running"), { status: 409 });
@@ -492,14 +502,23 @@ export async function containerComputerAction(action, runner = sh, platform = pr
         await prepareManagedImage(runtime, runner);
     }
     else {
-        if (action === "run")
+        if (action === "run" || action === "start")
             await ensureVmWorkspace(platform);
-        const args = action === "run"
-            ? containerRunArgs(runtime, randomBytes(6).toString("base64url"))
-            : action === "remove"
-                ? ["rm", runtime === "container" ? "--force" : "-f", CONTAINER]
-                : [action, CONTAINER];
-        await runner(runtime, args, 2 * 60_000);
+        if (action === "start") {
+            // Reusing the stopped container also reuses stale X11 state. Replace only
+            // the container layer; the browser profiles and workspace remain on the
+            // validated bind mount.
+            await runner(runtime, ["rm", runtime === "container" ? "--force" : "-f", CONTAINER], 2 * 60_000);
+            await runner(runtime, containerRunArgs(runtime, randomBytes(6).toString("base64url")), 2 * 60_000);
+        }
+        else {
+            const args = action === "run"
+                ? containerRunArgs(runtime, randomBytes(6).toString("base64url"))
+                : action === "remove"
+                    ? ["rm", runtime === "container" ? "--force" : "-f", CONTAINER]
+                    : [action, CONTAINER];
+            await runner(runtime, args, 2 * 60_000);
+        }
     }
     return containerComputerStatus(runner, platform);
 }

@@ -140,6 +140,9 @@ export function createAcpDriver(support) {
                         env: acpEnv(local.env ?? {}),
                     });
                 }
+                for (const custom of turn.integrations?.mcp ?? []) {
+                    servers.push({ name: custom.name, command: custom.command, args: custom.args, env: acpEnv(custom.env) });
+                }
                 return servers;
             };
             const sendTurn = async (turn) => {
@@ -557,6 +560,7 @@ export function createAcpDriver(support) {
                         sessionModelSwitch: "unsupported",
                         agentsMcp: true,
                         computerMcp: true,
+                        genericMcp: true,
                         effortLevels: support.effortLevels,
                     },
                     sendTurn,

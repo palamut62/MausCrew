@@ -97,6 +97,10 @@ export function saveConfig(patch) {
         disk.claudeGateways = patch.claudeGateways;
         delete disk.claudeGateway;
     }
+    if (patch.aguiAgents)
+        disk.aguiAgents = patch.aguiAgents;
+    if (patch.mcpServers)
+        disk.mcpServers = patch.mcpServers;
     mkdirSync(DATA_DIR, { recursive: true });
     writeFileAtomic(p, JSON.stringify(disk, null, 2), { mode: 0o600 });
 }
@@ -187,7 +191,27 @@ export function instanceConfigs(cfg) {
             },
         };
     }
+    for (const agent of cfg.aguiAgents ?? []) {
+        const instanceId = `agui-${agent.id}`;
+        if (map[instanceId])
+            continue;
+        const authEnv = aguiAuthEnv(agent.id);
+        map[instanceId] = {
+            driver: "agui",
+            displayName: agent.label.trim() || gatewayHost(agent.endpoint),
+            environment: process.env[authEnv] ? { [authEnv]: process.env[authEnv] } : {},
+            config: {
+                endpoint: agent.endpoint,
+                authHeader: agent.authHeader || "Authorization",
+                authEnv,
+                allowPrivateHosts: true,
+            },
+        };
+    }
     return map;
+}
+export function aguiAuthEnv(id) {
+    return `MAUSCREW_AGUI_AUTH_${id.replace(/[^A-Za-z0-9]/g, "_").toUpperCase()}`;
 }
 /** A readable fallback name: the endpoint's host, which is what distinguishes
  * two gateways when the user did not bother to name them. */
