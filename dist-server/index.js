@@ -9,6 +9,7 @@ import { homedir } from "node:os";
 import { dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { approvalKey, autoDecision, requiresOneTimeApproval } from "./auto-approve.js";
+import { cancelBotCreationApprovalsFor, createApprovedBot, dismissStaleBotCreationCards, requestBotCreationApproval, resolveBotCreation, } from "./bot-creation-approval.js";
 import * as box from "./box.js";
 import * as composio from "./composio.js";
 import { chiefOfStaffSystemPrompt } from "./chief-of-staff.js";
@@ -1088,8 +1089,9 @@ const approvalBus = { store, broadcast };
 // answered, and the composer stays disabled behind it — settle them at boot.
 {
     const stale = dismissStalePeerCards(approvalBus);
-    if (stale)
-        console.log(`peer approvals: dismissed ${stale} card(s) left by a previous run`);
+    const staleCreations = dismissStaleBotCreationCards(approvalBus);
+    if (stale || staleCreations)
+        console.log(`approvals: dismissed ${stale + staleCreations} card(s) left by a previous run`);
 }
 async function runGroupMemberTurn(groupId, botId, hop, 
 // bots that already spoke for this user message — "@Scout ask @Pixel"
@@ -1592,6 +1594,44 @@ const server = createServer(async (req, res) => {
                         ? `Queued for review — @${targetName} will only pick it up if the user approves after your turn finishes.`
                         : `Delegation queued — @${targetName} will pick it up after your current turn finishes.`,
                 });
+            }
+            if (method === "POST" && path === "/api/internal/create-bot") {
+                const body = await readBody(req);
+                const fromBotId = String(body.fromBotId ?? "");
+                const from = store.bot(fromBotId);
+                if (!from)
+                    return json(res, 404, { error: "unknown sender" });
+                const sourceThreadId = String(body.fromThreadId ?? from.threadId);
+                if (!store.taskByThread(from.id, sourceThreadId))
+                    return json(res, 403, { error: "source thread does not belong to sender" });
+                if ((Number(body.depth ?? 0) || 0) !== 0)
+                    return json(res, 403, { error: "delegated bots cannot create more bots" });
+                if (store.bots.length >= 50)
+                    return json(res, 409, { error: "the workspace already has the maximum of 50 bots" });
+                const name = String(body.name ?? "").trim();
+                const title = String(body.title ?? "").trim();
+                const description = String(body.description ?? "").trim();
+                if (!name || !title || !description)
+                    return json(res, 400, { error: "name, title, and description required" });
+                if (name.length > 48 || title.length > 80 || description.length > 800) {
+                    return json(res, 400, { error: "bot profile is too long" });
+                }
+                if (store.bots.some((bot) => bot.name.localeCompare(name, undefined, { sensitivity: "accent" }) === 0)) {
+                    return json(res, 409, { error: `a bot named ${name} already exists` });
+                }
+                const verdict = await requestBotCreationApproval(approvalBus, from, { name, title, description }, sourceThreadId);
+                if (verdict !== "allow")
+                    return json(res, 200, { error: "denied by user" });
+                if (!store.bot(fromBotId))
+                    return json(res, 404, { error: "requesting bot no longer exists" });
+                if (store.bots.length >= 50)
+                    return json(res, 409, { error: "the workspace already has the maximum of 50 bots" });
+                if (store.bots.some((bot) => bot.name.localeCompare(name, undefined, { sensitivity: "accent" }) === 0)) {
+                    return json(res, 409, { error: `a bot named ${name} already exists` });
+                }
+                const bot = createApprovedBot(approvalBus, { name, title, description }, await defaultSelection());
+                broadcast({ kind: "bot", bot: publicBot(bot) });
+                return json(res, 201, { botId: bot.id, name: bot.name });
             }
             return json(res, 404, { error: "unknown internal endpoint" });
         }
@@ -2163,6 +2203,7 @@ const server = createServer(async (req, res) => {
             // a peer approval naming this bot can never be meaningfully answered
             // now, and its caller would otherwise wait out the 15-minute timeout
             cancelPeerApprovalsFor(bot.id);
+            cancelBotCreationApprovalsFor(bot.id);
             discardDelegations(commsBus, bot.threadId);
             store.deleteBot(bot.id);
             for (const dir of [EVENTS_DIR, NATIVE_DIR]) {
@@ -2269,6 +2310,8 @@ const server = createServer(async (req, res) => {
             if (resolvePeerComms(approvalBus, String(body.requestId), body.behavior)) {
                 return json(res, 200, { ok: true });
             }
+            if (resolveBotCreation(String(body.requestId), body.behavior))
+                return json(res, 200, { ok: true });
             const instance = registry.get(bot.modelSelection.instanceId);
             if (!instance)
                 return json(res, 409, { error: "provider unavailable" });
@@ -2293,6 +2336,8 @@ const server = createServer(async (req, res) => {
             if (resolvePeerComms(approvalBus, String(body.requestId), body.behavior)) {
                 return json(res, 200, { ok: true });
             }
+            if (resolveBotCreation(String(body.requestId), body.behavior))
+                return json(res, 200, { ok: true });
             const instance = registry.get(owner.modelSelection.instanceId);
             if (!instance)
                 return json(res, 409, { error: "provider unavailable" });
