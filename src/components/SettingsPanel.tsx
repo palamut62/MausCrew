@@ -101,7 +101,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
   if (skillsOpen) return <SkillManager bot={bot} onClose={() => setSkillsOpen(false)} />;
 
   return (
-    <aside className="animate-panel-in flex h-full w-[400px] shrink-0 flex-col border-l border-hairline bg-panel max-md:absolute max-md:inset-0 max-md:z-50 max-md:w-full max-md:border-l-0">
+    <aside className="animate-panel-in flex h-full w-[312px] shrink-0 flex-col border-l border-hairline bg-panel max-md:absolute max-md:inset-0 max-md:z-50 max-md:w-full max-md:border-l-0">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3">
         <button

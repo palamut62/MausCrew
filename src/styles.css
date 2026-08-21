@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
-/* MausCrew terminal-industrial palette: near-black chassis, hairline structure,
-   a single signal-green accent reserved for active state and primary action. */
+/* MausCrew conversational dark system. It follows the soft, layered desktop
+   language used by modern teammate apps while keeping MausCrew's own identity. */
 @theme {
   --animate-panel-in: panel-in 0.24s cubic-bezier(0.22, 1, 0.36, 1);
   --animate-pop-in: pop-in 0.2s cubic-bezier(0.22, 1, 0.36, 1);
@@ -9,19 +9,19 @@
   --animate-msg-in: msg-in 0.18s cubic-bezier(0.22, 1, 0.36, 1);
   --animate-shimmer: shimmer 2s linear infinite;
 
-  --color-app: #060708;
-  --color-panel: #0C0E10;
-  --color-raised: #1C2126;
-  --color-raised-hover: #262C33;
-  --color-card: #14181C;
-  --color-inset: #101316;
-  --color-hairline: #232A31;
-  --color-ink: #E8EDF2;
-  --color-ink-secondary: #E8EDF299;
-  --color-accent: #22D3EE;
-  --color-accent-border: #67E8F9;
-  --color-bubble-user: #1C2126;
-  --color-success: #34D399;
+  --color-app: #080808;
+  --color-panel: #111111;
+  --color-raised: #292929;
+  --color-raised-hover: #363636;
+  --color-card: #181818;
+  --color-inset: #202020;
+  --color-hairline: #2D2D2D;
+  --color-ink: #F4F4F4;
+  --color-ink-secondary: #A3A3A3;
+  --color-accent: #1D9BF0;
+  --color-accent-border: #67BDF5;
+  --color-bubble-user: #5A5A5A;
+  --color-success: #2FB986;
   --color-danger: #FF4D5E;
   --color-warning: #FFB020;
 
@@ -31,12 +31,12 @@
   --font-mono: "JetBrains Mono", "Cascadia Code", ui-monospace, SFMono-Regular,
     "SF Mono", Menlo, Consolas, monospace;
 
-  --radius-sm: 1px;
-  --radius-md: 2px;
-  --radius-lg: 3px;
-  --radius-xl: 5px;
-  --radius-2xl: 6px;
-  --radius-3xl: 8px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-3xl: 22px;
 }
 
 html,
@@ -54,7 +54,7 @@ body {
 }
 
 ::-webkit-scrollbar {
-  width: 8px;
+  width: 6px;
 }
 ::-webkit-scrollbar-thumb {
   background: var(--color-raised-hover);

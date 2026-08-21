@@ -99,8 +99,8 @@ const Transcript = memo(function Transcript({
                   className={cn(
                     "text-[14px] leading-snug",
                     user
-                      ? "max-w-[70%] rounded-xl bg-bubble-user px-4 py-2.5 whitespace-pre-wrap text-ink"
-                      : "max-w-[760px] border-l border-l-accent/60 pl-3 text-ink",
+                      ? "max-w-[72%] rounded-2xl bg-bubble-user px-4 py-2.5 whitespace-pre-wrap text-ink"
+                      : "max-w-[78%] rounded-2xl bg-raised px-4 py-3 text-ink",
                   )}
                   title={new Date(m.at).toLocaleString()}
                 >
@@ -140,7 +140,7 @@ function StreamingBubble({ text }: { text: string }) {
   const deferred = useDeferredValue(text);
   return (
     <div className="flex w-full justify-start">
-      <div className="max-w-[760px] border-l border-l-accent/60 pl-3 text-[14px] leading-snug text-ink">
+      <div className="max-w-[78%] rounded-2xl bg-raised px-4 py-3 text-[14px] leading-snug text-ink">
         <ChatMarkdown text={deferred} streaming />
         <span className="animate-caret ml-0.5 inline-block h-[14px] w-[2px] bg-ink align-middle" />
       </div>
@@ -241,9 +241,9 @@ export function GroupView({ group }: { group: Group }) {
       {/* Header: static member mauses; a ring + dot marks the working bot. */}
       <div
         className={cn(
-          "flex items-center justify-between px-5 py-3",
+          "flex min-h-[52px] items-center justify-between border-b border-hairline/70 px-4 py-2",
           // Room for the drawer button, which overlays this corner below md.
-          "pl-11 md:pl-5",
+          "pl-11 md:pl-4",
           isWin && "pr-[148px]",
         )}
         style={drag}
@@ -277,7 +277,7 @@ export function GroupView({ group }: { group: Group }) {
       </div>
 
       {/* Bulletin: one pinned line; click to edit */}
-      <div className="mx-auto w-full max-w-[900px] px-5">
+      <div className="mx-auto w-full max-w-[760px] px-4">
         {bulletinOpen ? (
           <div className="mb-1 rounded-lg border border-hairline bg-panel p-2">
             <textarea
@@ -314,7 +314,7 @@ export function GroupView({ group }: { group: Group }) {
       {/* Transcript */}
       <div
         ref={scrollRef}
-        className="flex-1 overflow-y-auto px-5 [overflow-anchor:none]"
+        className="flex-1 overflow-y-auto px-4 [overflow-anchor:none]"
         onWheel={(e) => {
           if (e.deltaY < 0) setFollow(false);
           else if (atEnd()) setFollow(true);
@@ -330,7 +330,7 @@ export function GroupView({ group }: { group: Group }) {
         }}
       >
         <div
-          className="mx-auto flex max-w-[900px] flex-col gap-2 pb-4"
+          className="mx-auto flex max-w-[760px] flex-col gap-1.5 pb-4 pt-5"
           role="log"
           aria-live="polite"
           aria-label={`Room ${group.name}`}

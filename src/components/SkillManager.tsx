@@ -215,7 +215,7 @@ export function SkillManager({ bot, onClose }: { bot: Bot; onClose: () => void }
   const canSave = Boolean(draft.name.trim() && draft.description.trim() && draft.instructions.trim()) && !busy;
 
   return (
-    <aside className="animate-panel-in flex h-full w-[400px] max-w-full shrink-0 flex-col border-l border-hairline bg-panel max-md:absolute max-md:inset-0 max-md:z-50 max-md:w-full max-md:border-l-0">
+    <aside className="animate-panel-in flex h-full w-[312px] max-w-full shrink-0 flex-col border-l border-hairline bg-panel max-md:absolute max-md:inset-0 max-md:z-50 max-md:w-full max-md:border-l-0">
       <div className="flex items-center justify-between border-b border-hairline px-4 py-3">
         <button
           onClick={editorOpen ? closeEditor : onClose}

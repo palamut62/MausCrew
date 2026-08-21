@@ -32,6 +32,16 @@ export function ComposerAttachments({
   // tracks depth rather than the last event it happened to see
   const depth = useRef(0);
 
+  const chooseFiles = async (files: File[]) => {
+    const { attachments, rejectedNames } = await attachmentsFromDroppedFiles(files, pathForFile);
+    if (attachments.length) onAdd(attachments);
+    setNotice(
+      rejectedNames.length
+        ? `${rejectedNames.join(", ")} — MausCrew could not read a local path for that file.`
+        : null,
+    );
+  };
+
   useEffect(() => {
     let active = true;
     const carriesFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes("Files");
@@ -82,6 +92,17 @@ export function ComposerAttachments({
 
   return (
     <>
+      <input
+        id="mauscrew-attachment-picker"
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(event) => {
+          const files = Array.from(event.currentTarget.files ?? []);
+          event.currentTarget.value = "";
+          if (files.length) void chooseFiles(files);
+        }}
+      />
       {dragging && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-10">
           <div className="rounded-xl border-2 border-dashed border-accent/70 bg-panel/90 px-8 py-6 text-[14px] font-medium text-ink">
