@@ -5,7 +5,7 @@
 // bridge — box endpoints are never touched); off → parked. Auto (unset)
 // prefers a ready Local VM, then an existing cloud box, then this computer.
 import { useEffect, useRef, useState } from "react";
-import { ArrowSquareOut, CalendarDot, CalendarDots, Gear, Monitor, Moon, Plus, Power, Spinner, X } from "@phosphor-icons/react";
+import { ArrowClockwise, ArrowSquareOut, CalendarDot, CalendarDots, Gear, Monitor, Moon, Plus, Power, Spinner, Trash, X } from "@phosphor-icons/react";
 import { useStore, type Bot } from "@/state/store";
 import type { Routine } from "@/lib/routines";
 import { ApiKeyRow } from "./ApiKeys";
@@ -95,7 +95,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
   const [polledFrame, setPolledFrame] = useState<{ png: string; mime: string } | null>(null);
   const [vmFrame, setVmFrame] = useState<string | null>(null);
   const [localFrame, setLocalFrame] = useState<string | null>(null);
-  const [pending, setPending] = useState<"join" | "sleep" | null>(null);
+  const [pending, setPending] = useState<"join" | "sleep" | "reset" | "destroy" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [creatingRoutine, setCreatingRoutine] = useState(false);
   // bumped when a Box API key is saved inline, to re-run the spin-up flow
@@ -333,6 +333,28 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
       .finally(() => setPending(null));
   };
 
+  const manageCloud = (kind: "reset" | "destroy") => {
+    const prompt = kind === "reset"
+      ? `Reset ${bot.name}'s cloud computer? Its current disk and browser profile will be permanently replaced.`
+      : `Delete ${bot.name}'s cloud computer? Its disk, files, and browser profile cannot be recovered.`;
+    if (!window.confirm(prompt)) return;
+    setPending(kind);
+    setError(null);
+    api(`/api/bots/${bot.id}/computer/${kind}`, { method: "POST" })
+      .then(() => {
+        setPolledFrame(null);
+        if (kind === "reset") {
+          setBoxState("ready");
+          setPhase("ready");
+        } else {
+          dispatch({ type: "updateBot", botId: bot.id, patch: { computer: "off" } });
+          setPhase("off");
+        }
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setPending(null));
+  };
+
   const openVmSettings = () => {
     window.sessionStorage.setItem("mauscrew.settings.section", "computer");
     dispatch({ type: "toggleAppSettings", open: true });
@@ -455,7 +477,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
 
         {/* Cloud-only actions */}
         {phase === "ready" && (
-          <div className="mt-3 flex gap-2">
+          <div className="mt-3 grid grid-cols-2 gap-2">
             <button
               onClick={() => run("join")}
               disabled={pending === "join"}
@@ -475,6 +497,24 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
                 Sleep
               </button>
             )}
+            <button
+              onClick={() => manageCloud("reset")}
+              disabled={Boolean(pending) || bot.busy}
+              className="flex items-center justify-center gap-2 rounded-lg bg-raised px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+              title="Replace this computer but keep the bot"
+            >
+              {pending === "reset" ? <Spinner size={14} weight="fill" className="animate-spin" /> : <ArrowClockwise size={14} weight="bold" />}
+              Reset
+            </button>
+            <button
+              onClick={() => manageCloud("destroy")}
+              disabled={Boolean(pending) || bot.busy}
+              className="flex items-center justify-center gap-2 rounded-lg border border-danger/25 px-3 py-2 text-[13px] text-danger hover:bg-danger/10 disabled:opacity-50"
+              title="Permanently delete this computer"
+            >
+              {pending === "destroy" ? <Spinner size={14} weight="fill" className="animate-spin" /> : <Trash size={14} weight="bold" />}
+              Delete
+            </button>
           </div>
         )}
 
