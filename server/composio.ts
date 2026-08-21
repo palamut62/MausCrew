@@ -166,13 +166,27 @@ export async function authorizeService(cfg: AppConfig, slug: string) {
   // Auth Config automatically when the owner has already created one.
   if (toolkit === "twitter") {
     const params = new URLSearchParams({ toolkit_slug: toolkit, show_disabled: "false", limit: "50" });
-    const configs = await fetch(`${toolkitBase()}/auth_configs?${params}`, {
+    const configs = await fetch(`${apiBase()}/auth_configs?${params}`, {
       headers: projectHeaders(cfg.composio.apiKey),
       signal: AbortSignal.timeout(15_000),
     });
     if (configs.ok) {
-      const body = (await configs.json()) as { items?: Array<{ id?: string; disabled?: boolean; is_disabled?: boolean }> };
-      authConfigId = body.items?.find((item) => item.id && item.disabled !== true && item.is_disabled !== true)?.id;
+      const body = (await configs.json()) as {
+        items?: Array<{
+          id?: string;
+          disabled?: boolean;
+          is_disabled?: boolean;
+          status?: string;
+          is_enabled_for_tool_router?: boolean;
+        }>;
+      };
+      authConfigId = body.items?.find((item) => (
+        item.id
+        && item.disabled !== true
+        && item.is_disabled !== true
+        && item.status?.toUpperCase() !== "DISABLED"
+        && item.is_enabled_for_tool_router !== false
+      ))?.id;
     }
   }
 
