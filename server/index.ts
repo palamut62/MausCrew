@@ -77,6 +77,8 @@ import { narrateTool, toUtterances } from "./tts/speech-text.ts";
 import { readCuaConnection } from "./local-computer.ts";
 import { LocalVmIdleTimer } from "./local-vm-idle.ts";
 import { LocalVmLease } from "./local-vm-lease.ts";
+import { testMcpConnection } from "./mcp/connection-test.ts";
+import { mcpMountsForBot, mcpSecretEnv, validateMcpServer } from "./mcp/registry.ts";
 import { RoutineManager, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts";
 import {
   authenticateRemoteToken,
@@ -1072,6 +1074,10 @@ async function startTurn(
       // tools that would fail on every call or spawn an unnecessary proxy.
       const dwebUrl = process.env.DWEB_URL?.trim();
       if (dwebUrl) integrations.dweb = { url: dwebUrl };
+      if (instance.adapter.capabilities.genericMcp === true) {
+        const mounts = mcpMountsForBot(cfg, bot.id);
+        if (mounts.length) integrations.mcp = mounts;
+      }
       const wants = opts?.runOn === "cloud" ? "cloud" : bot.computer; // cloud routine overrides the MAUS default
       const mountsComputerMcp = instance.adapter.capabilities.computerMcp === true;
       const mountsCloudComputer = mountsComputerMcp || instance.driverKind === "boxAgent";
@@ -1247,6 +1253,9 @@ async function startTurn(
           // bot whose driver actually mounted the tools
           (integrations.composio
             ? " The user's connected apps (Gmail, Calendar, Slack, Notion, and the rest) are reachable through the composio tools — find the right one with COMPOSIO_SEARCH_TOOLS, read its arguments with COMPOSIO_GET_TOOL_SCHEMAS, then run it with COMPOSIO_MULTI_EXECUTE_TOOL. Reach for them before telling the user you have no access to a service."
+            : "") +
+          (integrations.mcp?.length
+            ? " User-configured MCP tools are available. Their calls are governed by the same ALLOW / ASK / DENY policy and audit trail as native tools."
             : "") +
           (coordinationPrompt ? ` ${coordinationPrompt}` : "") +
           (opts?.automationSource === "webhook"
@@ -1543,6 +1552,10 @@ function configStatus() {
       instanceId: `agui-${agent.id}`,
       configured: Boolean(process.env[aguiAuthEnv(agent.id)]) || agent.authConfigured === true,
     })),
+    mcpServers: (cfg.mcpServers ?? []).map((server) => ({
+      ...server,
+      configuredEnvNames: server.envNames.filter((name) => Boolean(process.env[mcpSecretEnv(server.id, name)])),
+    })),
     // the chosen voice is a setting, not a secret; the key is reported the
     // same configured-or-not way as every other credential
     tts: tts.describeVoice(cfg),
@@ -1713,7 +1726,7 @@ const server = createServer(async (req, res) => {
       remoteDevice = authenticateRemoteToken(cookieToken(req.headers.cookie));
       if (!remoteDevice) return json(res, 401, { error: "pairing required" });
       // Provider credentials and remote-device administration remain local.
-      if ((path === "/api/config" && method !== "GET") || path.startsWith("/api/remote/pairings") || path.startsWith("/api/remote/devices") || path.startsWith("/api/security") || path.startsWith("/api/agui-agents")) {
+      if ((path === "/api/config" && method !== "GET") || path.startsWith("/api/remote/pairings") || path.startsWith("/api/remote/devices") || path.startsWith("/api/security") || path.startsWith("/api/agui-agents") || path.startsWith("/api/mcp-servers")) {
         return json(res, 403, { error: "this setting can only be changed on the desktop" });
       }
     }
@@ -2889,6 +2902,66 @@ const server = createServer(async (req, res) => {
       agent.authConfigured = Boolean(body.value.trim());
       saveConfig({ aguiAgents: cfg.aguiAgents });
       await reloadProviders();
+      const status = configStatus();
+      broadcast({ kind: "config", ...status });
+      return json(res, 200, status);
+    }
+
+    // ── governed custom MCP servers ──────────────────────────────────
+    if (method === "POST" && path === "/api/mcp-servers/test") {
+      const body = await readBody(req);
+      let server: ReturnType<typeof validateMcpServer>;
+      try {
+        server = validateMcpServer(body.server);
+      } catch (error) {
+        return json(res, 400, { error: error instanceof Error ? error.message : String(error) });
+      }
+      const rawValues = body.envValues && typeof body.envValues === "object" && !Array.isArray(body.envValues)
+        ? body.envValues as Record<string, unknown>
+        : {};
+      const env = Object.fromEntries(server.envNames.flatMap((name) => {
+        const value = rawValues[name];
+        return typeof value === "string" && value ? [[name, value]] : [];
+      }));
+      try {
+        return json(res, 200, await testMcpConnection({ command: server.command, args: server.args, env }));
+      } catch (error) {
+        return json(res, 400, { error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    if (method === "PUT" && path === "/api/mcp-servers") {
+      const body = await readBody(req);
+      if (!Array.isArray(body.servers)) return json(res, 400, { error: "servers must be an array" });
+      if (body.servers.length > 30) return json(res, 400, { error: "at most 30 MCP servers can be registered" });
+      let servers: NonNullable<AppConfig["mcpServers"]>;
+      try {
+        servers = body.servers.map(validateMcpServer);
+      } catch (error) {
+        return json(res, 400, { error: error instanceof Error ? error.message : String(error) });
+      }
+      if (new Set(servers.map((server) => server.id)).size !== servers.length) {
+        return json(res, 400, { error: "MCP server ids must be unique" });
+      }
+      const removed = (cfg.mcpServers ?? []).filter((server) => !servers.some((candidate) => candidate.id === server.id));
+      for (const server of removed) {
+        for (const name of server.envNames) delete process.env[mcpSecretEnv(server.id, name)];
+      }
+      cfg.mcpServers = servers;
+      saveConfig({ mcpServers: servers });
+      const status = configStatus();
+      broadcast({ kind: "config", ...status });
+      return json(res, 200, status);
+    }
+    m = path.match(/^\/api\/mcp-servers\/([\w-]+)\/credential\/([A-Za-z_][A-Za-z0-9_]*)$/);
+    if (m && method === "PUT") {
+      const [, id, name] = m;
+      const server = (cfg.mcpServers ?? []).find((candidate) => candidate.id === id);
+      if (!server || !server.envNames.includes(name)) return json(res, 404, { error: "no such MCP credential field" });
+      const body = await readBody(req);
+      if (typeof body.value !== "string") return json(res, 400, { error: "credential value must be a string" });
+      const envName = mcpSecretEnv(id, name);
+      if (body.value.trim()) process.env[envName] = body.value.trim();
+      else delete process.env[envName];
       const status = configStatus();
       broadcast({ kind: "config", ...status });
       return json(res, 200, status);

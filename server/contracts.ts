@@ -162,6 +162,9 @@ export interface SendTurnInput {
     /** dweb network daemon: an MCP proxy exposing dweb status, repo, and
      * opencode model access as tools. url is the dweb HTTP base. */
     dweb?: { url: string };
+    /** User-configured stdio MCP servers. Secrets are resolved by the
+     * harness and passed in the child's environment, never to the renderer. */
+    mcp?: Array<{ name: string; command: string; args: string[]; env: Record<string, string> }>;
   };
   cwd?: string;
 }
@@ -187,6 +190,8 @@ export interface ProviderAdapter {
      * connected apps). Same rule again: a key in the config says the user
      * HAS those connections, not that this driver can reach them. */
     composioMcp?: boolean;
+    /** The driver can mount arbitrary user-configured stdio MCP servers. */
+    genericMcp?: boolean;
     /** Effort levels this driver can pass to its CLI, ascending. Absent =
      * the driver cannot set effort, so the app never offers the control —
      * same rule as computerMcp: never show a knob the driver cannot turn. */

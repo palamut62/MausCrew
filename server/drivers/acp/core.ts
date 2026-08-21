@@ -229,6 +229,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             env: acpEnv(local.env ?? {}),
           });
         }
+        for (const custom of turn.integrations?.mcp ?? []) {
+          servers.push({ name: custom.name, command: custom.command, args: custom.args, env: acpEnv(custom.env) });
+        }
         return servers;
       };
 
@@ -659,6 +662,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             sessionModelSwitch: "unsupported",
             agentsMcp: true,
             computerMcp: true,
+            genericMcp: true,
             effortLevels: support.effortLevels,
           },
           sendTurn,

@@ -49,6 +49,17 @@ export interface AppConfig {
     authHeader?: string;
     authConfigured?: boolean;
   }>;
+  /** Custom stdio MCP servers. Values for envNames live only in Electron's
+   * encrypted credential store and reach the harness as process env. */
+  mcpServers?: Array<{
+    id: string;
+    name: string;
+    command: string;
+    args: string[];
+    envNames: string[];
+    allowedBots: string[];
+    enabled?: boolean;
+  }>;
   xai?: { key?: string; url?: string };
   /** Project key used for Sessions, catalog and agent tools. userId/sessionId
    * are non-secret local identifiers used to reuse one Composio Session. */
@@ -175,6 +186,7 @@ export function saveConfig(patch: Partial<AppConfig>): void {
     delete disk.claudeGateway;
   }
   if (patch.aguiAgents) disk.aguiAgents = patch.aguiAgents;
+  if (patch.mcpServers) disk.mcpServers = patch.mcpServers;
   mkdirSync(DATA_DIR, { recursive: true });
   writeFileAtomic(p, JSON.stringify(disk, null, 2), { mode: 0o600 });
 }
