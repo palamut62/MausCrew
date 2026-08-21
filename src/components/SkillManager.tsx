@@ -1,5 +1,5 @@
 import { ArrowClockwise, CaretLeft, Check, FileText, FloppyDisk, GraduationCap, MagnifyingGlass, Plus, Spinner, Trash, Warning, X } from "@phosphor-icons/react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type CSSProperties } from "react";
 
 import { cn } from "@/lib/cn";
 import { api, type Bot } from "@/state/store";
@@ -213,19 +213,29 @@ export function SkillManager({ bot, onClose }: { bot: Bot; onClose: () => void }
     return !query || `${skill.name} ${skill.description} ${skill.whenToUse}`.toLowerCase().includes(query);
   });
   const canSave = Boolean(draft.name.trim() && draft.description.trim() && draft.instructions.trim()) && !busy;
+  const isWin = window.mauscrew?.platform === "win32";
+  const drag = isWin ? ({ WebkitAppRegion: "drag" } as CSSProperties) : undefined;
+  const noDrag = isWin ? ({ WebkitAppRegion: "no-drag" } as CSSProperties) : undefined;
 
   return (
-    <aside className="animate-panel-in flex h-full w-[312px] max-w-full shrink-0 flex-col border-l border-hairline bg-panel max-md:absolute max-md:inset-0 max-md:z-50 max-md:w-full max-md:border-l-0">
-      <div className="flex items-center justify-between border-b border-hairline px-4 py-3">
+    <aside className="animate-panel-in flex h-full min-w-0 w-[312px] max-w-full shrink-0 flex-col border-l border-hairline bg-panel max-md:absolute max-md:inset-0 max-md:z-50 max-md:w-full max-md:border-l-0">
+      <div
+        className={cn(
+          "flex min-h-[60px] shrink-0 items-center justify-between gap-2 border-b border-hairline px-4",
+          isWin && "pr-[148px]",
+        )}
+        style={drag}
+      >
         <button
           onClick={editorOpen ? closeEditor : onClose}
           aria-label={editorOpen ? "Back to skills" : "Back to bot settings"}
-          className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+          className="shrink-0 rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+          style={noDrag}
         >
           <CaretLeft size={18} weight="bold" />
         </button>
-        <span className="text-[15px] font-semibold text-ink">{editorOpen ? (editingId ? "Edit skill" : "New skill") : "Skill Center"}</span>
-        <button onClick={onClose} aria-label="Close Skill Center" className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink">
+        <span className="min-w-0 truncate text-[15px] font-semibold text-ink">{editorOpen ? (editingId ? "Edit skill" : "New skill") : "Skill Center"}</span>
+        <button onClick={onClose} aria-label="Close Skill Center" className="shrink-0 rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink" style={noDrag}>
           <X size={18} weight="bold" />
         </button>
       </div>
