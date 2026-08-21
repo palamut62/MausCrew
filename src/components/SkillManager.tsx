@@ -1,4 +1,4 @@
-import { ArrowClockwise, CaretLeft, Check, FileText, FloppyDisk, MagnifyingGlass, Plus, Spinner, Trash, Warning, X } from "@phosphor-icons/react";
+import { ArrowClockwise, CaretLeft, Check, FileText, FloppyDisk, GraduationCap, MagnifyingGlass, Plus, Spinner, Trash, Warning, X } from "@phosphor-icons/react";
 import { useCallback, useEffect, useState } from "react";
 
 import { cn } from "@/lib/cn";
@@ -97,6 +97,21 @@ export function SkillManager({ bot, onClose }: { bot: Bot; onClose: () => void }
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+
+  const teachFromTask = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await api(`/api/bots/${bot.id}/teach-draft`, { method: "POST" });
+      setDraft(result.draft);
+      setEditingId(null);
+      setCreating(true);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const load = useCallback(async (quiet = false) => {
     if (!quiet) setSkills(null);
@@ -303,7 +318,7 @@ export function SkillManager({ bot, onClose }: { bot: Bot; onClose: () => void }
                   onClick={() => void save()}
                   className="flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-[12.5px] font-medium text-app hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {busy ? <Spinner size={14} weight="fill" className="animate-spin" /> : <FloppyDisk size={14} weight="bold" />} FloppyDisk skill
+                  {busy ? <Spinner size={14} weight="fill" className="animate-spin" /> : <FloppyDisk size={14} weight="bold" />} Save skill
                 </button>
               </div>
             </div>
@@ -334,6 +349,18 @@ export function SkillManager({ bot, onClose }: { bot: Bot; onClose: () => void }
               <button type="button" onClick={openNew} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 text-[12.5px] font-medium text-app hover:brightness-110">
                 <Plus size={15} weight="bold" /> New
               </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => void teachFromTask()}
+              disabled={busy}
+              className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-accent/25 bg-accent/10 px-3 py-2 text-[12px] font-medium text-accent hover:bg-accent/15 disabled:opacity-50"
+            >
+              {busy ? <Spinner size={14} weight="fill" className="animate-spin" /> : <GraduationCap size={15} weight="bold" />}
+              Teach from current task
+            </button>
+            <div className="mt-1.5 text-[10.5px] leading-relaxed text-ink-secondary">
+              Creates an editable draft from this task. Nothing is written until you review and save it.
             </div>
           </div>
 

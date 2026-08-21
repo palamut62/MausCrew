@@ -97,6 +97,7 @@ import {
   updateWorkspaceSkill,
 } from "./skills.ts";
 import { createTeamManifest, parseTeamManifest } from "./team-manifest.ts";
+import { teachDraftFromTask } from "./teach/draft.ts";
 import { ensureTailscaleServe } from "./tailscale-serve.ts";
 import { extractStructuredUi } from "./ui-runtime/schema.ts";
 import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./webhook-ingress.ts";
@@ -2377,6 +2378,14 @@ const server = createServer(async (req, res) => {
         if (error instanceof SkillStoreError) return json(res, error.status, { error: error.message });
         throw error;
       }
+    }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/teach-draft$/);
+    if (m && method === "POST") {
+      const bot = store.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      const task = store.taskByThread(bot.id, bot.threadId);
+      if (!task) return json(res, 404, { error: "no active task" });
+      return json(res, 200, { draft: teachDraftFromTask({ title: task.title, messages: store.activePath(task.threadId) }) });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)$/);
     if (m && method === "PATCH") {
