@@ -24,6 +24,7 @@ import { SpeakButton } from "./SpeakButton";
 import { CallButton, CallOverlay } from "./CallView";
 import { cn } from "@/lib/cn";
 import { webhookMessageView } from "@/lib/webhook-message";
+import { StructuredResult } from "./StructuredResult";
 
 /** Long user messages collapse behind a fade so pasted walls of text don't
  * bury the conversation; bots get full markdown. */
@@ -636,6 +637,8 @@ const MessagesList = memo(function MessagesList({
               );
             case "screen":
               return m.png ? <ScreenFrame png={m.png} mime={m.mime} /> : null;
+            case "structured":
+              return <StructuredResult message={m} />;
             default:
               return (
                 <Bubble
