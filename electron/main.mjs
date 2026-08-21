@@ -1,11 +1,13 @@
-import { app, BrowserWindow, clipboard, desktopCapturer, dialog, ipcMain, safeStorage, session, shell, systemPreferences, utilityProcess } from "electron";
+import { app, BrowserWindow, clipboard, desktopCapturer, dialog, ipcMain, Menu, safeStorage, session, shell, systemPreferences, Tray, utilityProcess } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { startCua, stopCua, registerCuaIpc } from "./cua.mjs";
 import { finishSpeech, startSpeech, stopSpeech } from "./speech.mjs";
 import { openBlankTerminal } from "./terminal-launch.mjs";
+import { orderedServerPorts, readSavedServerPort, saveServerPort } from "./server-port.mjs";
 import { startUpdater, registerUpdaterIpc } from "./updater.mjs";
+import { shouldHideWindowOnClose } from "./window-lifecycle.mjs";
 import capabilitiesModule from "./capabilities.cjs";
 
 const { desktopCapabilities } = capabilitiesModule;
@@ -30,6 +32,9 @@ if (process.platform === "linux") app.setDesktopName("com.mauscrew.app.desktop")
 let serverProc = null;
 let serverReady = true;
 let secureCredentials = {};
+let mainWindow = null;
+let tray = null;
+let quitRequested = false;
 
 const CREDENTIALS_FILE = path.join(app.getPath("userData"), "credentials.bin");
 
@@ -176,14 +181,21 @@ async function startServerOn(port) {
 }
 
 async function startServerPackaged() {
+  const userDataDir = app.getPath("userData");
+  const ports = orderedServerPorts(readSavedServerPort(userDataDir));
   // two passes: a quit-and-reopen relaunch can race the dying instance's
   // server during teardown — one settle-and-retry covers it
   for (let attempt = 0; attempt < 2; attempt++) {
-    for (const port of [8799, 18799, 28799]) {
+    for (const port of ports) {
       const proc = await startServerOn(port);
       if (proc) {
         serverProc = proc;
         SERVER_PORT = port;
+        try {
+          saveServerPort(userDataDir, port);
+        } catch (error) {
+          slog(`server port persistence failed: ${error?.message ?? error}`);
+        }
         return true;
       }
     }
@@ -201,6 +213,12 @@ const ERROR_PAGE =
 let cuaReady = Promise.resolve({ mode: "unavailable", reason: "not-started" });
 
 function createWindow() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+    return mainWindow;
+  }
   const isMac = process.platform === "darwin";
   const win = new BrowserWindow({
     width: 1440,
@@ -228,6 +246,16 @@ function createWindow() {
       contextIsolation: true,
       preload: path.join(__dirname, "preload.cjs"),
     },
+  });
+  mainWindow = win;
+
+  win.on("close", (event) => {
+    if (!shouldHideWindowOnClose({ quitRequested, trayAvailable: Boolean(tray) })) return;
+    event.preventDefault();
+    win.hide();
+  });
+  win.on("closed", () => {
+    if (mainWindow === win) mainWindow = null;
   });
 
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -265,7 +293,8 @@ function createWindow() {
       } catch (error) {
         console.error(`[smoke] renderer-failed ${error?.stack ?? error}`);
       } finally {
-        win.close();
+        quitRequested = true;
+        app.quit();
       }
     });
   }
@@ -276,6 +305,35 @@ function createWindow() {
     win.loadURL(DEV_URL);
   }
   return win;
+}
+
+function showMainWindow() {
+  return createWindow();
+}
+
+function createTray() {
+  if (tray) return tray;
+  try {
+    tray = new Tray(APP_ICON);
+    tray.setToolTip("MausCrew");
+    tray.setContextMenu(Menu.buildFromTemplate([
+      { label: "Open MausCrew", click: () => showMainWindow() },
+      { type: "separator" },
+      {
+        label: "Quit MausCrew",
+        click: () => {
+          quitRequested = true;
+          app.quit();
+        },
+      },
+    ]));
+    tray.on("click", () => showMainWindow());
+    tray.on("double-click", () => showMainWindow());
+  } catch (error) {
+    tray = null;
+    console.error(`[tray] could not create tray icon: ${error?.stack ?? error}`);
+  }
+  return tray;
 }
 
 // "This Mac" screen preview — served from the main process so the Screen
@@ -425,6 +483,7 @@ app.whenReady().then(async () => {
   }
   registerCuaIpc();
   registerUpdaterIpc();
+  createTray();
   // Start the CUA daemon before the window so the harness can pick up the
   // connection descriptor on first render. Never blocks window creation on
   // failure — computer use degrades to "unavailable", the rest still works.
@@ -441,12 +500,12 @@ app.whenReady().then(async () => {
   // the user's click, installs on "Restart to update"
   startUpdater(win);
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    showMainWindow();
   });
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+  if (process.platform !== "darwin" && !tray) app.quit();
 });
 
 // EMBEDDING.md lifecycle rule: defer the first quit until the embedded
@@ -455,6 +514,7 @@ app.on("window-all-closed", () => {
 const CUA_STOP_TIMEOUT_MS = 2500;
 let cuaCleanedUp = false;
 app.on("before-quit", (e) => {
+  quitRequested = true;
   if (cuaCleanedUp) return;
   e.preventDefault();
   try {

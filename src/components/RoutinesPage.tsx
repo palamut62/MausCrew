@@ -591,6 +591,9 @@ export function RoutinesPage() {
   const unseenFailures = state.routineRuns.filter((run) => ["failed", "missed"].includes(run.status) && !run.seenAt).length;
   const running = state.routineRuns.filter((run) => ["queued", "running", "waiting"].includes(run.status)).length;
   const paused = state.routines.filter((routine) => !routine.enabled && canToggleRoutine(routine));
+  const isWin = window.mauscrew?.platform === "win32";
+  const drag = isWin ? ({ WebkitAppRegion: "drag" } as React.CSSProperties) : undefined;
+  const noDrag = isWin ? ({ WebkitAppRegion: "no-drag" } as React.CSSProperties) : undefined;
   useEffect(() => {
     if (pausedOpen && paused.length === 0) setPausedOpen(false);
   }, [pausedOpen, paused.length]);
@@ -613,23 +616,26 @@ export function RoutinesPage() {
           "pl-11 md:pl-5",
         )}
       >
-        <div className="flex flex-wrap items-start justify-between gap-3">
+        <div
+          className={cn("flex flex-wrap items-start justify-between gap-3", isWin && "pr-[148px]")}
+          style={drag}
+        >
           <div>
             <div className="flex items-center gap-2.5">{section === "calendar" ? <CalendarDots size={21} weight="bold" className="text-accent" /> : <WebhooksLogo size={21} weight="bold" className="text-accent" />}<h1 className="text-[20px] font-semibold tracking-tight text-ink">Automations</h1></div>
             <p className="mt-1 text-[12.5px] text-ink-secondary">{section === "calendar" ? "Run MAUS tasks on a schedule." : "Run MAUS tasks when an event arrives."}</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2" style={noDrag}>
             {running > 0 && <span className="flex items-center gap-1.5 rounded-md border border-accent/25 bg-accent/10 px-2.5 py-1.5 font-mono text-[11px] tracking-tight text-accent"><Spinner size={12} weight="fill" className="animate-spin" />{running} active</span>}
             {unseenFailures > 0 && <span className="flex items-center gap-1.5 rounded-md border border-danger/25 bg-danger/10 px-2.5 py-1.5 font-mono text-[11px] tracking-tight text-danger"><WarningCircle size={12} weight="bold" />{unseenFailures} need attention</span>}
             {paused.length > 0 && <button onClick={() => setPausedOpen(true)} className="flex items-center gap-1.5 rounded-md border border-hairline bg-panel px-2.5 py-1.5 font-mono text-[11px] tracking-tight text-ink-secondary hover:bg-raised hover:text-ink"><Pause size={12} weight="bold" />{paused.length} paused</button>}
             {section === "calendar" && <button onClick={() => setEditor("new")} disabled={visibleBots.length === 0} className="flex items-center gap-2 rounded-xl bg-accent px-3.5 py-2 text-[13px] font-medium text-app hover:brightness-110 disabled:opacity-40"><Plus size={15} weight="bold" />New schedule</button>}
           </div>
         </div>
-        <div className="mt-4 flex items-center gap-1 rounded-xl bg-panel p-1 sm:w-fit">
+        <div className="mt-4 flex items-center gap-1 rounded-xl bg-panel p-1 sm:w-fit" style={noDrag}>
           <button onClick={() => setSection("calendar")} className={cn("flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-medium", section === "calendar" ? "bg-raised text-ink shadow" : "text-ink-secondary hover:text-ink")}><CalendarDots size={13} weight={section === "calendar" ? "fill" : "bold"} />Schedules</button>
           <button onClick={() => setSection("webhooks")} className={cn("flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-medium", section === "webhooks" ? "bg-raised text-ink shadow" : "text-ink-secondary hover:text-ink")}><WebhooksLogo size={13} weight={section === "webhooks" ? "fill" : "bold"} />Webhooks{state.webhooks.length > 0 && <span className="rounded-md bg-accent/15 px-1.5 font-mono text-[10px] tracking-tight text-accent">{state.webhooks.length}</span>}</button>
         </div>
-        {section === "calendar" && <div className="mt-3 flex flex-wrap items-center gap-2">
+        {section === "calendar" && <div className="mt-3 flex flex-wrap items-center gap-2" style={noDrag}>
           <div className="flex items-center rounded-xl border border-hairline bg-panel p-0.5">
             <button onClick={() => move(-1)} className="rounded-lg p-2 text-ink-secondary hover:bg-raised hover:text-ink" aria-label="Previous dates"><CaretLeft size={16} weight="bold" /></button>
             <button onClick={goToday} className="px-2.5 py-1.5 text-[12px] font-medium text-ink hover:text-accent">Today</button>
