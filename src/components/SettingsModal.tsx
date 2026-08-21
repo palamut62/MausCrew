@@ -14,6 +14,7 @@ import { VoiceSettings } from "./VoiceSettings";
 import { cn } from "@/lib/cn";
 import { RemoteAccessSection } from "./RemoteAccessSection";
 import { SecuritySection } from "./SecuritySection";
+import { AguiAgents } from "./AguiAgents";
 
 const SECTIONS: Array<{ id: AppSettingsSection; label: string; icon: typeof User }> = [
   { id: "general", label: "General", icon: User },
@@ -233,6 +234,15 @@ export function SettingsModal() {
                     <DeepSeekOptions />
                   </div>
                 </div>
+              </Card>
+            )}
+
+            {section === "connections" && (
+              <Card
+                title="Remote AG-UI agents"
+                subtitle="Bring a LangGraph, CrewAI, Mastra, Pydantic AI, or custom AG-UI endpoint into MausCrew as a bot engine."
+              >
+                <AguiAgents />
               </Card>
             )}
 

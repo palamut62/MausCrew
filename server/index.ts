@@ -33,6 +33,7 @@ import {
   ensureDirs,
   gatewayInstanceId,
   instanceConfigs,
+  aguiAuthEnv,
   loadConfig,
   saveConfig,
   EVENTS_DIR,
@@ -40,6 +41,8 @@ import {
   type AppConfig,
   type ClaudeGateway,
 } from "./config.ts";
+import { checkAguiEndpoint } from "./drivers/agui/endpoint.ts";
+import { testAguiConnection } from "./drivers/agui/connection-test.ts";
 import { resetPathCache } from "./env-path.ts";
 import { AuditStore } from "./audit/audit-store.ts";
 import { normalizePermissionAction, type GovernedAction } from "./governance/action.ts";
@@ -1528,6 +1531,11 @@ function configStatus() {
       models: gw.models ?? [],
       configured: Boolean(gw.authToken),
     })),
+    aguiAgents: (cfg.aguiAgents ?? []).map((agent) => ({
+      ...agent,
+      instanceId: `agui-${agent.id}`,
+      configured: Boolean(process.env[aguiAuthEnv(agent.id)]) || agent.authConfigured === true,
+    })),
     // the chosen voice is a setting, not a secret; the key is reported the
     // same configured-or-not way as every other credential
     tts: tts.describeVoice(cfg),
@@ -1698,7 +1706,7 @@ const server = createServer(async (req, res) => {
       remoteDevice = authenticateRemoteToken(cookieToken(req.headers.cookie));
       if (!remoteDevice) return json(res, 401, { error: "pairing required" });
       // Provider credentials and remote-device administration remain local.
-      if ((path === "/api/config" && method !== "GET") || path.startsWith("/api/remote/pairings") || path.startsWith("/api/remote/devices") || path.startsWith("/api/security")) {
+      if ((path === "/api/config" && method !== "GET") || path.startsWith("/api/remote/pairings") || path.startsWith("/api/remote/devices") || path.startsWith("/api/security") || path.startsWith("/api/agui-agents")) {
         return json(res, 403, { error: "this setting can only be changed on the desktop" });
       }
     }
@@ -2803,6 +2811,80 @@ const server = createServer(async (req, res) => {
         result: url.searchParams.get("result") ?? undefined,
       });
       return json(res, 200, { records });
+    }
+
+    // ── remote AG-UI agents ───────────────────────────────────────────
+    if (method === "POST" && path === "/api/agui-agents/test") {
+      const body = await readBody(req);
+      const header = typeof body.authHeader === "string" && body.authHeader.trim() ? body.authHeader.trim() : "Authorization";
+      if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(header)) return json(res, 400, { error: "invalid auth header name" });
+      const savedAuth = typeof body.id === "string" ? process.env[aguiAuthEnv(body.id)] : undefined;
+      const authValue = typeof body.authValue === "string" && body.authValue ? body.authValue : savedAuth;
+      const result = await testAguiConnection({
+        endpoint: body.endpoint,
+        allowPrivateHosts: true,
+        ...(authValue ? { headers: { [header]: authValue } } : {}),
+      });
+      return json(res, result.ok ? 200 : 400, result);
+    }
+    if (method === "PUT" && path === "/api/agui-agents") {
+      const body = await readBody(req);
+      if (!Array.isArray(body.agents)) return json(res, 400, { error: "agents must be an array" });
+      if (body.agents.length > 50) return json(res, 400, { error: "at most 50 AG-UI agents can be registered" });
+      const existing = new Map((cfg.aguiAgents ?? []).map((agent) => [agent.id, agent]));
+      const ids = new Set<string>();
+      const agents: NonNullable<AppConfig["aguiAgents"]> = [];
+      for (const rawCandidate of body.agents as unknown[]) {
+        if (!rawCandidate || typeof rawCandidate !== "object" || Array.isArray(rawCandidate)) {
+          return json(res, 400, { error: "every AG-UI agent must be an object" });
+        }
+        const candidate = rawCandidate as Record<string, unknown>;
+        const id = typeof candidate.id === "string" && /^[\w-]{1,80}$/.test(candidate.id) ? candidate.id : randomUUID();
+        if (ids.has(id)) return json(res, 400, { error: `duplicate AG-UI agent id: ${id}` });
+        ids.add(id);
+        const label = typeof candidate.label === "string" ? candidate.label.trim().slice(0, 80) : "";
+        if (!label) return json(res, 400, { error: "every AG-UI agent needs a name" });
+        const endpoint = await checkAguiEndpoint(candidate.endpoint, { allowPrivateHosts: true });
+        if (!endpoint.allowed) return json(res, 400, { error: `${label}: ${endpoint.reason}` });
+        const authHeader = typeof candidate.authHeader === "string" && candidate.authHeader.trim() ? candidate.authHeader.trim() : "Authorization";
+        if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(authHeader)) return json(res, 400, { error: `${label}: invalid auth header name` });
+        agents.push({
+          id,
+          label,
+          endpoint: endpoint.url,
+          authHeader,
+          authConfigured: Boolean(process.env[aguiAuthEnv(id)]) || existing.get(id)?.authConfigured === true,
+        });
+      }
+      // Browser development stores a temporary credential in this server's
+      // environment. Clear removed agents here too; packaged Electron has
+      // already removed the encrypted value through credential:set.
+      for (const removedId of existing.keys()) {
+        if (!ids.has(removedId)) delete process.env[aguiAuthEnv(removedId)];
+      }
+      cfg.aguiAgents = agents;
+      saveConfig({ aguiAgents: agents });
+      await reloadProviders();
+      const status = configStatus();
+      broadcast({ kind: "config", ...status });
+      return json(res, 200, status);
+    }
+    m = path.match(/^\/api\/agui-agents\/([\w-]+)\/credential$/);
+    if (m && method === "PUT") {
+      const id = m[1];
+      const body = await readBody(req);
+      if (typeof body.value !== "string") return json(res, 400, { error: "credential value must be a string" });
+      const agent = (cfg.aguiAgents ?? []).find((candidate) => candidate.id === id);
+      if (!agent) return json(res, 404, { error: "no such AG-UI agent" });
+      const envName = aguiAuthEnv(id);
+      if (body.value.trim()) process.env[envName] = body.value.trim();
+      else delete process.env[envName];
+      agent.authConfigured = Boolean(body.value.trim());
+      saveConfig({ aguiAgents: cfg.aguiAgents });
+      await reloadProviders();
+      const status = configStatus();
+      broadcast({ kind: "config", ...status });
+      return json(res, 200, status);
     }
 
     // ── app config (API keys — never echoed back, booleans only) ──

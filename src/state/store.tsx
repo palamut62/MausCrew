@@ -203,6 +203,14 @@ export interface ConfigStatus {
     models: string[];
     configured: boolean;
   }[];
+  aguiAgents?: {
+    id: string;
+    instanceId: string;
+    label: string;
+    endpoint: string;
+    authHeader?: string;
+    configured: boolean;
+  }[];
   /** Voice (ElevenLabs). `configured` = a key is saved; `ready` = a key AND
    * a voice, which is what it takes to actually speak. The key itself is
    * never echoed back. */
