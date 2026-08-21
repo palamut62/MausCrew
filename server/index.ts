@@ -84,7 +84,7 @@ import {
   updateWorkspaceSkill,
 } from "./skills.ts";
 import { createTeamManifest, parseTeamManifest } from "./team-manifest.ts";
-import { verifyTailscaleServe } from "./tailscale-serve.ts";
+import { ensureTailscaleServe } from "./tailscale-serve.ts";
 import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./webhook-ingress.ts";
 import { WebhookManager } from "./webhooks.ts";
 
@@ -1595,7 +1595,7 @@ const server = createServer(async (req, res) => {
       if (!localRequest) return json(res, 403, { error: "desktop only" });
       const publicUrl = configuredRemoteUrl();
       if (!publicUrl) return json(res, 409, { error: "save a valid HTTPS remote address first" });
-      const ingress = await verifyTailscaleServe(publicUrl, PORT);
+      const ingress = await ensureTailscaleServe(publicUrl, PORT);
       if (!ingress.ok) return json(res, 409, { error: ingress.error });
       const pairing = createPairing();
       return json(res, 201, { ...pairing, url: `${publicUrl.origin}/pair?code=${encodeURIComponent(pairing.code)}` });

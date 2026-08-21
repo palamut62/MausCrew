@@ -25,21 +25,33 @@ export function tailscaleServeProxyUsesPort(proxy, port) {
         return false;
     }
 }
+async function readServeProxy(publicUrl, execute) {
+    const { stdout } = await execute("tailscale", ["serve", "status", "--json"], {
+        timeout: 5000,
+        encoding: "utf8",
+        env: { ...process.env, PATH: augmentedPath() },
+        windowsHide: true,
+    });
+    return tailscaleServeProxy(JSON.parse(stdout), publicUrl.hostname);
+}
 /** A .ts.net pairing URL is useful only when Tailscale Serve points at this
  * exact harness port. Other HTTPS reverse proxies are left alone. */
-export async function verifyTailscaleServe(publicUrl, localPort) {
+export async function ensureTailscaleServe(publicUrl, localPort, execute = run) {
     if (!publicUrl.hostname.toLowerCase().endsWith(".ts.net"))
         return { ok: true, checked: false };
     const command = `tailscale serve --bg localhost:${localPort}`;
     try {
-        const { stdout } = await run("tailscale", ["serve", "status", "--json"], {
-            timeout: 5000,
+        const proxy = await readServeProxy(publicUrl, execute);
+        if (tailscaleServeProxyUsesPort(proxy, localPort))
+            return { ok: true, checked: true };
+        await execute("tailscale", ["serve", "--bg", `localhost:${localPort}`], {
+            timeout: 15_000,
             encoding: "utf8",
             env: { ...process.env, PATH: augmentedPath() },
             windowsHide: true,
         });
-        const proxy = tailscaleServeProxy(JSON.parse(stdout), publicUrl.hostname);
-        if (tailscaleServeProxyUsesPort(proxy, localPort))
+        const updatedProxy = await readServeProxy(publicUrl, execute);
+        if (tailscaleServeProxyUsesPort(updatedProxy, localPort))
             return { ok: true, checked: true };
     }
     catch {
