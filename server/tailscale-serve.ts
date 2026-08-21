@@ -3,7 +3,13 @@ import { promisify } from "node:util";
 
 import { augmentedPath } from "./env-path.ts";
 
-const run = promisify(execFile);
+type CommandRunner = (
+  file: string,
+  args: string[],
+  options: { timeout: number; encoding: "utf8"; env: NodeJS.ProcessEnv; windowsHide: boolean },
+) => Promise<{ stdout: string }>;
+
+const run = promisify(execFile) as unknown as CommandRunner;
 
 interface ServeStatus {
   Web?: Record<string, { Handlers?: Record<string, { Proxy?: string }> }>;
@@ -34,20 +40,37 @@ export function tailscaleServeProxyUsesPort(proxy: string | null, port: number):
 
 export type TailscaleServeCheck = { ok: true; checked: boolean } | { ok: false; checked: true; error: string };
 
+async function readServeProxy(publicUrl: URL, execute: CommandRunner) {
+  const { stdout } = await execute("tailscale", ["serve", "status", "--json"], {
+    timeout: 5000,
+    encoding: "utf8",
+    env: { ...process.env, PATH: augmentedPath() },
+    windowsHide: true,
+  });
+  return tailscaleServeProxy(JSON.parse(stdout), publicUrl.hostname);
+}
+
 /** A .ts.net pairing URL is useful only when Tailscale Serve points at this
  * exact harness port. Other HTTPS reverse proxies are left alone. */
-export async function verifyTailscaleServe(publicUrl: URL, localPort: number): Promise<TailscaleServeCheck> {
+export async function ensureTailscaleServe(
+  publicUrl: URL,
+  localPort: number,
+  execute: CommandRunner = run,
+): Promise<TailscaleServeCheck> {
   if (!publicUrl.hostname.toLowerCase().endsWith(".ts.net")) return { ok: true, checked: false };
   const command = `tailscale serve --bg localhost:${localPort}`;
   try {
-    const { stdout } = await run("tailscale", ["serve", "status", "--json"], {
-      timeout: 5000,
+    const proxy = await readServeProxy(publicUrl, execute);
+    if (tailscaleServeProxyUsesPort(proxy, localPort)) return { ok: true, checked: true };
+
+    await execute("tailscale", ["serve", "--bg", `localhost:${localPort}`], {
+      timeout: 15_000,
       encoding: "utf8",
       env: { ...process.env, PATH: augmentedPath() },
       windowsHide: true,
     });
-    const proxy = tailscaleServeProxy(JSON.parse(stdout), publicUrl.hostname);
-    if (tailscaleServeProxyUsesPort(proxy, localPort)) return { ok: true, checked: true };
+    const updatedProxy = await readServeProxy(publicUrl, execute);
+    if (tailscaleServeProxyUsesPort(updatedProxy, localPort)) return { ok: true, checked: true };
   } catch {
     // The actionable message below covers a missing CLI, invalid JSON, and a
     // stale/disabled Serve mapping without leaking the raw process failure.
