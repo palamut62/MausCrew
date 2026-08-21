@@ -1,9 +1,8 @@
-// Auto-update popup — a small card floating bottom-left, driven by the
-// preload's updater bridge. Renders nothing in the browser/dev (no bridge)
-// and while idle/checking; appears only when actionable: an update to
-// download, a download in progress, a restart to apply, or an error.
+// Persistent sidebar update card, driven by the preload's updater bridge.
+// It stays out of the way while idle/checking and appears only when the user
+// can act on an update (or when a manual attempt needs retrying).
 import { useEffect, useState } from "react";
-import { ArrowClockwise, ArrowLineDown, Sparkle, Spinner, X } from "@phosphor-icons/react";
+import { ArrowClockwise, ArrowLineDown, Sparkle, Spinner } from "@phosphor-icons/react";
 import { useUpdaterState } from "@/lib/updater";
 import { cn } from "@/lib/cn";
 
@@ -26,11 +25,8 @@ function friendlyError(message?: string): string {
   return message.split("\n")[0].slice(0, 140);
 }
 
-export function UpdateBanner() {
+export function SidebarUpdateCard() {
   const s = useUpdaterState();
-  // dismissal is per status+version, so the popup returns for the next
-  // update (and when an available one finishes downloading)
-  const [dismissed, setDismissed] = useState<string | null>(null);
   // A click has to go renderer → main → broadcast before the real status
   // arrives. Latch the pressed button as busy on the same frame so it greys
   // out immediately; the incoming status clears the latch.
@@ -39,8 +35,6 @@ export function UpdateBanner() {
   useEffect(() => setPending(null), [status]);
 
   if (!s || s.status === "idle" || s.status === "checking") return null;
-  const key = `${s.status}:${s.version ?? ""}`;
-  if (dismissed === key) return null;
   const updater = window.mauscrew!.updater!;
 
   // while busy the card owns the moment: no dismissing, no second click
@@ -72,7 +66,7 @@ export function UpdateBanner() {
             : friendlyError(s.message);
 
   return (
-    <div className="animate-panel-in fixed bottom-4 left-4 z-50 w-[300px] rounded-xl border border-hairline bg-panel p-3.5">
+    <div className="mb-2 rounded-xl border border-accent/25 bg-accent/5 p-3">
       <div className="flex items-start gap-2.5">
         <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md bg-accent/15 text-accent">
           <Sparkle size={14} weight="bold" />
@@ -83,15 +77,6 @@ export function UpdateBanner() {
             {subtitle}
           </div>
         </div>
-        {!busy && (
-          <button
-            onClick={() => setDismissed(key)}
-            className="shrink-0 rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
-            title="Dismiss"
-          >
-            <X size={14} weight="bold" />
-          </button>
-        )}
       </div>
 
       {s.status === "downloading" && (
@@ -179,13 +164,6 @@ export function UpdateBanner() {
               )}
             </button>
           )}
-          <button
-            onClick={() => setDismissed(key)}
-            disabled={pending !== null}
-            className="rounded-lg px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-50 disabled:hover:bg-transparent"
-          >
-            Later
-          </button>
         </div>
       )}
     </div>

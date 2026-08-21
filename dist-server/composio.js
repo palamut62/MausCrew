@@ -9,6 +9,9 @@ function apiBase() {
 function toolkitBase() {
     return (process.env.MAUSCREW_COMPOSIO_TOOLKITS_API ?? `${DEFAULT_BACKEND_ORIGIN}/api/v3`).replace(/\/$/, "");
 }
+function normalizedToolkitSlug(slug) {
+    return slug.toLowerCase() === "x" ? "twitter" : slug.toLowerCase();
+}
 function projectHeaders(apiKey, json = false) {
     return {
         "x-api-key": apiKey,
@@ -135,17 +138,41 @@ export async function authorizeService(cfg, slug) {
     if (!cfg.composio?.apiKey)
         throw new Error("No Composio project key configured");
     const session = await ensureProjectSession(cfg);
+    const toolkit = normalizedToolkitSlug(slug);
+    let authConfigId;
+    // Twitter/X does not have Composio-managed OAuth. Reuse a custom project
+    // Auth Config automatically when the owner has already created one.
+    if (toolkit === "twitter") {
+        const params = new URLSearchParams({ toolkit_slug: toolkit, show_disabled: "false", limit: "50" });
+        const configs = await fetch(`${toolkitBase()}/auth_configs?${params}`, {
+            headers: projectHeaders(cfg.composio.apiKey),
+            signal: AbortSignal.timeout(15_000),
+        });
+        if (configs.ok) {
+            const body = (await configs.json());
+            authConfigId = body.items?.find((item) => item.id && item.disabled !== true && item.is_disabled !== true)?.id;
+        }
+    }
     const res = await fetch(`${apiBase()}/tool_router/session/${encodeURIComponent(session.session_id)}/link`, {
         method: "POST",
         headers: projectHeaders(cfg.composio.apiKey, true),
-        body: JSON.stringify({ toolkit: slug }),
+        body: JSON.stringify({
+            toolkit,
+            ...(authConfigId ? { auth_config_override: authConfigId } : {}),
+        }),
         signal: AbortSignal.timeout(30_000),
     });
-    if (!res.ok)
-        throw new Error(await responseError(res, `Composio authorization: HTTP ${res.status}`));
+    if (!res.ok) {
+        const detail = await responseError(res, `Composio authorization: HTTP ${res.status}`);
+        if (/does not manage auth|auth config.*required fields|auth_config_override/i.test(detail)) {
+            const label = toolkit === "twitter" ? "X (Twitter)" : toolkit;
+            throw new Error(`${label} needs a custom OAuth Auth Config in your Composio project. Create it with your own app credentials, then try Connect again.`);
+        }
+        throw new Error(detail);
+    }
     const body = (await res.json());
     if (!body.redirect_url)
-        throw new Error(`Composio returned no auth link for ${slug}`);
+        throw new Error(`Composio returned no auth link for ${toolkit}`);
     return { url: body.redirect_url };
 }
 // Curated fallback — the services agentcal's connectors page ships plus the
@@ -164,7 +191,7 @@ const CURATED = [
     { slug: "sentry", label: "Sentry", blurb: "Errors and alerts", domain: "sentry.io", logo: null },
     { slug: "posthog", label: "PostHog", blurb: "Analytics, feature flags, experiments", domain: "posthog.com", logo: null },
     { slug: "discord", label: "Discord", blurb: "Messages and channels", domain: "discord.com", logo: null },
-    { slug: "x", label: "X (Twitter)", blurb: "Post and read on X", domain: "x.com", logo: null },
+    { slug: "twitter", label: "X (Twitter)", blurb: "Post and read on X", domain: "x.com", logo: null },
     { slug: "reddit", label: "Reddit", blurb: "Browse and post", domain: "reddit.com", logo: null },
     { slug: "zapier", label: "Zapier", blurb: "Connect 9,000+ apps", domain: "zapier.com", logo: null },
     { slug: "hubspot", label: "HubSpot", blurb: "CRM search & updates", domain: "hubspot.com", logo: null },

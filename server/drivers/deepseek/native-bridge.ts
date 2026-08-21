@@ -25,6 +25,7 @@
 // completion. bridge.py got it from the Python SDK's blocking `run()`; here
 // the state machine in runtime-turn.ts owns it.
 import { existsSync } from "node:fs";
+import { isAbsolute } from "node:path";
 
 import type { BridgeCapabilities, BridgeCommand, BridgeMessage } from "./bridge-protocol.ts";
 import type { BridgeHooks, BridgeStatus } from "./bridge.ts";
@@ -520,8 +521,14 @@ export function checkNativeLaunch(launchArgs: string[], wsl: boolean): { ok: boo
   // Under WSL the host cannot stat the distribution's filesystem, so the
   // existence check is skipped rather than guessed at — same rule the Cordis
   // composition check follows.
+  // A bare name like "python3" is resolved through PATH and cannot be stat'ed
+  // here, so only a path-shaped command is checked. isAbsolute covers
+  // "C:\...\python.exe", which contains no forward slash at all — testing for
+  // "/" alone silently skipped this check for every bundled Windows path and
+  // turned "the runtime is not installed" into a 20s initialize timeout.
   const [command] = launchArgs;
-  if (!wsl && command.includes("/") && !existsSync(command)) {
+  const pathShaped = isAbsolute(command) || command.includes("/") || command.includes("\\");
+  if (!wsl && pathShaped && !existsSync(command)) {
     return { ok: false, reason: `the configured DeepSeek runtime is not at ${command}` };
   }
   return { ok: true };

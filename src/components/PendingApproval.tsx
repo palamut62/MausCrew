@@ -90,8 +90,10 @@ export function PendingApprovalActions({
   bot?: Bot;
   onCancelTurn: () => void;
 }) {
-  const { dispatch } = useStore();
-  const decide = (behavior: "allow" | "deny", always = false) =>
+  const { state, dispatch } = useStore();
+  const submitting = state.pendingDecisions[`${threadId}:${pending.requestId}`];
+  const decide = (behavior: "allow" | "deny", always = false) => {
+    if (submitting) return;
     dispatch({
       type: "decideRequest",
       threadId,
@@ -100,33 +102,37 @@ export function PendingApprovalActions({
       message: behavior === "deny" ? "Denied by the user." : undefined,
       alwaysAllow: always && bot && pending.allowKey ? { botId: bot.id, key: pending.allowKey } : undefined,
     });
+  };
 
-  const base = "rounded-md px-3.5 py-1.5 text-[13.5px] transition-colors";
+  const base = "rounded-md px-3.5 py-1.5 text-[13.5px] transition-colors disabled:cursor-wait disabled:opacity-55";
   return (
     <div className="flex flex-wrap items-center justify-end gap-2 px-2 py-2">
-      <button onClick={onCancelTurn} className={cn(base, "text-ink-secondary hover:bg-raised hover:text-ink")}>
+      <button disabled={Boolean(submitting)} onClick={onCancelTurn} className={cn(base, "text-ink-secondary hover:bg-raised hover:text-ink")}>
         Cancel turn
       </button>
       <button
+        disabled={Boolean(submitting)}
         onClick={() => decide("deny")}
         className={cn(base, "border border-danger/40 text-danger hover:bg-danger/10")}
       >
-        Deny
+        {submitting === "deny" ? "Denying…" : "Deny"}
       </button>
       {bot && pending.allowKey && (
         <button
+          disabled={Boolean(submitting)}
           onClick={() => decide("allow", true)}
           title={`Stop asking ${bot.name} about ${pending.allowKey}`}
           className={cn(base, "border border-hairline text-ink hover:bg-raised")}
         >
-          Always allow
+          {submitting === "always-allow" ? "Saving & allowing…" : "Always allow"}
         </button>
       )}
       <button
+        disabled={Boolean(submitting)}
         onClick={() => decide("allow")}
         className={cn(base, "bg-accent font-medium text-app hover:brightness-110")}
       >
-        Allow once
+        {submitting === "allow" ? "Allowing…" : "Allow once"}
       </button>
     </div>
   );

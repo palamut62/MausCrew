@@ -436,19 +436,26 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
               Where this bot's computer runs{bot.computer ? "" : " (currently: auto)"}
             </div>
             <div className="mt-3 flex overflow-hidden rounded-lg border border-hairline">
-              {(["cloud", "local", "off"] as const).map((mode, i) => (
+              {(
+                [
+                  ["cloud", "Cloud"],
+                  ["vm", "Local VM"],
+                  ["local", "This computer"],
+                  ["off", "Off"],
+                ] as const
+              ).map(([mode, label], i) => (
                 <button
                   key={mode}
                   onClick={() => patch({ computer: mode })}
                   className={cn(
-                    "flex-1 py-1.5 text-[13px] capitalize",
+                    "flex-1 py-1.5 text-[13px]",
                     i > 0 && "border-l border-hairline",
                     bot.computer === mode
                       ? "bg-raised text-ink"
                       : "text-ink-secondary hover:bg-raised/60 hover:text-ink",
                   )}
                 >
-                  {mode}
+                  {label}
                 </button>
               ))}
             </div>

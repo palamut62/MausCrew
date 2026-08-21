@@ -36,7 +36,41 @@ export function ComputerMark({ size = 16, className }: IconProps) {
   return <Monitor size={size} className={cn("text-ink-secondary", className)} />;
 }
 
-export function ProviderMark({ driverKind, size, className }: IconProps & { driverKind: string }) {
+/** A user-added gateway, which has no brand of its own. Initials of whatever
+ * the user called it, in a box that reads as "custom" rather than as one of
+ * the shipped engines — the important thing is that it is NOT the Claude mark,
+ * because the endpoint is not Claude. */
+export function GatewayMark({ label, size = 16, className }: IconProps & { label: string }) {
+  const initials =
+    (label
+      .replace(/^https?:\/\//, "")
+      // "api.deepseek.com" should read DEE, not API — the middle label is the
+      // one that names the provider.
+      .split(/[^A-Za-z0-9]+/)
+      .filter((part) => part && !/^(api|www|com|net|org|ai|io|dev|app|v\d+)$/i.test(part))[0] ?? label)
+      .slice(0, 3)
+      .toUpperCase() || "GW";
+  return (
+    <span
+      style={{ fontSize: Math.max(8, Math.round(size * 0.46)) }}
+      className={cn(
+        "flex items-center justify-center rounded-[5px] border border-accent/40 bg-accent/10 px-[3px] font-semibold leading-none tracking-tight text-accent",
+        className,
+      )}
+    >
+      {initials}
+    </span>
+  );
+}
+
+export function ProviderMark({
+  driverKind,
+  gateway,
+  displayName,
+  size,
+  className,
+}: IconProps & { driverKind: string; gateway?: boolean; displayName?: string }) {
+  if (gateway) return <GatewayMark label={displayName ?? driverKind} size={size} className={className} />;
   switch (driverKind) {
     case "grok":
     case "grokAgent":

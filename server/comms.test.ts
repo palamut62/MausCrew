@@ -116,6 +116,11 @@ describe("comms e2e (fake ACP fleet)", () => {
             environment: { FAKE_ACP_MODE: "delegate-peer" },
             config: { cli: FAKE_CLI, fullAuto: true },
           },
+          creator: {
+            driver: "grokAgent",
+            environment: { FAKE_ACP_MODE: "create-bot" },
+            config: { cli: FAKE_CLI, fullAuto: true },
+          },
           // a peer whose agent crashes at initialize — the delegated turn
           // ends with ok=false, so the channel must show a failed terminal
           // chip, not silence.
@@ -583,6 +588,48 @@ describe("comms e2e (fake ACP fleet)", () => {
     },
     45_000,
   );
+
+  it("lets a bot create a durable specialist only after explicit approval", async () => {
+    const creator = (await api("POST", "/api/bots")).body.bot;
+    await api("PATCH", `/api/bots/${creator.id}`, {
+      name: "Chief",
+      modelSelection: { instanceId: "creator", model: "fake-model" },
+    });
+    const before = (await api("GET", "/api/bots")).body.bots.length;
+    expect((await api("POST", `/api/bots/${creator.id}/messages`, { text: "Build a durable research role" })).status).toBe(202);
+
+    let card: any;
+    const cardDeadline = Date.now() + 20_000;
+    for (;;) {
+      const bot = (await api("GET", "/api/bots")).body.bots.find((entry: any) => entry.id === creator.id);
+      card = bot.messages.find((message: any) => message.card?.tool === "create_bot" && !message.card.answered);
+      if (card) break;
+      if (Date.now() > cardDeadline) throw new Error(`create_bot approval card never appeared\nstderr: ${stderr.slice(-2000)}`);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    expect((await api("GET", "/api/bots")).body.bots).toHaveLength(before);
+    expect(card.card.options).toEqual(["Allow", "Deny"]);
+
+    expect((await api("POST", `/api/bots/${creator.id}/respond`, {
+      requestId: card.card.requestId,
+      behavior: "allow",
+    })).status).toBe(200);
+
+    const createdDeadline = Date.now() + 20_000;
+    for (;;) {
+      const state = (await api("GET", "/api/bots")).body;
+      const researcher = state.bots.find((entry: any) => entry.name === "Researcher");
+      const chief = state.bots.find((entry: any) => entry.id === creator.id);
+      if (researcher && !chief.busy) {
+        expect(researcher.title).toBe("Evidence researcher");
+        expect(researcher.description).toContain("never publish without approval");
+        expect(chief.messages.findLast((message: any) => message.kind === "text" && message.role === "bot")?.text).toContain("Created @Researcher");
+        break;
+      }
+      if (Date.now() > createdDeadline) throw new Error(`approved bot was not created\nstderr: ${stderr.slice(-2000)}`);
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }, 50_000);
 
   // ── approval gate (approvePeerComms) ─────────────────────────────────
   // When the SOURCE bot has approvePeerComms = true, an ask_bot call must

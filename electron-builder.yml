@@ -3,14 +3,16 @@ productName: MausCrew
 artifactName: MausCrew-${version}-${arch}.${ext}
 
 # In-app auto-update reads latest-mac.yml + the .zip (macOS) or latest.yml +
-# the NSIS .exe (Windows). The MausCrew repository is private, so anonymous
-# desktop updates are intentionally unavailable until a public, signed release
-# feed is configured. This block still emits branded metadata for authorized
-# internal packaging; never embed a GitHub token in a distributed client.
+# the NSIS .exe (Windows). The source repository is private, and the updater
+# fetches its feed anonymously — pointing it there returns 404, which reads as
+# "no release". So the feed lives in its own public repository that holds
+# nothing but binaries and update metadata. The alternative, keeping the feed
+# on the private repo, only works by shipping a token that can read it, i.e.
+# handing every installed client the whole private source; never do that.
 publish:
   - provider: github
     owner: palamut62
-    repo: MausCrew
+    repo: mauscrew-releases
 
 directories:
   buildResources: build
@@ -45,7 +47,12 @@ mac:
       arch: arm64
     - target: zip
       arch: arm64
-  icon: build/icon.icns
+  # A 1024px master, not a prebuilt .icns: iconutil only runs on macOS, so a
+  # checked-in .icns silently goes stale the moment the brand changes on any
+  # other machine. electron-builder converts PNG → icns itself on every
+  # platform. build/icon.iconset/ is kept in sync as the iconutil source for
+  # anyone who wants to hand-build one.
+  icon: build/icon-1024.png
   category: public.app-category.productivity
   hardenedRuntime: true
   gatekeeperAssess: false
