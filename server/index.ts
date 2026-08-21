@@ -450,8 +450,9 @@ if (!LOCAL_VM_DISABLED) {
     .catch(() => null);
 }
 
-async function localVmReadyForTurn() {
+async function localVmReadyForTurn(cancelled: () => boolean = () => false) {
   let status = await containerComputerStatus();
+  if (cancelled()) return status;
   if (status.container === "stopped") {
     localVmLifecycleBusy = true;
     try {
@@ -464,7 +465,7 @@ async function localVmReadyForTurn() {
   // finish booting. Keep the agent on the local path during that short window
   // instead of falling through to a paid Box sandbox.
   const deadline = Date.now() + 75_000;
-  while (status.container === "running" && !status.ready && Date.now() < deadline) {
+  while (!cancelled() && status.container === "running" && !status.ready && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 1_000));
     status = await containerComputerStatus();
   }
@@ -878,6 +879,23 @@ const screenPollers = new Map<
   { timer: ReturnType<typeof setInterval> | null; capture: () => Promise<void>; last: Frame | null }
 >();
 
+// startTurn marks a bot busy before it awaits integration/computer setup. Keep
+// that pre-dispatch window interruptible: provider adapters cannot cancel a
+// session that has not been created yet.
+type PendingTurnDispatch = { interrupted: boolean };
+const pendingTurnDispatches = new Map<string, PendingTurnDispatch>();
+
+class TurnInterruptedBeforeDispatch extends Error {}
+
+function throwIfTurnInterrupted(pending: PendingTurnDispatch) {
+  if (pending.interrupted) throw new TurnInterruptedBeforeDispatch();
+}
+
+function interruptPendingTurn(threadId: string) {
+  const pending = pendingTurnDispatches.get(threadId);
+  if (pending) pending.interrupted = true;
+}
+
 /** The preview shares the box's single command endpoint with the agent's
  * own actions, so every frame we take is latency stolen from the work the
  * user is waiting on. Hence: a slow interval, a floor between captures,
@@ -1066,6 +1084,8 @@ async function startTurn(
   // busy flips immediately so the composer locks; the dispatch itself runs
   // in the background — box provisioning can take ~90s and must never
   // hang the HTTP request
+  const pendingDispatch: PendingTurnDispatch = { interrupted: false };
+  pendingTurnDispatches.set(threadId, pendingDispatch);
   store.patchBot(bot.id, { busy: true, unread: false });
   broadcast({ kind: "bot", bot: wireBot(store.bot(bot.id)!) });
 
@@ -1077,6 +1097,7 @@ async function startTurn(
       // this engine can reach them
       if (cfg.composio?.apiKey && instance.adapter.capabilities.composioMcp === true) {
         const connection = await composio.mcpIntegration(cfg);
+        throwIfTurnInterrupted(pendingDispatch);
         if (connection) integrations.composio = connection;
       }
       // dweb is opt-in: without an explicit daemon URL, do not advertise
@@ -1111,7 +1132,8 @@ async function startTurn(
         }
         localVmActiveThread = threadId;
         localVmIdle.touch();
-        const localVm = await localVmReadyForTurn();
+        const localVm = await localVmReadyForTurn(() => pendingDispatch.interrupted);
+        throwIfTurnInterrupted(pendingDispatch);
         if (!localVm.ready || !localVm.runtime) {
           throw new Error(`${localVm.problem ?? "the Local VM is not ready"} (App Settings → Local VM)`);
         }
@@ -1140,7 +1162,8 @@ async function startTurn(
       ) {
         let keepLease = false;
         try {
-          const localVm = await localVmReadyForTurn();
+          const localVm = await localVmReadyForTurn(() => pendingDispatch.interrupted);
+          throwIfTurnInterrupted(pendingDispatch);
           if (localVm.ready && localVm.runtime) {
             localVmActiveThread = threadId;
             localVmIdle.touch();
@@ -1168,12 +1191,15 @@ async function startTurn(
           throw new Error("this model engine cannot use computer tools — choose Claude, an ACP engine, or the Computer engine");
         }
         let b = await box.findBox(cfg, bot.id).catch(() => null);
+        throwIfTurnInterrupted(pendingDispatch);
         // Explicit Cloud and the box-native Computer engine provision on first
         // use. Auto remains non-surprising and only reuses an existing box.
         if (!b && mountsCloudComputer && (wants === "cloud" || instance.driverKind === "boxAgent")) {
           broadcast({ kind: "computer", botId: bot.id, state: "provisioning" });
           await box.provisionBox(cfg, bot.id, bot.name);
+          throwIfTurnInterrupted(pendingDispatch);
           b = await box.findBox(cfg, bot.id).catch(() => null);
+          throwIfTurnInterrupted(pendingDispatch);
         }
         // an archived box answers every action with an error until it
         // resumes — wake it here, once, instead of letting the agent
@@ -1182,6 +1208,7 @@ async function startTurn(
         if (b && mountsCloudComputer && !["idle", "ready", "running"].includes(b.state)) {
           broadcast({ kind: "computer", botId: bot.id, state: "waking" });
           b = (await box.readyBox(cfg, bot.id).catch(() => null)) ?? b;
+          throwIfTurnInterrupted(pendingDispatch);
         }
         if (b) {
           previewBoxId = b.id;
@@ -1236,6 +1263,14 @@ async function startTurn(
           ? "You can work with the user's other bots through the agents tools — list_bots shows who's available, ask_bot sends one of them a message and returns their reply."
           : "";
 
+      // The interrupt endpoint can run while the awaits above are still
+      // preparing integrations. Consume that request before spawning the
+      // provider. Deleting the entry and calling sendTurn are synchronous up
+      // to the adapter's active-session registration, so a later interrupt is
+      // handled by the adapter instead of falling into another gap.
+      throwIfTurnInterrupted(pendingDispatch);
+      if (pendingTurnDispatches.get(threadId) === pendingDispatch) pendingTurnDispatches.delete(threadId);
+
       await instance.adapter.sendTurn({
         threadId,
         text: turnText,
@@ -1284,8 +1319,14 @@ async function startTurn(
       if (rewound) store.patchBot(bot.id, { rewound: false, resumeCursors: {} });
       if (previewBoxId) startScreenPoller(bot.id, previewBoxId);
     } catch (e) {
+      if (pendingTurnDispatches.get(threadId) === pendingDispatch) pendingTurnDispatches.delete(threadId);
       localVmLease.release(threadId);
       if (localVmActiveThread === threadId) localVmActiveThread = null;
+      if (e instanceof TurnInterruptedBeforeDispatch) {
+        store.patchBot(bot.id, { busy: false });
+        broadcast({ kind: "bot", bot: wireBot(store.bot(bot.id)!) });
+        return;
+      }
       const message = e instanceof Error ? e.message : String(e);
       const failure = store.appendMessage(threadId, {
         role: "bot",
@@ -1324,6 +1365,7 @@ routines = new RoutineManager({
       : bot
         ? registry.get(bot.modelSelection.instanceId)
         : null;
+    interruptPendingTurn(threadId);
     await instance?.adapter.interruptTurn(threadId);
   },
 });
@@ -2515,6 +2557,7 @@ const server = createServer(async (req, res) => {
       const bot = store.bot(m[1]);
       if (!bot) return json(res, 404, { error: "no such bot" });
       // a running turn dies with its bot
+      interruptPendingTurn(bot.threadId);
       await registry.get(bot.modelSelection.instanceId)?.adapter.interruptTurn(bot.threadId).catch(() => {});
       stopScreenPoller(bot.id);
       routines!.disableForBot(bot.id);
@@ -2665,6 +2708,7 @@ const server = createServer(async (req, res) => {
         return json(res, 200, { ok: true });
       }
       const instance = registry.get(bot.modelSelection.instanceId);
+      interruptPendingTurn(bot.threadId);
       await instance?.adapter.interruptTurn(bot.threadId);
       return json(res, 200, { ok: true });
     }
