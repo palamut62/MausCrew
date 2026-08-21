@@ -63,6 +63,23 @@ export function ApprovalCard({
         </div>
       )}
 
+      {card.policy && (
+        <div className="mt-2 grid grid-cols-3 gap-2 rounded-lg border border-hairline bg-inset px-3 py-2 text-[11px]">
+          <div>
+            <div className="uppercase tracking-wider text-ink-secondary">Risk</div>
+            <div className="mt-0.5 capitalize text-ink">{card.policy.risk}</div>
+          </div>
+          <div>
+            <div className="uppercase tracking-wider text-ink-secondary">Policy</div>
+            <div className="mt-0.5 truncate font-mono text-ink" title={card.policy.ruleId}>{card.policy.ruleId}</div>
+          </div>
+          <div>
+            <div className="uppercase tracking-wider text-ink-secondary">Decision</div>
+            <div className="mt-0.5 font-semibold uppercase text-warning">{card.policy.decision}</div>
+          </div>
+        </div>
+      )}
+
       {/* The decision lives in the composer (one place to answer, and it
           can't be scrolled past); here we only record what happened. */}
       <div className="mt-3 flex items-center gap-1.5 text-[13px] text-ink-secondary">

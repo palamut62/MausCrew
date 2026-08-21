@@ -439,17 +439,38 @@ describe("containerComputerAction", () => {
     expect(fake.calls.some((call) => call.startsWith("docker run "))).toBe(false);
   });
 
-  it("never starts a stopped desktop because its stale X lock makes resume unsafe", async () => {
-    const fake = runner({
-      "/usr/bin/which docker": "docker\n",
-      "/usr/bin/which podman": new Error("missing"),
-      "docker info --format {{.ServerVersion}}": "29\n",
-      [`docker image inspect ${IMAGE}`]: preparedImageInspect(),
-      [`docker inspect ${CONTAINER}`]: readyInspect({ State: { Running: false } }),
-    });
+  it("safely replaces a stopped managed desktop while preserving its workspace mount", async () => {
+    const calls: string[] = [];
+    let replaced = false;
+    const run: CommandRunner = async (command, args) => {
+      const key = [command, ...args].join(" ");
+      calls.push(key);
+      if (key === "/usr/bin/which docker") return { stdout: "docker\n" };
+      if (key === "/usr/bin/which podman") throw new Error("missing");
+      if (key === "docker info --format {{.ServerVersion}}") return { stdout: "29\n" };
+      if (key === `docker image inspect ${IMAGE}`) return { stdout: preparedImageInspect() };
+      if (key === `docker inspect ${CONTAINER}`) {
+        return { stdout: readyInspect({ State: { Running: replaced } }) };
+      }
+      if (key === `docker rm -f ${CONTAINER}`) return { stdout: "removed\n" };
+      if (key.startsWith(`docker run -d --name ${CONTAINER} `)) {
+        replaced = true;
+        return { stdout: "replacement-id\n" };
+      }
+      if (key === versionProbe) return { stdout: `cua-driver ${CUA_DRIVER_VERSION}\n` };
+      if (key === statusProbe) return { stdout: "running\n" };
+      if (key === healthProbe) return { stdout: JSON.stringify({ schema_version: "1", overall: "ok", checks: [] }) };
+      if (key === readinessProbe) return { stdout: "{}\n" };
+      if (key === readinessRead) return { stdout: validPng.toString("base64") };
+      throw new Error(`unexpected command: ${key}`);
+    };
 
-    await expect(containerComputerAction("start", fake.run, "linux")).rejects.toThrow("cannot safely resume");
-    expect(fake.calls).not.toContain(`docker start ${CONTAINER}`);
+    const status = await containerComputerAction("start", run, "linux");
+
+    expect(status.ready).toBe(true);
+    expect(calls).toContain(`docker rm -f ${CONTAINER}`);
+    expect(calls.some((call) => call.startsWith(`docker run -d --name ${CONTAINER} `))).toBe(true);
+    expect(calls).not.toContain(`docker start ${CONTAINER}`);
   });
 });
 

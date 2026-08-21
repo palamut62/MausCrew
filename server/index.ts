@@ -41,6 +41,11 @@ import {
   type ClaudeGateway,
 } from "./config.ts";
 import { resetPathCache } from "./env-path.ts";
+import { AuditStore } from "./audit/audit-store.ts";
+import { normalizePermissionAction, type GovernedAction } from "./governance/action.ts";
+import type { PolicyDecision } from "./governance/decision.ts";
+import { GovernanceGateway } from "./governance/gateway.ts";
+import { ensureDefaultPolicy, loadPolicy, savePolicy } from "./governance/policy-loader.ts";
 import { buildNotification, type Notification } from "./notify.ts";
 import { isEffortLevel, type ModelSelection, type RuntimeEvent, type SubagentActivity } from "./contracts.ts";
 
@@ -103,6 +108,7 @@ const MIME: Record<string, string> = {
 };
 
 ensureDirs();
+await ensureDefaultPolicy();
 const cfg = loadConfig();
 const registry = new ProviderRegistry(BUILT_IN_DRIVERS);
 await registry.load(instanceConfigs(cfg));
@@ -325,6 +331,21 @@ function broadcast(payload: Record<string, unknown>) {
 // once can collide on a bare id and patch each other's messages.
 const toolMessageByItem = new Map<string, string>(); // threadId:itemId -> messageId
 const askMessageByRequest = new Map<string, string>(); // threadId:requestId -> messageId
+const auditStore = new AuditStore();
+const governance = new GovernanceGateway(auditStore);
+const pendingGovernance = new Map<string, { action: GovernedAction; decision: PolicyDecision; startedAt: number }>();
+
+async function recordGovernanceResponse(threadId: string, requestId: string, behavior: unknown) {
+  const key = `${threadId}:${requestId}`;
+  const pending = pendingGovernance.get(key);
+  if (!pending) return;
+  const userDecision = behavior === "allow" ? "allow" : "deny";
+  await governance.record(pending.action, pending.decision, userDecision === "allow" ? "success" : "denied", {
+    userDecision,
+    durationMs: Date.now() - pending.startedAt,
+  });
+  pendingGovernance.delete(key);
+}
 // the last settled assistant text per thread, so a "finished" notification
 // can carry what the bot actually said
 const lastReply = new Map<string, string>();
@@ -412,6 +433,27 @@ void containerComputerStatus()
   })
   .catch(() => null);
 
+async function localVmReadyForTurn() {
+  let status = await containerComputerStatus();
+  if (status.container === "stopped") {
+    localVmLifecycleBusy = true;
+    try {
+      status = await containerComputerAction("start");
+    } finally {
+      localVmLifecycleBusy = false;
+    }
+  }
+  // The replacement container is visible to Docker before X11 and Cua Driver
+  // finish booting. Keep the agent on the local path during that short window
+  // instead of falling through to a paid Box sandbox.
+  const deadline = Date.now() + 75_000;
+  while (status.container === "running" && !status.ready && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    status = await containerComputerStatus();
+  }
+  return status;
+}
+
 bus.subscribe((event: RuntimeEvent) => {
   localVmLease.touch(event.threadId);
   if (localVmActiveThread === event.threadId) localVmIdle.touch();
@@ -497,11 +539,107 @@ bus.subscribe((event: RuntimeEvent) => {
       break;
     case "request.opened": {
       const permission = event.requestType === "permission";
+      const asker = bot ?? (speaker ? store.bot(speaker.botId) : undefined);
+      if (permission && asker && event.requestId) {
+        const requestId = event.requestId;
+        const instance = event.providerInstanceId
+          ? registry.get(event.providerInstanceId)
+          : registry.get(asker.modelSelection.instanceId);
+        const action = normalizePermissionAction({
+          botId: asker.id,
+          engine: event.providerInstanceId ?? asker.modelSelection.instanceId,
+          threadId: event.threadId,
+          tool: event.tool,
+          summary: event.summary,
+          requestId,
+          raw: event.raw,
+        });
+        const policy = governance.decide(action);
+        void (async () => {
+          try {
+            // The row must exist before an allow can reach a provider. An
+            // unavailable audit store therefore fails closed at this gateway.
+            await governance.record(action, policy, "pending");
+            if (!instance) throw new Error("provider unavailable");
+
+            if (policy.outcome === "deny") {
+              await instance.adapter.respondToRequest(event.threadId, requestId, {
+                behavior: "deny",
+                message: `${policy.reason} (${policy.ruleId})`,
+              });
+              await governance.record(action, policy, "denied");
+              pushMessage({
+                role: "bot",
+                kind: "activity",
+                tool: { name: `policy denied ${event.tool}: ${policy.ruleId}`, ok: false },
+              });
+              return;
+            }
+
+            const legacyAuto =
+              policy.outcome === "ask" && policy.ruleId.startsWith("defaults.")
+                ? autoDecision(asker, event.tool, event.summary, { unattended: isUnattended(asker.id) })
+                : null;
+            if (policy.outcome === "allow" || legacyAuto) {
+              await instance.adapter.respondToRequest(event.threadId, requestId, { behavior: "allow" });
+              await governance.record(action, policy, "success", { userDecision: "allow" });
+              pushMessage({
+                role: "bot",
+                kind: "activity",
+                tool: {
+                  name: `${legacyAuto ?? `policy allowed ${event.tool} (${policy.ruleId})`}: ${event.summary.slice(0, 120)}`,
+                  ok: true,
+                },
+              });
+              return;
+            }
+
+            pendingGovernance.set(`${event.threadId}:${requestId}`, { action, decision: policy, startedAt: Date.now() });
+            const message = pushMessage({
+              role: "bot",
+              kind: "options",
+              card: {
+                title: "Approval needed",
+                subtitle: event.summary,
+                options: ["Allow", "Deny"],
+                requestId,
+                tool: event.tool,
+                allowKey: requiresOneTimeApproval(event.tool) ? undefined : approvalKey(event.tool, event.summary),
+                held: policy.reason,
+                policy: {
+                  decision: policy.outcome,
+                  ruleId: policy.ruleId,
+                  risk: action.risk,
+                  category: action.tool.category,
+                },
+              },
+            });
+            askMessageByRequest.set(`${event.threadId}:${requestId}`, message.id);
+            notify(buildNotification("approval", asker, event.threadId, event.summary));
+          } catch (error) {
+            // Governance/audit errors are never converted into an allow.
+            try {
+              await instance?.adapter.respondToRequest(event.threadId, requestId, {
+                behavior: "deny",
+                message: "MausCrew governance unavailable — action denied",
+              });
+            } catch {
+              // The provider may already have exited; the visible failure is
+              // still useful and no action was approved.
+            }
+            pushMessage({
+              role: "bot",
+              kind: "activity",
+              tool: { name: `governance error: ${error instanceof Error ? error.message : String(error)}`, ok: false },
+            });
+          }
+        })();
+        break;
+      }
       // Auto mode / always-allow: answer routine tool permissions for the
       // bot so it keeps working. A QUESTION always reaches the human — the
       // whole point of asking is that a person decides — and anything that
       // looks destructive stops even in auto mode.
-      const asker = bot ?? (speaker ? store.bot(speaker.botId) : undefined);
       const settled = permission && asker && event.requestId
         ? autoDecision(asker, event.tool, event.summary, {
             unattended: isUnattended(asker.id),
@@ -947,7 +1085,7 @@ async function startTurn(
         }
         localVmActiveThread = threadId;
         localVmIdle.touch();
-        const localVm = await containerComputerStatus();
+        const localVm = await localVmReadyForTurn();
         if (!localVm.ready || !localVm.runtime) {
           throw new Error(`${localVm.problem ?? "the Local VM is not ready"} (App Settings → Local VM)`);
         }
@@ -975,7 +1113,7 @@ async function startTurn(
       ) {
         let keepLease = false;
         try {
-          const localVm = await containerComputerStatus();
+          const localVm = await localVmReadyForTurn();
           if (localVm.ready && localVm.runtime) {
             localVmActiveThread = threadId;
             localVmIdle.touch();
@@ -1560,7 +1698,7 @@ const server = createServer(async (req, res) => {
       remoteDevice = authenticateRemoteToken(cookieToken(req.headers.cookie));
       if (!remoteDevice) return json(res, 401, { error: "pairing required" });
       // Provider credentials and remote-device administration remain local.
-      if ((path === "/api/config" && method !== "GET") || path.startsWith("/api/remote/pairings") || path.startsWith("/api/remote/devices")) {
+      if ((path === "/api/config" && method !== "GET") || path.startsWith("/api/remote/pairings") || path.startsWith("/api/remote/devices") || path.startsWith("/api/security")) {
         return json(res, 403, { error: "this setting can only be changed on the desktop" });
       }
     }
@@ -2438,6 +2576,7 @@ const server = createServer(async (req, res) => {
       if (resolveBotCreation(String(body.requestId), body.behavior)) return json(res, 200, { ok: true });
       const instance = registry.get(bot.modelSelection.instanceId);
       if (!instance) return json(res, 409, { error: "provider unavailable" });
+      await recordGovernanceResponse(bot.threadId, String(body.requestId), body.behavior);
       await instance.adapter.respondToRequest(bot.threadId, String(body.requestId), {
         behavior: body.behavior,
         message: body.message,
@@ -2461,6 +2600,7 @@ const server = createServer(async (req, res) => {
       if (resolveBotCreation(String(body.requestId), body.behavior)) return json(res, 200, { ok: true });
       const instance = registry.get(owner.modelSelection.instanceId);
       if (!instance) return json(res, 409, { error: "provider unavailable" });
+      await recordGovernanceResponse(threadId, String(body.requestId), body.behavior);
       await instance.adapter.respondToRequest(threadId, String(body.requestId), {
         behavior: body.behavior,
         message: body.message,
@@ -2639,6 +2779,30 @@ const server = createServer(async (req, res) => {
         ...(gatewayIds.has(instance.instanceId) ? { gateway: true } : {}),
       }));
       return json(res, 200, { instances });
+    }
+
+    // ── local governance policy + redacted audit trail ────────────────
+    if (method === "GET" && path === "/api/security/policy") {
+      const loaded = loadPolicy();
+      return json(res, loaded.policy ? 200 : 503, loaded);
+    }
+    if (method === "PUT" && path === "/api/security/policy") {
+      if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+        return json(res, 415, { error: "content-type must be application/json" });
+      }
+      const policy = await savePolicy(await readBody(req));
+      return json(res, 200, { policy });
+    }
+    if (method === "GET" && path === "/api/security/audit") {
+      const records = await auditStore.list({
+        limit: Number.parseInt(url.searchParams.get("limit") ?? "100", 10),
+        agentId: url.searchParams.get("agentId") ?? undefined,
+        engine: url.searchParams.get("engine") ?? undefined,
+        tool: url.searchParams.get("tool") ?? undefined,
+        decision: url.searchParams.get("decision") ?? undefined,
+        result: url.searchParams.get("result") ?? undefined,
+      });
+      return json(res, 200, { records });
     }
 
     // ── app config (API keys — never echoed back, booleans only) ──

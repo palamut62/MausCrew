@@ -45,6 +45,13 @@ export interface OptionCardData {
   held?: string;
   /** the narrow grant "always allow" remembers, e.g. "Bash:git" */
   allowKey?: string;
+  /** Server-side governance decision that caused this card. */
+  policy?: {
+    decision: "ask";
+    ruleId: string;
+    risk: "low" | "medium" | "high";
+    category: string;
+  };
 }
 
 export interface Message {
