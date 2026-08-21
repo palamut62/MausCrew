@@ -44,18 +44,8 @@ function dayLabel(at: number): string {
 
 function DaySeparator({ at }: { at: number }) {
   return (
-    <div className="py-3 text-center font-mono text-[13px] tracking-tight text-ink-secondary">
+    <div className="py-4 text-center text-[11.5px] text-ink-secondary">
       {dayLabel(at)} {formatTime(at)}
-    </div>
-  );
-}
-
-/** The bot-side header line: "DEEPSEEK · 10:34". Mono, uppercase, small —
- * the only label the bubble-less assistant column gets. */
-function RoleStamp({ name, at }: { name: string; at: number }) {
-  return (
-    <div className="mb-1 pl-3 font-mono text-[10.5px] tracking-tight text-ink-secondary uppercase">
-      {name} · {formatTime(at)}
     </div>
   );
 }
@@ -286,9 +276,6 @@ function Bubble({
 
   return (
     <div className={cn("group animate-msg-in flex w-full flex-col", user ? "items-end" : "items-start")}>
-      {/* The bot side has no bubble — a mono role stamp plus an accent rule
-          does the framing, so the transcript reads as a log, not chat. */}
-      {!user && <RoleStamp name={bot.name} at={message.at} />}
       <div className={cn("flex w-full items-center gap-1.5", user ? "justify-end" : "justify-start")}>
         {/* editing rewinds the thread, so it waits for the turn to end —
             same rule as the version switcher below */}
@@ -310,8 +297,8 @@ function Bubble({
             user && webhookView
               ? "max-w-[70%] overflow-hidden rounded-xl border border-accent bg-card text-ink shadow-[0_10px_30px_rgba(0,0,0,0.18)]"
               : user
-                ? "max-w-[70%] rounded-xl bg-bubble-user px-4 py-2.5 whitespace-pre-wrap text-ink"
-                : "max-w-[760px] border-l border-l-accent/60 pl-3 text-ink",
+                ? "max-w-[72%] rounded-2xl bg-bubble-user px-4 py-2.5 whitespace-pre-wrap text-ink"
+                : "max-w-[78%] rounded-2xl bg-raised px-4 py-3 text-ink",
           )}
           title={new Date(message.at).toLocaleString()}
         >
@@ -538,14 +525,13 @@ function ScreenFrame({ png, mime }: { png: string; mime?: string }) {
   );
 }
 
-function StreamingBubble({ botName, text }: { botName: string; text: string }) {
+function StreamingBubble({ text }: { text: string }) {
   // markdown re-parses on a deferred value: when tokens arrive faster than
   // the parser keeps up, React lags the parse instead of janking the frame
   const deferred = useDeferredValue(text);
   return (
     <div className="flex w-full flex-col items-start">
-      <RoleStamp name={botName} at={Date.now()} />
-      <div className="max-w-[760px] border-l border-l-accent/60 pl-3 text-[14px] leading-snug text-ink">
+      <div className="max-w-[78%] rounded-2xl bg-raised px-4 py-3 text-[14px] leading-snug text-ink">
         <MessageBoundary fallbackText={deferred}>
           <ChatMarkdown text={deferred} streaming />
         </MessageBoundary>
@@ -753,16 +739,16 @@ export function ChatView({ bot }: { bot: Bot }) {
       {/* Header */}
       <div
         className={cn(
-          "flex items-center justify-between px-5 py-3",
+          "flex min-h-[52px] items-center justify-between border-b border-hairline/70 px-4 py-2",
           // Room for the drawer button, which overlays this corner below md.
-          "pl-11 md:pl-5",
+          "pl-11 md:pl-4",
           isWin && "pr-[148px]",
         )}
         style={drag}
       >
         <button
           onClick={() => dispatch({ type: "toggleSettings" })}
-          className="flex items-center gap-2.5 rounded-lg px-1.5 py-1 hover:bg-raised/50"
+          className="flex items-center gap-2 rounded-lg px-1 py-1 hover:bg-raised/50"
           title="Bot settings"
           style={noDrag}
         >
@@ -770,7 +756,7 @@ export function ChatView({ bot }: { bot: Bot }) {
             color={bot.color}
             name={bot.name}
             state={stateForBot({ ...bot, messages })}
-            size={28}
+            size={22}
             motion={mascotMotion?.kind ?? "none"}
             motionKey={mascotMotion?.nonce ?? 0}
           />
@@ -793,9 +779,11 @@ export function ChatView({ bot }: { bot: Bot }) {
               Stop
             </button>
           )}
-          <TaskPicker bot={bot} />
-          <ModelPicker bot={bot} />
-          <CallButton bot={bot} />
+          <span className="contents max-xl:hidden">
+            <TaskPicker bot={bot} />
+            <ModelPicker bot={bot} />
+            <CallButton bot={bot} />
+          </span>
           <button
             onClick={() => dispatch({ type: "toggleComputer" })}
             className={cn(
@@ -821,7 +809,7 @@ export function ChatView({ bot }: { bot: Bot }) {
       {/* Messages */}
       <div
         ref={scrollRef}
-        className="flex-1 overflow-y-auto px-5 [overflow-anchor:none]"
+        className="flex-1 overflow-y-auto px-4 [overflow-anchor:none]"
         onWheel={(e) => {
           if (e.deltaY < 0) setFollow(false);
           else if (atEnd()) setFollow(true);
@@ -837,7 +825,7 @@ export function ChatView({ bot }: { bot: Bot }) {
         }}
       >
         <div
-          className="mx-auto flex max-w-[900px] flex-col gap-2 pb-4"
+          className="mx-auto flex max-w-[760px] flex-col gap-1.5 pb-4 pt-5"
           role="log"
           aria-live="polite"
           aria-label={`Conversation with ${bot.name}`}
@@ -864,7 +852,7 @@ export function ChatView({ bot }: { bot: Bot }) {
           )}
           {reasoning && bot.busy && <ThinkingStrip text={reasoning} active={!streaming} />}
           {streaming ? (
-            <StreamingBubble botName={bot.name} text={streaming} />
+            <StreamingBubble text={streaming} />
           ) : (
             bot.busy && (
               <div className="flex justify-start">

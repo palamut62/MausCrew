@@ -155,7 +155,7 @@ export function PluginsPanel() {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-5 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-6 backdrop-blur-[2px]"
       onClick={() => dispatch({ type: "togglePlugins", open: false })}
     >
       <div
@@ -164,11 +164,11 @@ export function PluginsPanel() {
         aria-modal="true"
         aria-labelledby="connected-apps-title"
         tabIndex={-1}
-        className="animate-pop-in flex max-h-[calc(100dvh-2.5rem)] w-full max-w-[560px] flex-col overflow-hidden rounded-xl border border-hairline bg-panel p-5"
+        className="animate-pop-in flex h-[calc(100dvh-3rem)] w-full max-w-[1100px] flex-col overflow-hidden rounded-2xl border border-hairline bg-panel p-8 shadow-[0_24px_80px_rgba(0,0,0,0.55)] max-md:p-5"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">
-          <div id="connected-apps-title" className="text-[17px] font-semibold text-ink">Connected apps</div>
+          <div id="connected-apps-title" className="text-[18px] font-semibold text-ink">Plugins</div>
           <div className="flex items-center gap-1">
             <button
               onClick={() => refreshStatus(visible.map((c) => c.slug).slice(0, 40))}
@@ -187,7 +187,7 @@ export function PluginsPanel() {
           </div>
         </div>
         <div className="mt-1 text-[13px] text-ink-secondary">
-          Apps your bots can use through Composio.
+          Apps and services your bots can use through Composio.
         </div>
 
         {!configured && (
@@ -240,25 +240,22 @@ export function PluginsPanel() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search apps"
-          className="mt-3 w-full rounded-lg border border-hairline bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
+          className="mt-5 w-full rounded-xl border border-hairline bg-inset px-3.5 py-2.5 text-[13px] text-ink placeholder:text-ink-secondary focus:border-ink-secondary/60 focus:outline-none"
         />
 
-        <div className="mt-3 min-h-0 flex-1 overflow-y-auto rounded-xl border border-hairline">
+        <div className="mt-4 grid min-h-0 flex-1 grid-cols-1 content-start gap-2 overflow-y-auto md:grid-cols-2">
           {cards === null ? (
             <div className="flex items-center justify-center gap-2 py-8 text-[13px] text-ink-secondary">
               <Spinner size={14} weight="fill" className="animate-spin" /> Loading catalog…
             </div>
           ) : (
-            visible.map((card, i) => {
+            visible.map((card) => {
               const connected = status[card.slug]?.connected;
               const busy = busySlug === card.slug;
               return (
                 <div
                   key={card.slug}
-                  className={cn(
-                    "flex items-center gap-3 bg-card px-4 py-3",
-                    i > 0 && "border-t border-hairline",
-                  )}
+                  className="flex items-center gap-3 rounded-xl bg-card px-4 py-3 hover:bg-raised/45"
                 >
                   <ServiceIcon card={card} />
                   <div className="min-w-0 flex-1">

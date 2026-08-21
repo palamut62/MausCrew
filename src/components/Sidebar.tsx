@@ -174,8 +174,8 @@ function GroupListItem({ group, onMenu }: { group: Group; onMenu: (menu: { group
         onMenu({ groupId: group.id, x: e.clientX, y: e.clientY });
       }}
       className={cn(
-        "flex w-full items-center gap-3 rounded-lg border-l-2 px-3 py-2 text-left",
-        selected ? "border-l-accent bg-raised" : "border-l-transparent hover:bg-raised/60",
+        "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left",
+        selected ? "bg-raised" : "hover:bg-raised/60",
       )}
     >
       <StackedMauses members={members} />
@@ -808,16 +808,14 @@ function BotListItem({ bot, onMenu }: { bot: Bot; onMenu: (menu: MenuState) => v
         onMenu({ botId: bot.id, x: e.clientX, y: e.clientY });
       }}
       className={cn(
-        // The selected row is marked by a 2px accent rule on its leading edge —
-        // structure, not fill, carries state in the industrial language.
-        "flex w-full items-center gap-3 rounded-lg border-l-2 px-3 py-2 text-left",
+        "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left",
         bot.chiefOfStaff
           ? selected
-            ? "border-l-accent bg-raised"
-            : "border-l-accent/40 hover:bg-raised/60"
+            ? "bg-raised"
+            : "hover:bg-raised/60"
           : selected
-            ? "border-l-accent bg-raised"
-            : "border-l-transparent hover:bg-raised/60",
+            ? "bg-raised"
+            : "hover:bg-raised/60",
       )}
     >
       <MausAvatar
@@ -935,7 +933,7 @@ export function Sidebar({ open, onClose, onOpenDirectory }: { open: boolean; onC
   return (
     <aside
       className={cn(
-        "flex h-full w-[320px] shrink-0 flex-col border-r border-hairline bg-panel",
+        "flex h-full w-[280px] shrink-0 flex-col border-r border-hairline bg-panel",
         // Below md only: the sidebar leaves the flow and slides in over the chat.
         // Scoped with max-md: rather than cancelled with md: on purpose — Tailwind
         // v4 emits the native `translate` property, and any value other than
@@ -953,7 +951,7 @@ export function Sidebar({ open, onClose, onOpenDirectory }: { open: boolean; onC
           to control, and this used to paint imitation macOS traffic lights —
           three dead dots in another OS's colours, on every platform. */}
       <div
-        className="flex items-center justify-between px-4 pt-3.5 pb-1"
+        className="flex h-[52px] items-center justify-between px-4 pb-1 pt-3.5"
         style={macInset ? ({ WebkitAppRegion: "drag" } as React.CSSProperties) : undefined}
       >
         {macInset ? <div className="w-14" /> : <div />}
@@ -964,7 +962,7 @@ export function Sidebar({ open, onClose, onOpenDirectory }: { open: boolean; onC
           <button
             ref={importReturnRef}
             onClick={() => setPlusOpen((o) => !o)}
-            className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+            className="rounded-lg p-1.5 text-ink-secondary hover:bg-raised hover:text-ink"
             title="New or share"
           >
             <Plus size={20} weight="bold" strokeWidth={2} />
@@ -1040,8 +1038,8 @@ export function Sidebar({ open, onClose, onOpenDirectory }: { open: boolean; onC
       />
 
       {/* MagnifyingGlass */}
-      <div className="px-3 pt-2 pb-3">
-        <div className="flex items-center gap-2 rounded-lg bg-raised/70 px-3 py-2">
+      <div className="px-3 pb-2 pt-1">
+        <div className="flex items-center gap-2 rounded-xl bg-inset px-2.5 py-2">
           <MagnifyingGlass size={16} weight="bold" className="text-ink-secondary" />
           <input
             value={query}
@@ -1055,8 +1053,8 @@ export function Sidebar({ open, onClose, onOpenDirectory }: { open: boolean; onC
       </div>
 
       {/* Bot list */}
-      <div className="flex-1 overflow-y-auto px-2">
-        <div className="flex flex-col gap-0.5">
+      <div className="flex-1 overflow-y-auto px-2.5">
+        <div className="flex flex-col gap-1">
           {!chiefBot && visibleBots.length === 0 && visibleGroups.length === 0 && q && (
             <div className="px-3 py-6 text-center text-[13px] text-ink-secondary">Nothing matches “{query}”</div>
           )}
@@ -1075,12 +1073,12 @@ export function Sidebar({ open, onClose, onOpenDirectory }: { open: boolean; onC
       </div>
 
       {/* Footer */}
-      <div className="px-3 pb-3 pt-2">
+      <div className="border-t border-hairline/70 px-3 pb-3 pt-2">
         <SidebarUpdateCard />
         <button
           onClick={() => dispatch({ type: "showRoutines" })}
           className={cn(
-            "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors",
+            "flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors",
             state.activeView === "routines" ? "bg-raised text-ink" : "text-ink hover:bg-raised/50",
           )}
         >
@@ -1092,7 +1090,7 @@ export function Sidebar({ open, onClose, onOpenDirectory }: { open: boolean; onC
         </button>
         <button
           onClick={() => dispatch({ type: "togglePlugins", open: true })}
-          className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left hover:bg-raised/50"
+          className="flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left hover:bg-raised/50"
         >
           <PuzzlePiece size={20} weight="bold" className="text-ink-secondary" />
           <span className="text-[14px] text-ink">Plugins</span>
@@ -1100,7 +1098,7 @@ export function Sidebar({ open, onClose, onOpenDirectory }: { open: boolean; onC
         <div className="flex items-center">
           <button
             onClick={() => dispatch({ type: "toggleAppSettings" })}
-            className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-2 text-left hover:bg-raised/50"
+            className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-2 py-2 text-left hover:bg-raised/50"
           >
             <InitialsAvatar initials={profileInitials(state.config?.profile)} size={28} />
             <span className="truncate text-[14px] text-ink">

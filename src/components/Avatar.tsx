@@ -1,8 +1,5 @@
-// Bot avatar — a mono monogram tile. Bot identity is carried by one thing
-// only: a fully opaque hairline border in the bot's own color. No mascot, no
-// gradient, no face. The Blob Studio cursor mascot (CursorAvatar.tsx) and the
-// mascot engine (@/lib/mascot) are left in the tree on purpose so switching
-// back is a one-line change, but nothing renders them any more.
+// Bot avatar — a compact coloured teammate face. Two asymmetric eye marks keep
+// even 20px avatars recognizable without importing another product's logo.
 import { forwardRef, memo, useImperativeHandle } from "react";
 import { MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
 
@@ -18,7 +15,7 @@ export const EYE_SCALE = 1.12;
 export const MOUTH_WEIGHT = 11;
 
 /** Tile metrics, proportional to the box so 16px and 220px both read right. */
-const GLYPH_RATIO = 0.4;
+const GLYPH_RATIO = 0.38;
 const MIN_GLYPH = 9;
 
 /**
@@ -81,17 +78,37 @@ function MausAvatarComponent(
 
   return (
     <span
-      className="inline-flex shrink-0 items-center justify-center rounded-md border bg-inset font-mono uppercase tracking-tight text-ink leading-none select-none"
+      className="relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-lg leading-none select-none shadow-[inset_0_0_0_1px_rgba(255,255,255,0.10)]"
       style={{
         width: size,
         height: size,
-        borderColor: accent,
-        fontSize: Math.max(MIN_GLYPH, Math.round(size * GLYPH_RATIO)),
+        backgroundColor: accent,
       }}
       title={title}
       aria-label={title}
     >
-      {monogramFor(name ?? label)}
+      <span
+        aria-hidden="true"
+        className="absolute rounded-full bg-black/85"
+        style={{
+          width: Math.max(2, Math.round(size * 0.09)),
+          height: Math.max(5, Math.round(size * 0.28)),
+          left: Math.round(size * 0.35),
+          top: Math.round(size * 0.27),
+          transform: "rotate(-7deg)",
+        }}
+      />
+      <span
+        aria-hidden="true"
+        className="absolute rounded-full bg-black/85"
+        style={{
+          width: Math.max(2, Math.round(size * 0.09)),
+          height: Math.max(4, Math.round(size * 0.22)),
+          right: Math.round(size * 0.27),
+          top: Math.round(size * 0.32),
+          transform: "rotate(-7deg)",
+        }}
+      />
     </span>
   );
 }
@@ -107,7 +124,7 @@ export function InitialsAvatar({
 }) {
   return (
     <div
-      className="flex shrink-0 items-center justify-center rounded-md border border-hairline bg-inset font-mono uppercase tracking-tight text-ink-secondary leading-none"
+      className="flex shrink-0 items-center justify-center rounded-full border border-hairline bg-inset font-sans font-semibold uppercase tracking-tight text-ink-secondary leading-none"
       style={{
         width: size,
         height: size,

@@ -1,6 +1,6 @@
 import { track } from "@/lib/analytics";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, Clock, Microphone, Square, Users, X } from "@phosphor-icons/react";
+import { ArrowUp, Clock, Microphone, Plus, Square, Users, X } from "@phosphor-icons/react";
 import { useStore, visibleMessages, type Bot, type Group } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { useComposerDraft } from "@/lib/drafts";
@@ -205,13 +205,13 @@ export function Composer({
   };
 
   return (
-    <div className="px-5 pb-5 pt-2">
+    <div className="px-4 pb-4 pt-2">
       {speechError && (
         <div className="mx-auto mb-2 max-w-[900px] rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[12px] text-warning">
           {speechError}
         </div>
       )}
-      <div className="relative mx-auto max-w-[900px]">
+      <div className="relative mx-auto max-w-[760px]">
         {queued && (
           <div className="mb-2 flex items-center gap-2 rounded-lg border border-hairline bg-panel px-3 py-2 text-[12.5px] text-ink-secondary">
             <Clock size={13} weight="bold" className="shrink-0" />
@@ -284,8 +284,16 @@ export function Composer({
           onAdd={addAttachments}
           onRemove={removeAttachment}
         />
-        <div className="flex items-end gap-2 rounded-xl border border-hairline bg-raised/60 focus-within:border-accent py-2 pl-3 pr-2">
-        <textarea
+        <div className="flex items-end gap-2 rounded-3xl border border-hairline bg-raised focus-within:border-ink-secondary/60 py-2 pl-3 pr-2 shadow-[0_8px_28px_rgba(0,0,0,0.28)]">
+          <label
+            htmlFor="mauscrew-attachment-picker"
+            aria-label="Attach files"
+            title="Attach files"
+            className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-inset text-ink-secondary hover:bg-raised-hover hover:text-ink"
+          >
+            <Plus size={20} weight="bold" />
+          </label>
+          <textarea
           ref={inputRef}
           rows={1}
           value={text}
@@ -379,7 +387,7 @@ export function Composer({
               "flex size-8 shrink-0 items-center justify-center rounded-md",
               recording
                 ? "animate-pulse bg-danger/20 text-danger"
-                : "text-ink-secondary hover:bg-raised hover:text-ink",
+                : "bg-white text-black hover:bg-white/90",
             )}
             title={recording ? "Stop dictation (Esc)" : "Dictate"}
           >
@@ -393,7 +401,7 @@ export function Composer({
             title={busy ? "Queue — sends when the bot finishes" : "Send"}
             className={cn(
               "flex size-8 shrink-0 items-center justify-center rounded-md",
-              busy ? "bg-raised text-ink-secondary hover:bg-raised-hover" : "bg-accent text-app hover:brightness-110",
+              busy ? "bg-inset text-ink-secondary hover:bg-raised-hover" : "bg-white text-black hover:bg-white/90",
             )}
           >
             {busy ? <Clock size={15} weight="bold" /> : <ArrowUp size={17} weight="fill" />}
