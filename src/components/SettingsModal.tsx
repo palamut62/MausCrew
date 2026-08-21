@@ -15,6 +15,7 @@ import { cn } from "@/lib/cn";
 import { RemoteAccessSection } from "./RemoteAccessSection";
 import { SecuritySection } from "./SecuritySection";
 import { AguiAgents } from "./AguiAgents";
+import { McpServers } from "./McpServers";
 
 const SECTIONS: Array<{ id: AppSettingsSection; label: string; icon: typeof User }> = [
   { id: "general", label: "General", icon: User },
@@ -243,6 +244,15 @@ export function SettingsModal() {
                 subtitle="Bring a LangGraph, CrewAI, Mastra, Pydantic AI, or custom AG-UI endpoint into MausCrew as a bot engine."
               >
                 <AguiAgents />
+              </Card>
+            )}
+
+            {section === "connections" && (
+              <Card
+                title="MCP servers"
+                subtitle="Add local stdio tools, test their handshake, grant them to bots, and route calls through MausCrew approvals."
+              >
+                <McpServers />
               </Card>
             )}
 

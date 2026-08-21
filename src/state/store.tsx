@@ -211,6 +211,16 @@ export interface ConfigStatus {
     authHeader?: string;
     configured: boolean;
   }[];
+  mcpServers?: {
+    id: string;
+    name: string;
+    command: string;
+    args: string[];
+    envNames: string[];
+    configuredEnvNames: string[];
+    allowedBots: string[];
+    enabled: boolean;
+  }[];
   /** Voice (ElevenLabs). `configured` = a key is saved; `ready` = a key AND
    * a voice, which is what it takes to actually speak. The key itself is
    * never echoed back. */

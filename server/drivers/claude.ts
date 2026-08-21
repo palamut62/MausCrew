@@ -418,6 +418,16 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         };
         allowed.push("mcp__dweb");
       }
+      // Custom MCP tools deliberately are NOT added to --allowedTools. The
+      // Claude permission prompt therefore reaches MausCrew's broker and the
+      // central Governance Gateway before each call.
+      for (const custom of turn.integrations?.mcp ?? []) {
+        mcpServers[custom.name] = {
+          command: custom.command,
+          args: custom.args,
+          env: custom.env,
+        };
+      }
       // permission broker: anything acceptEdits would silently deny becomes
       // an Allow/Deny card in chat, and the agent gets ask_user. Skipped in
       // bypassPermissions (fullAuto) — nothing would ever ask.
@@ -646,6 +656,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           agentsMcp: true,
           computerMcp: true,
           composioMcp: true,
+          genericMcp: true,
           effortLevels: ["low", "medium", "high", "xhigh", "max"],
         },
         sendTurn,

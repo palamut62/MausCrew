@@ -92,6 +92,20 @@ function aguiCredentialEnv(credentials) {
   );
 }
 
+function mcpCredentialEnv(credentials) {
+  return Object.fromEntries(
+    Object.entries(credentials)
+      .filter(([name, value]) => name.startsWith("mcpEnv:") && typeof value === "string" && value)
+      .flatMap(([name, value]) => {
+        const match = /^mcpEnv:([\w-]{1,60}):([A-Za-z_][A-Za-z0-9_]{0,79})$/.exec(name);
+        if (!match) return [];
+        const server = match[1].replace(/[^A-Za-z0-9]/g, "_").toUpperCase();
+        const field = match[2].replace(/[^A-Za-z0-9]/g, "_").toUpperCase();
+        return [[`MAUSCREW_MCP_${server}_${field}`, value]];
+      }),
+  );
+}
+
 async function secureComposioConfig() {
   const dataDir = process.env.MAUSCREW_DATA_DIR || process.env.OMB_DATA_DIR || path.join(app.getPath("home"), ".mauscrew");
   const configPath = path.join(dataDir, "config.json");
@@ -161,6 +175,7 @@ async function startServerOn(port) {
         ? { COMPOSIO_API_KEY: secureCredentials.composioApiKey }
         : {}),
       ...aguiCredentialEnv(secureCredentials),
+      ...mcpCredentialEnv(secureCredentials),
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -455,7 +470,8 @@ ipcMain.handle("desktop:capabilities", async () =>
 
 ipcMain.handle("credential:set", async (_event, name, value) => {
   const agui = typeof name === "string" ? name.match(/^aguiAuth:([\w-]{1,80})$/) : null;
-  if ((name !== "composioApiKey" && !agui) || typeof value !== "string") {
+  const mcp = typeof name === "string" ? name.match(/^mcpEnv:([\w-]{1,60}):([A-Za-z_][A-Za-z0-9_]{0,79})$/) : null;
+  if ((name !== "composioApiKey" && !agui && !mcp) || typeof value !== "string") {
     throw new Error("Unsupported credential");
   }
   if (app.isPackaged && !(await safeStorage.isAsyncEncryptionAvailable())) {
@@ -465,11 +481,15 @@ ipcMain.handle("credential:set", async (_event, name, value) => {
   // receive credentials from Electron at boot. Keep its established local
   // config path there; production always uses the encrypted external store.
   const secretStorage = app.isPackaged ? "?secretStorage=external" : "";
-  const endpoint = agui ? `/api/agui-agents/${encodeURIComponent(agui[1])}/credential` : `/api/config${secretStorage}`;
+  const endpoint = agui
+    ? `/api/agui-agents/${encodeURIComponent(agui[1])}/credential`
+    : mcp
+      ? `/api/mcp-servers/${encodeURIComponent(mcp[1])}/credential/${encodeURIComponent(mcp[2])}`
+      : `/api/config${secretStorage}`;
   const response = await fetch(`http://127.0.0.1:${SERVER_PORT}${endpoint}`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(agui ? { value: value.trim() } : { composio: { apiKey: value.trim() } }),
+    body: JSON.stringify(agui || mcp ? { value: value.trim() } : { composio: { apiKey: value.trim() } }),
   });
   const body = await response.json().catch(() => null);
   if (!response.ok) throw new Error(body?.error || `Could not save credential (HTTP ${response.status})`);
