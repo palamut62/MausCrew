@@ -276,6 +276,20 @@ export async function sleepBox(cfg: AppConfig, botId: string) {
   return { ok: true };
 }
 
+/** Permanently remove the bot-scoped box and its disk. The caller owns the
+ * confirmation UI; provider confirmation still requires the exact box id. */
+export async function destroyBox(cfg: AppConfig, botId: string) {
+  const box = await findBox(cfg, botId);
+  if (!box) return { ok: true, removed: false };
+  const result = await boxJson(cfg, `/boxes/${box.id}`, {
+    method: "DELETE",
+    headers: { "X-Ascii-Confirm-Delete": box.id },
+  });
+  if (!result.ok) throw new Error(boxErrorMessage(result.status, "box delete", result.body));
+  boxIdCache.delete(botId);
+  return { ok: true, removed: true };
+}
+
 /** Owner-scoped shell for the Computer panel's console. */
 export async function execOnBox(cfg: AppConfig, botId: string, command: string) {
   const box = await findBox(cfg, botId);

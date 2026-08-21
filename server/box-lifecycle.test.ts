@@ -5,7 +5,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 describe("cloud computer lifecycle", () => {
   let api: Server;
   let sleepBox: typeof import("./box.ts").sleepBox;
-  const requests: Array<{ method: string; path: string; command?: string }> = [];
+  let destroyBox: typeof import("./box.ts").destroyBox;
+  const requests: Array<{ method: string; path: string; command?: string; confirmation?: string }> = [];
   const botId = "browser-session-test";
 
   beforeAll(async () => {
@@ -18,7 +19,12 @@ describe("cloud computer lifecycle", () => {
       req.on("data", (chunk) => (body += chunk));
       req.on("end", () => {
         const parsed = body ? JSON.parse(body) : {};
-        requests.push({ method: req.method ?? "GET", path: url.pathname, command: parsed.command });
+        requests.push({
+          method: req.method ?? "GET",
+          path: url.pathname,
+          command: parsed.command,
+          confirmation: typeof req.headers["x-ascii-confirm-delete"] === "string" ? req.headers["x-ascii-confirm-delete"] : undefined,
+        });
         res.writeHead(200, { "content-type": "application/json" });
         if (url.pathname === "/api/box/v1/boxes") {
           res.end(JSON.stringify({ boxes: [{ id: "box-1", name: machineName, state: "ready" }] }));
@@ -33,7 +39,7 @@ describe("cloud computer lifecycle", () => {
     const port = (api.address() as any).port;
     vi.stubEnv("MAUSCREW_BOX_API", `http://127.0.0.1:${port}/api/box/v1`);
     vi.resetModules();
-    ({ sleepBox } = await import("./box.ts"));
+    ({ sleepBox, destroyBox } = await import("./box.ts"));
   });
 
   afterAll(async () => {
@@ -50,5 +56,16 @@ describe("cloud computer lifecycle", () => {
     expect(stopIndex).toBeGreaterThan(commandIndex);
     expect(requests[commandIndex]?.command).toContain("kill -TERM");
     expect(requests[commandIndex]?.command).toContain("pgrep -o -x");
+  });
+
+  it("requires the exact provider id when permanently deleting a computer", async () => {
+    await expect(destroyBox({ box: { token: "box_test" } } as any, botId))
+      .resolves.toEqual({ ok: true, removed: true });
+
+    expect(requests).toContainEqual(expect.objectContaining({
+      method: "DELETE",
+      path: "/api/box/v1/boxes/box-1",
+      confirmation: "box-1",
+    }));
   });
 });

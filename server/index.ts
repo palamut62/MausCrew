@@ -20,6 +20,9 @@ import {
 import * as box from "./box.ts";
 import * as composio from "./composio.ts";
 import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts";
+import { BoxComputerProvider } from "./computers/providers/box.ts";
+import { LocalVmComputerProvider } from "./computers/providers/local.ts";
+import { ComputerSupervisor } from "./computers/supervisor.ts";
 import {
   containerComputerAction,
   containerComputerMcp,
@@ -113,6 +116,10 @@ const MIME: Record<string, string> = {
 ensureDirs();
 await ensureDefaultPolicy();
 const cfg = loadConfig();
+const computerSupervisor = new ComputerSupervisor([
+  LocalVmComputerProvider,
+  BoxComputerProvider(() => cfg),
+]);
 const registry = new ProviderRegistry(BUILT_IN_DRIVERS);
 await registry.load(instanceConfigs(cfg));
 
@@ -3202,27 +3209,51 @@ const server = createServer(async (req, res) => {
     m = path.match(/^\/api\/connectors\/([\w-]+)$/);
     if (m && method === "DELETE") return json(res, 200, await composio.removeService(cfg, m[1]));
 
-    // ── the bot's cloud computer (Box) ──
+    // ── the bot's cloud computer (provider-neutral lifecycle) ──
     m = path.match(/^\/api\/bots\/([\w-]+)\/computer$/);
-    if (m && method === "GET") return json(res, 200, await box.boxStatus(cfg, m[1]));
-    m = path.match(/^\/api\/bots\/([\w-]+)\/computer\/(provision|join|sleep|exec|screenshot)$/);
+    if (m && method === "GET") {
+      const bot = store.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      const status = await computerSupervisor.status("box", { botId: bot.id, botName: bot.name });
+      return json(res, 200, {
+        configured: status.configured,
+        box: status.instanceId ? { boxId: status.instanceId, state: status.state, desktopAvailable: null } : null,
+        provider: status,
+      });
+    }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/computer\/(provision|join|sleep|reset|destroy|exec|screenshot)$/);
     if (m && method === "POST") {
       const botId = m[1];
       const bot = store.bot(botId);
       if (!bot) return json(res, 404, { error: "no such bot" });
+      const scope = { botId, botName: bot.name };
       switch (m[2]) {
-        case "provision":
-          return json(res, 200, await box.provisionBox(cfg, botId, bot.name));
+        case "provision": {
+          const status = await computerSupervisor.start("box", scope);
+          return json(res, 200, { state: status.state, provider: status });
+        }
         case "join":
           return json(res, 200, await box.joinBox(cfg, botId));
-        case "sleep":
-          return json(res, 200, await box.sleepBox(cfg, botId));
+        case "sleep": {
+          const status = await computerSupervisor.stop("box", scope);
+          return json(res, 200, { ok: true, state: status.state, provider: status });
+        }
+        case "reset": {
+          if (bot.busy) return json(res, 409, { error: "stop this bot before resetting its computer" });
+          return json(res, 200, { provider: await computerSupervisor.reset("box", scope) });
+        }
+        case "destroy": {
+          if (bot.busy) return json(res, 409, { error: "stop this bot before deleting its computer" });
+          return json(res, 200, { provider: await computerSupervisor.destroy("box", scope) });
+        }
         case "exec": {
           const body = await readBody(req);
-          return json(res, 200, await box.execOnBox(cfg, botId, String(body.command ?? "")));
+          return json(res, 200, await computerSupervisor.provider("box").execute(scope, String(body.command ?? "")));
         }
-        case "screenshot":
-          return json(res, 200, await box.screenshotBox(cfg, botId));
+        case "screenshot": {
+          const frame = await computerSupervisor.provider("box").getScreen(scope);
+          return json(res, 200, { png: frame.data, format: frame.mime === "image/jpeg" ? "jpeg" : "png" });
+        }
       }
     }
 
