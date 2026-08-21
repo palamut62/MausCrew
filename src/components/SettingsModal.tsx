@@ -3,7 +3,7 @@
 // is the stuff shared by every bot: who you are, your keys, and the
 // machine your bots can borrow.
 import { useEffect, useRef, useState } from "react";
-import { DeviceMobile, Key, Monitor, SpeakerHigh, User, X } from "@phosphor-icons/react";
+import { DeviceMobile, Key, Monitor, ShieldCheck, SpeakerHigh, User, X } from "@phosphor-icons/react";
 import { useStore, type AppSettingsSection } from "@/state/store";
 import { ApiKeyRow, DeepSeekOptions } from "./ApiKeys";
 import { ClaudeGateways } from "./ClaudeGateways";
@@ -13,11 +13,13 @@ import { Card } from "./SettingsPrimitives";
 import { VoiceSettings } from "./VoiceSettings";
 import { cn } from "@/lib/cn";
 import { RemoteAccessSection } from "./RemoteAccessSection";
+import { SecuritySection } from "./SecuritySection";
 
 const SECTIONS: Array<{ id: AppSettingsSection; label: string; icon: typeof User }> = [
   { id: "general", label: "General", icon: User },
   { id: "connections", label: "Connections", icon: Key },
   { id: "computer", label: "Local VM", icon: Monitor },
+  { id: "security", label: "Security", icon: ShieldCheck },
   { id: "voice", label: "Voice", icon: SpeakerHigh },
   { id: "remote", label: "Mobile", icon: DeviceMobile },
 ];
@@ -246,6 +248,7 @@ export function SettingsModal() {
             {section === "voice" && <VoiceSettings />}
 
             {section === "computer" && <LocalComputerSection />}
+            {section === "security" && <SecuritySection />}
             {section === "remote" && <RemoteAccessSection />}
           </div>
         </div>

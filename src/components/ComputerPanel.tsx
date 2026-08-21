@@ -20,6 +20,19 @@ async function api(path: string, init?: RequestInit): Promise<any> {
   return body;
 }
 
+async function ensureLocalVmReady(): Promise<any> {
+  let status = await api("/api/local-computer");
+  if (status.container === "stopped") {
+    status = await api("/api/local-computer/start", { method: "POST", body: "{}" });
+  }
+  const deadline = Date.now() + 75_000;
+  while (status.container === "running" && !status.ready && Date.now() < deadline) {
+    await new Promise((resolve) => window.setTimeout(resolve, 1_000));
+    status = await api("/api/local-computer");
+  }
+  return status;
+}
+
 /** Park a frame on the harness server and open it by URL, which is the only
  * handoff a browser will accept from here (see the server route). Failure is
  * silent by design: the preview the user is looking at still works, and a
@@ -146,7 +159,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
         setPhase("vm-unavailable");
         return;
       }
-      api("/api/local-computer")
+      ensureLocalVmReady()
         .then((status) => {
           if (!alive) return;
           if (status.ready) setPhase("vm");
@@ -175,7 +188,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
     const resolveComputer = async () => {
       if (!bot.computer && vmSupported) {
         try {
-          const localVm = await api("/api/local-computer");
+          const localVm = await ensureLocalVmReady();
           if (!alive) return;
           if (localVm.ready) {
             setPhase("vm");
