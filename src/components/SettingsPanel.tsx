@@ -1,5 +1,5 @@
 import { BookOpen, CaretLeft, Crown, FolderOpen, PuzzlePiece, X } from "@phosphor-icons/react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { api, useStore, type Bot } from "@/state/store";
 import { MausAvatar } from "./Avatar";
 import {
@@ -100,26 +100,39 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
 
   if (skillsOpen) return <SkillManager bot={bot} onClose={() => setSkillsOpen(false)} />;
 
+  const isWin = window.mauscrew?.platform === "win32";
+  const drag = isWin ? ({ WebkitAppRegion: "drag" } as CSSProperties) : undefined;
+  const noDrag = isWin ? ({ WebkitAppRegion: "no-drag" } as CSSProperties) : undefined;
+
   return (
-    <aside className="animate-panel-in flex h-full w-[312px] shrink-0 flex-col border-l border-hairline bg-panel max-md:absolute max-md:inset-0 max-md:z-50 max-md:w-full max-md:border-l-0">
+    <aside className="animate-panel-in flex h-full min-w-0 w-[312px] shrink-0 flex-col border-l border-hairline bg-panel max-md:absolute max-md:inset-0 max-md:z-50 max-md:w-full max-md:border-l-0">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3">
+      <div
+        className={cn(
+          "flex min-h-[60px] shrink-0 items-center justify-between gap-2 px-4",
+          isWin && "pr-[148px]",
+        )}
+        style={drag}
+      >
         <button
           onClick={() => dispatch({ type: "toggleSettings", open: false })}
-          className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+          className="shrink-0 rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+          style={noDrag}
         >
           <CaretLeft size={18} weight="bold" />
         </button>
-        <span className="text-[15px] font-semibold text-ink">Settings</span>
+        <span className="min-w-0 truncate text-[15px] font-semibold text-ink">Settings</span>
         <button
           onClick={() => dispatch({ type: "toggleSettings", open: false })}
-          className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+          className="shrink-0 rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+          aria-label="Close bot settings"
+          style={noDrag}
         >
           <X size={18} weight="bold" />
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-5 pb-5">
+      <div className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-5 pb-5">
         <div className="flex justify-center py-5">
           <MausAvatar
             color={bot.color}
@@ -415,7 +428,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                     aria-pressed={bot.modelSelection.effort === level}
                     onClick={() => patch({ modelSelection: { ...bot.modelSelection, effort: level } })}
                     className={cn(
-                      "flex-1 py-1.5 text-[13px] capitalize",
+                      "min-w-0 flex-1 break-words px-1 py-2 text-[11.5px] leading-tight capitalize",
                       i > 0 && "border-l border-hairline",
                       bot.modelSelection.effort === level
                         ? "bg-raised text-ink"
@@ -435,7 +448,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
             <div className="mt-0.5 text-[13px] text-ink-secondary">
               Where this bot's computer runs{bot.computer ? "" : " (currently: auto)"}
             </div>
-            <div className="mt-3 flex overflow-hidden rounded-lg border border-hairline">
+            <div className="mt-3 grid grid-cols-4 overflow-hidden rounded-lg border border-hairline">
               {(
                 [
                   ["cloud", "Cloud"],
@@ -448,7 +461,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                   key={mode}
                   onClick={() => patch({ computer: mode })}
                   className={cn(
-                    "flex-1 py-1.5 text-[13px]",
+                    "min-h-[52px] min-w-0 break-words px-1 py-2 text-center text-[11.5px] leading-tight",
                     i > 0 && "border-l border-hairline",
                     bot.computer === mode
                       ? "bg-raised text-ink"

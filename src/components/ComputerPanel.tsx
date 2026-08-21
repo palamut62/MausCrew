@@ -4,7 +4,7 @@
 // come from the Electron main process (desktopCapturer over the preload
 // bridge — box endpoints are never touched); off → parked. Auto (unset)
 // prefers a ready Local VM, then an existing cloud box, then this computer.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { ArrowClockwise, ArrowSquareOut, CalendarDot, CalendarDots, Gear, Monitor, Moon, Plus, Power, Spinner, Trash, X } from "@phosphor-icons/react";
 import { useStore, type Bot } from "@/state/store";
 import type { Routine } from "@/lib/routines";
@@ -374,28 +374,40 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
     off: "This bot's computer is off",
     error: "Couldn't reach the computer",
   };
+  const isWin = window.mauscrew?.platform === "win32";
+  const drag = isWin ? ({ WebkitAppRegion: "drag" } as CSSProperties) : undefined;
+  const noDrag = isWin ? ({ WebkitAppRegion: "no-drag" } as CSSProperties) : undefined;
 
   return (
-    <aside className="animate-panel-in flex h-full w-[312px] shrink-0 flex-col border-l border-hairline bg-panel max-md:absolute max-md:inset-0 max-md:z-50 max-md:w-full">
+    <aside className="animate-panel-in flex h-full min-w-0 w-[312px] shrink-0 flex-col border-l border-hairline bg-panel max-md:absolute max-md:inset-0 max-md:z-50 max-md:w-full">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3">
+      <div
+        className={cn(
+          "flex min-h-[60px] shrink-0 items-center justify-between gap-2 px-4",
+          isWin && "pr-[148px]",
+        )}
+        style={drag}
+      >
         <button
           onClick={() => dispatch({ type: "toggleSettings", open: true })}
-          className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+          className="shrink-0 rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
           title="Bot settings"
+          style={noDrag}
         >
           <Gear size={18} weight="bold" />
         </button>
-        <span className="text-[15px] font-semibold text-ink">Computer</span>
+        <span className="min-w-0 truncate text-[15px] font-semibold text-ink">Computer</span>
         <button
           onClick={() => dispatch({ type: "toggleComputer", open: false })}
-          className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+          className="shrink-0 rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+          aria-label="Close computer panel"
+          style={noDrag}
         >
           <X size={18} weight="bold" />
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-5 pb-5">
+      <div className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-5 pb-5">
           {/* Screen preview */}
           <div className="mb-1.5 mt-2 flex items-center justify-between text-[13px] text-ink-secondary">
             <span>{bot.name}'s screen</span>
@@ -530,7 +542,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
               in a container on this machine — free and separate from your own desktop. Set it up in App
               Gear → Local VM.
           </div>
-          <div className="mt-3 flex overflow-hidden rounded-lg border border-hairline">
+          <div className="mt-3 grid grid-cols-4 overflow-hidden rounded-lg border border-hairline">
             {(
               [
                 ["cloud", "Cloud box"],
@@ -565,7 +577,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
                 title={unavailableTitle}
                 onClick={() => dispatch({ type: "updateBot", botId: bot.id, patch: { computer: mode } })}
                 className={cn(
-                  "flex-1 py-1.5 text-[13px]",
+                  "min-h-[52px] min-w-0 break-words px-1 py-2 text-center text-[11.5px] leading-tight",
                   i > 0 && "border-l border-hairline",
                   disabled && "cursor-not-allowed opacity-40",
                   bot.computer === mode
