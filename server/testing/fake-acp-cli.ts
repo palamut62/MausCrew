@@ -14,6 +14,9 @@
 //                   | delegate-peer (same as ask-peer but uses delegate_bot —
 //                     returns immediately, the peer runs after our turn)
 //                   | create-bot (propose one durable specialist through approval)
+//                   | schedule-self (spawn the injected "routines" MCP server,
+//                     create a weekly routine and list them back — the
+//                     self-scheduling e2e)
 //   FAKE_ACP_DUMP   path to write {argv, env} as JSON, so a test can assert
 //                   argv shape (agent/stdio flags) and env hygiene
 //   FAKE_ACP_MODELS      comma-separated model ids. Enables the opencode-shaped
@@ -92,6 +95,7 @@ let onPermissionAnswered: (() => void) | null = null;
 // ask-peer mode: the "agents" MCP server entry from session/new's mcpServers
 type McpEntry = { command: string; args?: string[]; env?: Array<{ name: string; value: string }> };
 let agentsMcp: McpEntry | null = null;
+let routinesMcp: McpEntry | null = null;
 
 /** Minimal one-shot MCP stdio client: initialize, call each tool in
  * sequence, return the text of the last result. Dependency-free. */
@@ -201,6 +205,7 @@ function handle(msg: any) {
       }
       const servers: McpEntry[] = Array.isArray(msg.params?.mcpServers) ? msg.params.mcpServers : [];
       agentsMcp = servers.find((s: any) => s?.name === "agents") ?? null;
+      routinesMcp = servers.find((s: any) => s?.name === "routines") ?? null;
       const opts = configOptions();
       result(msg.id, opts ? { sessionId: "fake-acp-session", configOptions: opts } : { sessionId: "fake-acp-session" });
       break;
@@ -313,6 +318,31 @@ function handle(msg: any) {
           })
           .catch((e) => {
             out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `delegate error: ${(e as Error).message}` } } } });
+            complete();
+          });
+        return;
+      }
+      if (mode === "schedule-self" && routinesMcp) {
+        // the self-scheduling e2e: put a weekly routine on the calendar and
+        // read the calendar back, so the test can assert both that the
+        // routine landed and that the listing is scoped to this bot.
+        void driveMcp(routinesMcp, [
+          {
+            name: "create_routine",
+            args: () => ({
+              name: "Weekly footprint scan",
+              prompt: "Re-scan the digital footprint and report the diff.",
+              schedule: { type: "daily", time: "09:00", weekdays: [1] },
+            }),
+          },
+          { name: "list_routines", args: () => ({}) },
+        ])
+          .then((reply) => {
+            out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `scheduled: ${reply}` } } } });
+            complete();
+          })
+          .catch((e) => {
+            out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `schedule error: ${(e as Error).message}` } } } });
             complete();
           });
         return;

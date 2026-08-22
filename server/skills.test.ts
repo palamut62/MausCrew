@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -9,6 +9,7 @@ import {
   listWorkspaceSkills,
   SkillStoreError,
   skillFileMode,
+  skillIndexPrompt,
   skillRootForWorkspace,
   updateWorkspaceSkill,
   validateSkillInput,
@@ -160,5 +161,68 @@ describe("workspace skill store", () => {
   it("writes owner-only files on platforms with POSIX mode bits", () => {
     createWorkspaceSkill(scratch, { name: "private-skill", description: "Private", instructions: "Do it." });
     if (process.platform !== "win32") expect(skillFileMode(scratch, "private-skill") & 0o077).toBe(0);
+  });
+});
+
+// Skills only became reachable outside DeepSeek once the harness started
+// handing every other engine this index. These pin the part that decides
+// whether a saved skill is visible at all.
+describe("skill index prompt", () => {
+  let scratch: string;
+
+  beforeEach(() => {
+    scratch = mkdtempSync(join(tmpdir(), "mauscrew-skill-prompt-"));
+  });
+
+  afterEach(() => {
+    rmSync(scratch, { recursive: true, force: true });
+  });
+
+  it("says nothing, and creates nothing, for a workspace with no skills", () => {
+    expect(skillIndexPrompt(scratch)).toBe("");
+    // The turn path runs this for every bot on every turn; it must not
+    // scatter .agents/skills trees under bots that never use skills.
+    expect(existsSync(join(scratch, ".agents"))).toBe(false);
+  });
+
+  it("names each skill, when to use it, and the absolute file to read", () => {
+    createWorkspaceSkill(scratch, {
+      name: "weekly-report",
+      description: "Assemble the Monday status report.",
+      whenToUse: "The user asks for the weekly status.",
+      instructions: "1. Gather the week's commits.",
+    });
+    const prompt = skillIndexPrompt(scratch);
+    expect(prompt).toContain("weekly-report");
+    expect(prompt).toContain("Assemble the Monday status report.");
+    expect(prompt).toContain("Use when: The user asks for the weekly status.");
+    // Without the path the agent cannot open the file — cwd is not the
+    // workspace for every engine.
+    expect(prompt).toContain(join(scratch, ".agents", "skills", "weekly-report", "SKILL.md"));
+  });
+
+  it("withholds a skill the user marked as not model-invocable", () => {
+    createWorkspaceSkill(scratch, {
+      name: "manual-only",
+      description: "Runs only when the user asks for it by name.",
+      instructions: "Do the thing.",
+      modelInvocable: false,
+    });
+    expect(skillIndexPrompt(scratch)).toBe("");
+  });
+
+  it("withholds a malformed bundle rather than sending the agent to read it", () => {
+    const dir = join(skillRootForWorkspace(scratch), "broken");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "SKILL.md"), "no frontmatter here");
+    expect(skillIndexPrompt(scratch)).toBe("");
+  });
+
+  it("survives an unreadable skills directory instead of taking the turn down", () => {
+    const root = skillRootForWorkspace(scratch);
+    rmSync(root, { recursive: true, force: true });
+    symlinkSync(tmpdir(), root, "junction");
+    expect(() => skillIndexPrompt(scratch)).not.toThrow();
+    expect(skillIndexPrompt(scratch)).toBe("");
   });
 });

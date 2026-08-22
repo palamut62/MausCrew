@@ -344,30 +344,37 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
             <ModelPicker bot={bot} />
           </div>
 
+          {/* Skills are a workspace artifact every engine can read, so this
+              card is not gated on the driver. Teaching a skill from the
+              current task lives inside it, which is why gating this card
+              also hid Teach from every bot that was not on DeepSeek. */}
+          <div className="rounded-xl border border-hairline bg-card p-4">
+            <div className="flex items-center gap-3">
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-raised text-ink-secondary">
+                <BookOpen size={17} weight="bold" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="text-[15px] font-medium text-ink">Skills</div>
+                <div className="text-[11.5px] text-ink-secondary">Reusable workspace instructions</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSkillsOpen(true)}
+                className="rounded-lg border border-hairline bg-raised px-3 py-1.5 text-[12.5px] font-medium text-ink hover:bg-raised-hover"
+              >
+                Manage
+              </button>
+            </div>
+            <div className="mt-3 text-[13px] leading-relaxed text-ink-secondary">
+              Create and edit SKILL.md workflows, or teach one from a task this bot just finished.{" "}
+              {engine?.driverKind === "deepseek-harness"
+                ? "This engine discovers them automatically."
+                : "This bot is given the list each turn and reads the one that fits."}
+            </div>
+          </div>
+
           {engine?.driverKind === "deepseek-harness" && (
             <>
-              <div className="rounded-xl border border-hairline bg-card p-4">
-                <div className="flex items-center gap-3">
-                  <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-raised text-ink-secondary">
-                    <BookOpen size={17} weight="bold" />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[15px] font-medium text-ink">Skills</div>
-                    <div className="text-[11.5px] text-ink-secondary">Reusable workspace instructions</div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setSkillsOpen(true)}
-                    className="rounded-lg border border-hairline bg-raised px-3 py-1.5 text-[12.5px] font-medium text-ink hover:bg-raised-hover"
-                  >
-                    Manage
-                  </button>
-                </div>
-                <div className="mt-3 text-[13px] leading-relaxed text-ink-secondary">
-                  Create and edit SKILL.md workflows this bot can discover automatically or invoke by name.
-                </div>
-              </div>
-
               <div className={cn(
                 "rounded-xl border p-4",
                 bot.dynamicCordis ? "border-accent/40 bg-accent/10" : "border-hairline bg-card",

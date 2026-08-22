@@ -159,6 +159,11 @@ export interface SendTurnInput {
      * through the harness so this bot can message other bots. The harness
      * owns turns, permissions, and recursion limits; the proxy only forwards. */
     agents?: { command: string; args: string[]; env: Record<string, string> };
+    /** Self-scheduling: an MCP proxy (list/create/update/delete_routine) that
+     * lets a bot put its own recurring work on the Automations calendar. The
+     * harness owns the scheduler and re-derives the routine owner from the
+     * calling bot; the proxy only forwards. */
+    routines?: { command: string; args: string[]; env: Record<string, string> };
     /** dweb network daemon: an MCP proxy exposing dweb status, repo, and
      * opencode model access as tools. url is the dweb HTTP base. */
     dweb?: { url: string };
@@ -181,6 +186,12 @@ export interface ProviderAdapter {
      * the harness only offers agents tooling (and prompts about it) to
      * drivers that can actually hand it to the agent. */
     agentsMcp?: boolean;
+    /** True when the driver mounts turn.integrations.routines (the bot's own
+     * Automations calendar). Same rule as agentsMcp: a bot whose driver
+     * cannot mount the tools is never told it can schedule itself, because
+     * the fallback it invents — a shell cron, the host CLI's own scheduler —
+     * is wired to nothing and reports success anyway. */
+    routinesMcp?: boolean;
     /** True when the driver mounts turn.integrations.computer (the box's
      * screenshot/click tools). Same rule as agentsMcp: a bot must never be
      * told it has a computer whose tools its driver cannot mount — it
@@ -192,6 +203,11 @@ export interface ProviderAdapter {
     composioMcp?: boolean;
     /** The driver can mount arbitrary user-configured stdio MCP servers. */
     genericMcp?: boolean;
+    /** True when the runtime discovers `<workspace>/.agents/skills` by itself.
+     * Those engines need no prompt injection; every other engine is handed
+     * the skill index in its system prompt instead, so a SKILL.md the user
+     * wrote is not silently invisible to the bot that owns the workspace. */
+    autoDiscoversSkills?: boolean;
     /** Effort levels this driver can pass to its CLI, ascending. Absent =
      * the driver cannot set effort, so the app never offers the control —
      * same rule as computerMcp: never show a knob the driver cannot turn. */

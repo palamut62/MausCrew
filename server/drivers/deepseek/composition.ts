@@ -65,12 +65,13 @@ export interface McpMount {
 export interface MountSupport {
   computerMcp: boolean;
   agentsMcp: boolean;
+  routinesMcp: boolean;
   composioMcp: boolean;
 }
 
 export function mountSupport(config: DeepSeekHarnessConfig): MountSupport {
   const stdio = config.runtime.mode !== "wsl";
-  return { computerMcp: stdio, agentsMcp: stdio, composioMcp: true };
+  return { computerMcp: stdio, agentsMcp: stdio, routinesMcp: stdio, composioMcp: true };
 }
 
 /** Translate a turn's integrations into MCP mounts.
@@ -122,6 +123,12 @@ export function mountsFor(integrations: TurnIntegrations | undefined, support: M
 
   if (integrations.agents && support.agentsMcp) {
     mounts.push(stdioMount("agents", integrations.agents.command, integrations.agents.args, integrations.agents.env));
+  }
+
+  if (integrations.routines && support.routinesMcp) {
+    mounts.push(
+      stdioMount("routines", integrations.routines.command, integrations.routines.args, integrations.routines.env),
+    );
   }
 
   if (integrations.dweb && support.composioMcp) {

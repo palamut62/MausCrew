@@ -232,11 +232,9 @@ and nested DeepSeek agents appear as expandable activity cards. Mid-turn
 cancellation and in-session model switching remain unsupported and are
 reported as such.
 
-DeepSeek bots include a workspace-scoped **Skill Center** in Bot Settings.
-It creates and manages portable `.agents/skills/<name>/SKILL.md` workflows,
-including discovery guidance and separate model/user invocation controls.
-Skills stay with the selected project instead of being locked inside
-MausCrew, so other compatible agents can read the same files.
+DeepSeek is the one engine whose runtime discovers
+`.agents/skills/<name>/SKILL.md` on its own. The Skill Center itself is not
+DeepSeek-only — see **Skills and teaching** below.
 
 Each DeepSeek bot also has an experimental, opt-in **Dynamic Cordis plugins**
 setting. It supports temporary host-side plugins only: browser UI code is
@@ -286,11 +284,34 @@ pnpm package:win   # Windows installer + zip → release/
 pnpm package:linux # Ubuntu x64 .deb + AppImage → release/
 ```
 
-### Routines and webhook triggers
+### Skills and teaching
 
-Routines can run once or on selected weekdays, using either a MAUS's configured model/computer or the
-Cloud VM runner. Webhook triggers are independent from schedules but reuse the same queued task executor
-and calendar receipts.
+Every bot has a workspace-scoped **Skill Center** in Bot Settings. It creates and manages portable
+`.agents/skills/<name>/SKILL.md` bundles with separate model/user invocation controls. Skills stay with the
+selected project rather than inside MausCrew, so other compatible agents can read the same files; a bot with
+no workspace of its own gets one under `~/.mauscrew/workspaces`.
+
+**Teach from current task** turns a job the bot just finished into a draft skill — the steps, tool actions,
+and observed results, with API keys and bearer tokens redacted. Nothing is written until you edit the draft
+and save it.
+
+DeepSeek's runtime discovers these bundles itself. Every other engine is handed the skill index in its
+system prompt each turn — name, description, when to use it, and the absolute path to read — so a skill is
+never silently invisible to the bot that owns it.
+
+### Routines, watches, and webhook triggers
+
+Routines run once, on selected weekdays at a wall-clock time, or on an interval from 5 minutes to 24 hours,
+using either a MAUS's configured model/computer or the Cloud VM runner. Bots schedule their own: ask for
+something weekly and the bot calls `create_routine` itself, and the entry appears on the calendar
+immediately.
+
+A **watch** is a routine that reports change instead of state. Each run is handed its own previous report
+and asked for the delta; a run that finds nothing is kept as a receipt but stays quiet. Turn it on with
+"Only tell me when it changes" in the schedule editor, or let the bot call `create_watch`.
+
+Webhook triggers are independent from schedules but reuse the same queued task executor and calendar
+receipts.
 
 MausCrew starts a webhook-only receiver on `127.0.0.1:8800` by default (or one port above `MAUSCREW_PORT`).
 Set `MAUSCREW_WEBHOOK_PORT` to choose another port. A webhook secret is shown once when the trigger is created

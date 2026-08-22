@@ -10,6 +10,17 @@ import { api, useStore, type Bot } from "@/state/store";
 
 const HOUR_HEIGHT = 68;
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+// Fixed rungs rather than a free number field: every one of these is a
+// cadence worth a full agent turn, and the tightest is the server's floor.
+const INTERVAL_CHOICES = [
+  { minutes: 5, label: "5 min" },
+  { minutes: 15, label: "15 min" },
+  { minutes: 30, label: "30 min" },
+  { minutes: 60, label: "Hourly" },
+  { minutes: 180, label: "3h" },
+  { minutes: 360, label: "6h" },
+  { minutes: 720, label: "12h" },
+] as const;
 
 type CalendarItem = {
   id: string;
@@ -62,10 +73,19 @@ function niceTime(at: number) {
   return new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
+/** "every 30 min" / "every 2h" — the same phrasing in the calendar, the
+ * computer panel, and the agent's own tool output. */
+function intervalLabel(everyMinutes: number) {
+  if (everyMinutes % 60 !== 0) return `Every ${everyMinutes} min`;
+  const hours = everyMinutes / 60;
+  return hours === 1 ? "Hourly" : `Every ${hours}h`;
+}
+
 function scheduleLabel(routine: Routine) {
   if (routine.schedule.type === "once") {
     return `${niceDate(routine.schedule.at)}, ${niceTime(routine.schedule.at)}`;
   }
+  if (routine.schedule.type === "interval") return intervalLabel(routine.schedule.everyMinutes);
   const days = routine.schedule.weekdays;
   const dayLabel =
     days.length === 7
@@ -77,7 +97,8 @@ function scheduleLabel(routine: Routine) {
 }
 
 function canToggleRoutine(routine: Routine) {
-  return routine.schedule.type === "daily" || routine.schedule.at > Date.now();
+  // Only a one-off that has already passed is beyond resuming.
+  return routine.schedule.type !== "once" || routine.schedule.at > Date.now();
 }
 
 function statusState(status: RoutineRunStatus): MausState {
@@ -145,6 +166,15 @@ function projectedItems(routines: Routine[], runs: RoutineRun[], from: number, t
     if (routine.schedule.type === "once") {
       const at = routine.schedule.at;
       if (at >= from && at < to && !hasReceipt(routine.id, at)) {
+        items.push({ id: `next-${routine.id}-${at}`, at, routine, run: null });
+      }
+      continue;
+    }
+    // An interval has no wall-clock grid to project onto — only its single
+    // known nextRunAt is real, so the calendar shows that and nothing more.
+    if (routine.schedule.type === "interval") {
+      const at = routine.nextRunAt;
+      if (at != null && at >= from && at < to && !hasReceipt(routine.id, at)) {
         items.push({ id: `next-${routine.id}-${at}`, at, routine, run: null });
       }
       continue;
@@ -308,7 +338,7 @@ export function RoutineEditor({
   const [prompt, setPrompt] = useState(routine?.prompt ?? "");
   const [botId, setBotId] = useState(lockedBotId ?? routine?.botId ?? bots[0]?.id ?? "");
   const [runOn, setRunOn] = useState<RoutineRunOn>(routine?.runOn ?? defaultRunOn ?? "maus");
-  const [kind, setKind] = useState<"once" | "daily">(routine?.schedule.type ?? "daily");
+  const [kind, setKind] = useState<"once" | "daily" | "interval">(routine?.schedule.type ?? "daily");
   const [at, setAt] = useState(
     toInputDateTime(routine?.schedule.type === "once" ? routine.schedule.at : nextHour()),
   );
@@ -316,6 +346,12 @@ export function RoutineEditor({
   const [weekdays, setWeekdays] = useState(
     routine?.schedule.type === "daily" ? routine.schedule.weekdays : [1, 2, 3, 4, 5],
   );
+  const [everyMinutes, setEveryMinutes] = useState(
+    routine?.schedule.type === "interval" ? routine.schedule.everyMinutes : 60,
+  );
+  // A watch is the same object with the diff behaviour switched on, so the
+  // toggle lives here rather than in a second, near-identical editor.
+  const [watch, setWatch] = useState(Boolean(routine?.watch));
   const [durationMinutes, setDurationMinutes] = useState(routine?.durationMinutes ?? 30);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -330,10 +366,15 @@ export function RoutineEditor({
       runOn,
       enabled: routine ? undefined : true,
       durationMinutes,
+      // A watch only makes sense on a repeating cadence — there is no
+      // "previous check" to diff against for a one-off.
+      watch: kind === "once" ? false : watch,
       schedule:
         kind === "once"
           ? { type: "once", at: new Date(at).getTime() }
-          : { type: "daily", time, weekdays },
+          : kind === "interval"
+            ? { type: "interval", everyMinutes }
+            : { type: "daily", time, weekdays },
     };
     setSaving(true);
     setError("");
@@ -420,12 +461,28 @@ export function RoutineEditor({
           <div>
             <div className="mb-2 text-[12px] font-medium text-ink-secondary">When?</div>
             <div className="mb-3 inline-flex rounded-xl bg-inset p-1">
-              {(["once", "daily"] as const).map((value) => (
-                <button key={value} onClick={() => setKind(value)} className={cn("rounded-lg px-4 py-1.5 text-[13px] capitalize", kind === value ? "bg-raised text-ink shadow" : "text-ink-secondary hover:text-ink")}>{value === "daily" ? "Repeating" : "Once"}</button>
+              {(["once", "daily", "interval"] as const).map((value) => (
+                <button key={value} onClick={() => setKind(value)} className={cn("rounded-lg px-4 py-1.5 text-[13px]", kind === value ? "bg-raised text-ink shadow" : "text-ink-secondary hover:text-ink")}>{value === "daily" ? "Repeating" : value === "interval" ? "Every…" : "Once"}</button>
               ))}
             </div>
             {kind === "once" ? (
               <input type="datetime-local" value={at} onChange={(event) => setAt(event.target.value)} className="block rounded-xl border border-hairline bg-inset px-3.5 py-2.5 text-[14px] text-ink outline-none focus:border-accent/70 [color-scheme:dark]" />
+            ) : kind === "interval" ? (
+              <div className="flex flex-wrap gap-1.5">
+                {INTERVAL_CHOICES.map(({ minutes, label }) => (
+                  <button
+                    key={minutes}
+                    type="button"
+                    onClick={() => setEveryMinutes(minutes)}
+                    className={cn(
+                      "rounded-xl border px-3.5 py-2 text-[12.5px] font-medium",
+                      everyMinutes === minutes ? "border-accent bg-accent text-app" : "border-hairline bg-inset text-ink-secondary hover:text-ink",
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             ) : (
               <div className="space-y-3">
                 <input type="time" value={time} onChange={(event) => setTime(event.target.value)} className="rounded-xl border border-hairline bg-inset px-3.5 py-2.5 text-[14px] text-ink outline-none focus:border-accent/70 [color-scheme:dark]" />
@@ -435,6 +492,17 @@ export function RoutineEditor({
                   ))}
                 </div>
               </div>
+            )}
+            {kind !== "once" && (
+              <label className="mt-3 flex cursor-pointer items-start gap-2.5 rounded-xl border border-hairline bg-inset p-3">
+                <input type="checkbox" checked={watch} onChange={(event) => setWatch(event.target.checked)} className="mt-0.5 accent-accent" />
+                <span className="min-w-0">
+                  <span className="block text-[13px] font-medium text-ink">Only tell me when it changes</span>
+                  <span className="mt-0.5 block text-[11.5px] leading-relaxed text-ink-secondary">
+                    Each run sees its own previous report and answers with the difference. Runs that find nothing are kept as receipts but stay quiet.
+                  </span>
+                </span>
+              </label>
             )}
           </div>
           <label className="block">

@@ -284,7 +284,13 @@ describe("harness HTTP API", () => {
 
   it("manages workspace skills without exposing arbitrary filesystem paths", async () => {
     const bot = (await api("POST", "/api/bots")).body.bot;
-    expect((await api("GET", `/api/bots/${bot.id}/skills`)).status).toBe(409);
+    // A bot with no workspace of its own still gets a skills home rather
+    // than a 409 — requiring the user to pick a folder first is what kept
+    // skills (and teach-from-task) out of reach on every engine but DeepSeek.
+    const unset = await api("GET", `/api/bots/${bot.id}/skills`);
+    expect(unset.status).toBe(200);
+    expect(unset.body.skills).toEqual([]);
+    expect(unset.body.workspacePath).toContain("workspaces");
 
     const workspacePath = join(home, "projects", "skill-workspace");
     expect((await api("PATCH", `/api/bots/${bot.id}`, { workspacePath })).status).toBe(200);

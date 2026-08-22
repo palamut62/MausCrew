@@ -19,7 +19,7 @@ import {
   type TurnIntegrations,
 } from "./composition.ts";
 
-const HOST = { computerMcp: true, agentsMcp: true, composioMcp: true };
+const HOST = { computerMcp: true, agentsMcp: true, routinesMcp: true, composioMcp: true };
 
 const ALL: TurnIntegrations = {
   composio: { url: "https://mcp.composio.dev/x", headers: { "x-api-key": "ck_live_1" } },
@@ -52,7 +52,7 @@ describe("mountSupport", () => {
     // Reporting the capability anyway would put a Local VM option in front of
     // a user for whom every call fails (§54).
     const wsl = mountSupport(decodeConfig({ runtime: { mode: "wsl" } }));
-    expect(wsl).toEqual({ computerMcp: false, agentsMcp: false, composioMcp: true });
+    expect(wsl).toEqual({ computerMcp: false, agentsMcp: false, routinesMcp: false, composioMcp: true });
   });
 });
 
@@ -98,7 +98,7 @@ describe("mountsFor", () => {
   });
 
   it("drops what this platform cannot mount instead of producing a dead server", () => {
-    const mounts = mountsFor(ALL, { computerMcp: false, agentsMcp: false, composioMcp: true });
+    const mounts = mountsFor(ALL, { computerMcp: false, agentsMcp: false, routinesMcp: false, composioMcp: true });
     expect(mounts.map((m) => m.serverName)).toEqual(["composio", "dweb"]);
   });
 
