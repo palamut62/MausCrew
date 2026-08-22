@@ -137,6 +137,17 @@ export function titleFromMessage(text: string): string {
   return line.length > 48 ? `${line.slice(0, 47)}…` : line || UNTITLED_TASK;
 }
 
+/** Lifetime token/cost accounting for one bot, accumulated from runtime
+ * events (thread.token-usage.updated, turn.completed cost). costUsd is a
+ * driver-reported estimate: only some drivers report it. */
+export interface UsageStats {
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+  turns: number;
+  since: number;
+}
+
 export interface BotRecord {
   id: string;
   /** the ACTIVE task's thread — everything that runs a turn reads this */
@@ -191,6 +202,7 @@ export interface BotRecord {
    * useful when it can coordinate without nagging. */
   approvePeerComms?: boolean;
   busy?: boolean;
+  usage?: UsageStats;
   createdAt: number;
 }
 
@@ -198,7 +210,7 @@ const BOTS_FILE = join(DATA_DIR, "bots.json");
 const GROUPS_FILE = join(DATA_DIR, "groups.json");
 const messagesFile = (threadId: string) => join(DATA_DIR, `messages-${threadId}.json`);
 
-const COLORS: MausColor[] = [
+export const COLORS: MausColor[] = [
   "green",
   "blue",
   "red",
@@ -638,6 +650,23 @@ export class Store {
     Object.assign(bot, patch);
     this.saveBots();
     return bot;
+  }
+
+  /** Fold one turn's accounting into a bot's lifetime usage tally.
+   * Token events may arrive several times per turn; the turn itself is
+   * counted once, on its terminal turn.completed. */
+  addUsage(
+    id: string,
+    delta: { input?: number; output?: number; costUsd?: number; turn?: boolean },
+  ): void {
+    const bot = this.bot(id);
+    if (!bot) return;
+    bot.usage ??= { inputTokens: 0, outputTokens: 0, costUsd: 0, turns: 0, since: Date.now() };
+    bot.usage.inputTokens += Math.max(0, Math.round(delta.input ?? 0));
+    bot.usage.outputTokens += Math.max(0, Math.round(delta.output ?? 0));
+    bot.usage.costUsd = Number((bot.usage.costUsd + Math.max(0, delta.costUsd ?? 0)).toFixed(4));
+    if (delta.turn) bot.usage.turns += 1;
+    this.saveBots();
   }
 
   /** Elect one Chief of Staff (or clear the role) as one persisted change.

@@ -129,7 +129,11 @@ export function remoteComputerBootstrapCommand(botName: string): string {
     `touch /opt/mauscrew/cua-${REMOTE_CUA_VERSION}-ready`,
     'rm -f "$wheel"',
   ].join("\n");
-  const safeName = botName.replace(/["'\\]/g, "");
+  // The name lands inside a double-quoted region of a single-quoted shell
+  // word, where $, backticks and friends are all live — stripping quotes
+  // alone left command substitution reachable through a renamed bot. Allow
+  // only a conservative display-safe set instead of outsmarting quoting.
+  const safeName = botName.replace(/[^\p{L}\p{N} _.,:#%()+@/-]/gu, "").slice(0, 80);
   return [
     "if ! command -v xdotool >/dev/null || ! command -v convert >/dev/null || ! command -v curl >/dev/null || ! command -v python3 >/dev/null; then sudo apt-get update -qq || true; sudo apt-get install -y -qq ca-certificates curl python3 gnome-screenshot xclip wmctrl xdotool imagemagick scrot >/dev/null 2>&1 || true; fi",
     "sudo mkdir -p /opt/mauscrew/run",

@@ -490,6 +490,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         stdio: ["pipe", "pipe", "pipe"],
       });
 
+      // Writing to a CLI that dies mid-turn surfaces EPIPE asynchronously, as
+      // an 'error' event on the pipe — an unhandled one takes the whole server
+      // down with it (same guard as acp/core.ts). The race is normal, not
+      // exceptional: an interrupt kills the process while a prompt may still
+      // be in flight, and the child's own exit path settles the turn either way.
+      child.stdin.on("error", () => {});
+
       let settled = false;
       const settle = (ok: boolean, stopReason: string | null, cost: number | null = null) => {
         if (settled) return;
@@ -693,7 +700,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           execCli(
             config.cli,
             ["-p", prompt, "--model", "claude-haiku-4-5", "--output-format", "text"],
-            { timeout: 60_000, env: { ...process.env, PATH: augmentedPath() } },
+            // same environment as every other claude invocation in this driver:
+            // stripped routing vars, plus the instance's own gateway if it has
+            // one — a bare process.env silently reroutes a gateway instance
+            { timeout: 60_000, env: claudeEnvironment(config) },
             (err, stdout) => (err ? reject(err) : resolve(stdout.trim())),
           );
         }),

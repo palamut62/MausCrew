@@ -65,6 +65,7 @@ import { normalizeModelSelection } from "./model-selection.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
 import { cancelPeerApprovalsFor, dismissStalePeerCards, requestPeerApproval, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
 import {
+  COLORS,
   mentionedBots,
   roomResponders,
   Store,
@@ -405,6 +406,19 @@ async function recordGovernanceResponse(threadId: string, requestId: string, beh
   });
   pendingGovernance.delete(key);
 }
+
+/** A requestId only means something while this server still holds it pending.
+ * Cards survive a restart in the transcript, but the pending maps do not, so
+ * this is also the line between a live approval and a replay of a stale id.
+ * Matched by suffix rather than one threadId because the respond endpoints
+ * answer by bot or room thread while the request may have been raised on a
+ * task thread. */
+function hasPendingRequest(requestId: string): boolean {
+  const suffix = `:${requestId}`;
+  for (const key of pendingGovernance.keys()) if (key.endsWith(suffix)) return true;
+  for (const key of askMessageByRequest.keys()) if (key.endsWith(suffix)) return true;
+  return false;
+}
 // the last settled assistant text per thread, so a "finished" notification
 // can carry what the bot actually said
 const lastReply = new Map<string, string>();
@@ -702,55 +716,6 @@ bus.subscribe((event: RuntimeEvent) => {
         })();
         break;
       }
-      // Auto mode / always-allow: answer routine tool permissions for the
-      // bot so it keeps working. A QUESTION always reaches the human — the
-      // whole point of asking is that a person decides — and anything that
-      // looks destructive stops even in auto mode.
-      const settled = permission && asker && event.requestId
-        ? autoDecision(asker, event.tool, event.summary, {
-            unattended: isUnattended(asker.id),
-          })
-        : null;
-      if (settled && asker && event.requestId) {
-        const instance = event.providerInstanceId
-          ? registry.get(event.providerInstanceId)
-          : registry.get(asker.modelSelection.instanceId);
-        const requestId = event.requestId;
-        const { tool, summary } = event;
-        // The chip is written only AFTER the provider takes the answer.
-        // Claiming approval first and correcting later means a moment
-        // where the transcript says "approved" over a request nothing
-        // answered — and if the provider is gone entirely, forever.
-        void (async () => {
-          try {
-            if (!instance) throw new Error("provider unavailable");
-            await instance.adapter.respondToRequest(event.threadId, requestId, { behavior: "allow" });
-            pushMessage({
-              role: "bot",
-              kind: "activity",
-              tool: { name: `${settled}: ${summary.slice(0, 120)}`, ok: true },
-            });
-          } catch {
-            // couldn't answer it for them — hand it back to the human
-            // rather than leaving the bot waiting on nobody
-            const card = pushMessage({
-              role: "bot",
-              kind: "options",
-              card: {
-                title: "Approval needed",
-                subtitle: summary,
-                options: ["Allow", "Deny"],
-                requestId,
-                tool,
-                allowKey: requiresOneTimeApproval(tool) ? undefined : approvalKey(tool, summary),
-                held: "Auto mode couldn't answer this one.",
-              },
-            });
-            askMessageByRequest.set(`${event.threadId}:${requestId}`, card.id);
-          }
-        })();
-        break;
-      }
       const message = pushMessage({
         role: "bot",
         kind: "options",
@@ -801,9 +766,20 @@ bus.subscribe((event: RuntimeEvent) => {
         tool: { name: `error: ${event.message.slice(0, 160)}`, ok: false, setup: event.setup },
       });
       break;
+    case "thread.token-usage.updated": {
+      // group turns run on the room's thread, so the token bill belongs to
+      // whichever member is busy there — same owner rule as turn.completed
+      const owner = bot ?? (group?.busyBotId ? store.bot(group.busyBotId) : undefined);
+      if (owner) store.addUsage(owner.id, { input: event.input, output: event.output });
+      break;
+    }
     case "turn.completed": {
       const reply = lastReply.get(event.threadId) ?? "";
       lastReply.delete(event.threadId);
+      // one lifetime usage tick per terminal turn; cost arrives only from
+      // drivers that report it (claude today), others tally tokens alone.
+      const owner = bot ?? (group?.busyBotId ? store.bot(group.busyBotId) : undefined);
+      if (owner) store.addUsage(owner.id, { turn: true, costUsd: event.cost ?? 0 });
       if (bot) {
         store.patchBot(bot.id, { busy: false, unread: true });
         broadcast({ kind: "bot", bot: wireBot(store.bot(bot.id)!) });
@@ -1729,7 +1705,7 @@ function json(res: ServerResponse, status: number, body: unknown) {
 
 function readBody(req: IncomingMessage): Promise<any> {
   return new Promise((resolve, reject) => {
-    let data = "";
+    const chunks: Buffer[] = [];
     let bytes = 0;
     let done = false;
     const fail = (status: number, msg: string) => {
@@ -1747,12 +1723,16 @@ function readBody(req: IncomingMessage): Promise<any> {
         // receiving the useful 413 response.
         return fail(413, "body too large");
       }
-      data += c;
+      // Buffer chunks and decode once at the end: `data += c` on a chunk
+      // boundary splits multibyte characters that straddle two reads and
+      // corrupts the text mid-body.
+      chunks.push(typeof c === "string" ? Buffer.from(c, "utf8") : c);
     });
     req.on("end", () => {
       if (done) return;
       let body: any;
       try {
+        const data = Buffer.concat(chunks).toString("utf8");
         body = data ? JSON.parse(data) : {};
       } catch {
         return fail(400, "invalid JSON body");
@@ -1837,11 +1817,14 @@ const server = createServer(async (req, res) => {
 
     let remoteDevice: RemoteDevice | null = null;
     const claimRoute = method === "POST" && path === "/api/remote/claim";
-    if (remoteRequest && path.startsWith("/api/") && !claimRoute) {
+    // /frames/ too: parked screen captures are desktop surface, not API
+    // metadata — without this they were the one ingress a paired phone could
+    // reach with no pairing at all.
+    if (remoteRequest && (path.startsWith("/api/") || path.startsWith("/frames/")) && !claimRoute) {
       remoteDevice = authenticateRemoteToken(cookieToken(req.headers.cookie));
       if (!remoteDevice) return json(res, 401, { error: "pairing required" });
       // Provider credentials and remote-device administration remain local.
-      if ((path === "/api/config" && method !== "GET") || path.startsWith("/api/remote/pairings") || path.startsWith("/api/remote/devices") || path.startsWith("/api/security") || path.startsWith("/api/agui-agents") || path.startsWith("/api/mcp-servers")) {
+      if ((path === "/api/config" && method !== "GET") || path.startsWith("/api/remote/pairings") || path.startsWith("/api/remote/devices") || path.startsWith("/api/security") || path.startsWith("/api/agui-agents") || path.startsWith("/api/mcp-servers") || (path.startsWith("/api/webhooks") && method !== "GET")) {
         return json(res, 403, { error: "this setting can only be changed on the desktop" });
       }
     }
@@ -2549,6 +2532,34 @@ const server = createServer(async (req, res) => {
     if (m && method === "PATCH") {
       const body = await readBody(req);
       const existing = store.bot(m[1]);
+      // Permission policy and filesystem/computer wiring decide what an
+      // agent may do unattended — the same desktop-only line drawn above for
+      // credentials and device administration.
+      if (
+        !localRequest &&
+        ["autoApprove", "alwaysAllow", "approvePeerComms", "dynamicCordis", "computer", "workspacePath"].some(
+          (key) => body[key] !== undefined,
+        )
+      ) {
+        return json(res, 403, { error: "this setting can only be changed on the desktop" });
+      }
+      // Names drive @-mentions and peer addressing: a blank one leaves
+      // mentionedBots ambiguous, so the boundary lives here rather than in
+      // the store. Title and color are bounded too — both are copied into
+      // prompts and UI classes verbatim.
+      if (body.name !== undefined) {
+        const name = String(body.name).trim();
+        if (!name || name.length > 64) return json(res, 400, { error: "name must be 1-64 characters" });
+        body.name = name;
+      }
+      if (body.title !== undefined) {
+        const title = String(body.title).trim();
+        if (title.length > 200) return json(res, 400, { error: "title is too long" });
+        body.title = title;
+      }
+      if (body.color !== undefined && !(COLORS as readonly string[]).includes(String(body.color))) {
+        return json(res, 400, { error: "unknown color" });
+      }
       // Neither Codex (free-form string field) nor Grok (lazy, logs-only)
       // rejects an unknown effort level at their own boundary — this is the
       // only real gate, so it stays. But it fires only when the target
@@ -2776,6 +2787,13 @@ const server = createServer(async (req, res) => {
         return json(res, 200, { ok: true });
       }
       if (resolveBotCreation(String(body.requestId), body.behavior)) return json(res, 200, { ok: true });
+      // A requestId is a capability: only one this server raised and still
+      // holds pending may be answered. Anything else is a stale card from
+      // before a restart or someone else's guess — refuse rather than hand
+      // a decision to a provider that never asked.
+      if (!hasPendingRequest(String(body.requestId))) {
+        return json(res, 409, { error: "that request is no longer waiting for an answer" });
+      }
       const instance = registry.get(bot.modelSelection.instanceId);
       if (!instance) return json(res, 409, { error: "provider unavailable" });
       await recordGovernanceResponse(bot.threadId, String(body.requestId), body.behavior);
@@ -2800,6 +2818,10 @@ const server = createServer(async (req, res) => {
         return json(res, 200, { ok: true });
       }
       if (resolveBotCreation(String(body.requestId), body.behavior)) return json(res, 200, { ok: true });
+      // same pending-only rule as the bot respond route above
+      if (!hasPendingRequest(String(body.requestId))) {
+        return json(res, 409, { error: "that request is no longer waiting for an answer" });
+      }
       const instance = registry.get(owner.modelSelection.instanceId);
       if (!instance) return json(res, 409, { error: "provider unavailable" });
       await recordGovernanceResponse(threadId, String(body.requestId), body.behavior);
@@ -3537,11 +3559,22 @@ server.listen(PORT, "127.0.0.1", () => {
   console.log(`mauscrew server on http://127.0.0.1:${PORT}`);
 });
 
+let shutdownSignals = 0;
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
+    // a second Ctrl+C means the user wants out NOW — no graceful waiting
+    shutdownSignals += 1;
+    if (shutdownSignals > 1) process.exit(1);
     localVmIdle.cancel();
     routines?.stop();
     webhookIngress?.server.close();
-    void registry.disposeAll().finally(() => process.exit(0));
+    // A wedged child process must not hold the exit hostage: dispose
+    // best-effort, then force the exit either way.
+    const forced = setTimeout(() => process.exit(1), 5_000);
+    if (typeof forced.unref === "function") forced.unref();
+    void registry
+      .disposeAll()
+      .catch(() => {})
+      .finally(() => process.exit(0));
   });
 }

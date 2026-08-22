@@ -19,8 +19,10 @@ import { MausAvatar } from "./Avatar";
 import { CallTargetButton } from "./CallView";
 import { pendingApprovals } from "./PendingApproval";
 
-const YES = /^(yes|yeah|yep|yup|sure|ok|okay|go ahead|do it|allow|approve|approved|fine|please do)\b/i;
-const NO = /^(no|nope|don'?t|do not|stop|deny|denied|cancel|never|skip it)\b/i;
+// spoken approval is matched by prefix, English and Turkish both — a caller
+// answering "evet" must never loop the yes/no prompt
+const YES = /^(yes|yeah|yep|yup|sure|ok|okay|go ahead|do it|allow|approve|approved|fine|please do|evet|e\.h|tamam|tamamdır|olur|olsun|onayla|onay|kabul|hay hay)\b/i;
+const NO = /^(no|nope|don'?t|do not|stop|deny|denied|cancel|never|skip it|hayır|hayir|yok|iptal|vazgeç|vazgec|redret|reddet|etme|dur)\b/i;
 const CALL_ENDPOINT_MS = 850;
 
 type Phase = "listening" | "sending" | "working" | "speaking";

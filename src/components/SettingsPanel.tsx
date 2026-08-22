@@ -31,6 +31,11 @@ function Field({
 const inputCls =
   "w-full rounded-lg border border-hairline bg-inset px-3 py-2.5 text-[15px] text-ink placeholder:text-ink-secondary focus:outline-none focus:border-hairline";
 
+const fmtInt = new Intl.NumberFormat();
+
+/** Sub-cent costs stay visible ($0.0004), larger ones read like money. */
+const fmtCost = (usd: number) => (usd >= 0.01 ? `$${usd.toFixed(2)}` : `$${usd.toFixed(4)}`);
+
 export function SettingsPanel({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
   const [workspaceDraft, setWorkspaceDraft] = useState(bot.workspacePath ?? "");
@@ -343,6 +348,34 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
             </div>
             <ModelPicker bot={bot} />
           </div>
+
+          {bot.usage && (
+            <div className="rounded-xl border border-hairline bg-card p-4">
+              <div className="text-[15px] font-medium text-ink">Usage</div>
+              <div className="mt-0.5 text-[13px] text-ink-secondary">This bot's lifetime tally</div>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                {(
+                  [
+                    ["Turns", fmtInt.format(bot.usage.turns)],
+                    ["Est. cost", fmtCost(bot.usage.costUsd)],
+                    ["Tokens in", fmtInt.format(bot.usage.inputTokens)],
+                    ["Tokens out", fmtInt.format(bot.usage.outputTokens)],
+                  ] as const
+                ).map(([label, value]) => (
+                  <div key={label} className="rounded-lg bg-inset px-3 py-2">
+                    <div className="font-mono text-[11px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
+                      {label}
+                    </div>
+                    <div className="mt-0.5 truncate text-[14px] font-medium text-ink">{value}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-2 text-[11.5px] leading-relaxed text-ink-secondary">
+                Since {new Date(bot.usage.since).toLocaleDateString()}. Cost is an estimate — only some
+                engines report it; the rest tally tokens alone.
+              </div>
+            </div>
+          )}
 
           {/* Skills are a workspace artifact every engine can read, so this
               card is not gated on the driver. Teaching a skill from the
