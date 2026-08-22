@@ -2,7 +2,12 @@ import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import { RemotePairingPage } from "./components/RemotePairingPage";
+import { installSttCapture } from "./lib/stt/capture";
 import "./styles.css";
+
+// Windows speech recognition captures in this window (see capture.ts);
+// registering is a no-op wherever the bridge or the tap is absent.
+installSttCapture();
 
 function Root() {
   const [authorized, setAuthorized] = useState<boolean | null>(null);

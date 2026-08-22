@@ -21,7 +21,7 @@ describe("desktop capabilities", () => {
     });
   });
 
-  it.each(["linux", "win32", "freebsd"])("fails closed on %s", (platform) => {
+  it.each(["linux", "freebsd"])("fails closed on %s", (platform) => {
     const capabilities = desktopCapabilities({
       platform,
       env: { DISPLAY: ":0" },
@@ -31,6 +31,29 @@ describe("desktop capabilities", () => {
     expect(capabilities.windowChrome).toBe("native");
     expect(capabilities.screenPreview.available).toBe(false);
     expect(capabilities.dictation.available).toBe(false);
+    expect(capabilities.localComputer).toMatchObject({
+      available: false,
+      support: "unsupported",
+      reasonCode: "unsupported-platform",
+    });
+  });
+
+  // win32 keeps every other native feature closed but gains the whisper.cpp
+  // recognizer — renderer-side capture, files fetched on first use
+  it("offers whisper-local dictation on win32 and fails closed otherwise", () => {
+    const capabilities = desktopCapabilities({
+      platform: "win32",
+      env: { DISPLAY: ":0" },
+      localConnection: { mode: "embedded" },
+    });
+
+    expect(capabilities.windowChrome).toBe("native");
+    expect(capabilities.screenPreview.available).toBe(false);
+    expect(capabilities.dictation).toMatchObject({
+      available: true,
+      engine: "whisper-local",
+      onDevice: true,
+    });
     expect(capabilities.localComputer).toMatchObject({
       available: false,
       support: "unsupported",

@@ -35,6 +35,7 @@ function desktopCapabilities({
 } = {}) {
   const hostPlatform = normalizedPlatform(platform);
   const isMac = hostPlatform === "darwin";
+  const isWin = hostPlatform === "win32";
   const localAvailable = localComputerReady(hostPlatform, localConnection);
 
   return {
@@ -58,10 +59,12 @@ function desktopCapabilities({
       ...(!isMac ? { reasonCode: "unsupported-platform" } : {}),
     },
     dictation: {
-      available: isMac,
-      engine: isMac ? "apple-speech" : "none",
-      onDevice: isMac,
-      ...(!isMac ? { reasonCode: "unsupported-platform" } : {}),
+      // Windows runs the whisper.cpp recognizer (speech-win.mjs) — capture
+      // lives in the renderer, files download on first use
+      available: isMac || isWin,
+      engine: isMac ? "apple-speech" : isWin ? "whisper-local" : "none",
+      onDevice: isMac || isWin,
+      ...(!isMac && !isWin ? { reasonCode: "unsupported-platform" } : {}),
     },
     localComputer: {
       available: localAvailable,

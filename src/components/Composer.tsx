@@ -180,11 +180,9 @@ export function Composer({
     const offEnd = bridge.onSpeechEnd(({ code }) => {
       setRecording(false);
       if (code === 2) {
-        setSpeechError("Dictation is only available on macOS for now.");
+        setSpeechError("Dictation isn't available on this platform.");
       } else if (code === 1) {
-        setSpeechError(
-          "Dictation needs Microphone + Speech Recognition access — System Settings → Privacy & Security.",
-        );
+        setSpeechError("Dictation couldn't start — check your system's microphone privacy settings.");
       }
     });
     void bridge.speechStart();

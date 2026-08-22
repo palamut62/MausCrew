@@ -82,7 +82,7 @@ export function CallTargetButton({
     : !capabilitiesReady
       ? "Checking call availability"
       : !supported
-        ? "Calls currently need the macOS desktop app"
+        ? "Calls need the MausCrew desktop app"
         : !configured
           ? "Add an ElevenLabs key in App Settings to make calls"
           : !voiceReady
@@ -92,7 +92,7 @@ export function CallTargetButton({
   const reason = !capabilitiesReady
     ? "Checking whether this device can make calls."
     : !capabilities.dictation.available
-      ? "Calls require MausCrew for macOS because speech recognition runs on-device."
+      ? "Calls require the MausCrew desktop app — speech recognition runs on-device."
       : !window.mauscrew?.speechStart
         ? "The speech service is unavailable in this app build. Restart or update MausCrew."
         : !configured
@@ -340,7 +340,7 @@ function Call({ bot }: { bot: Bot }) {
     const offEnd = bridge.onSpeechEnd(({ code, reason }) => {
       if (!alive.current || currentCall() !== bot.id) return;
       if (code === 2) {
-        setNote("Calls need macOS dictation, which isn't available here yet.");
+        setNote("Calls aren't available on this platform yet.");
         return;
       }
       if (code === 1) {

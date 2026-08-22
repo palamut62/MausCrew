@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { startCua, stopCua, registerCuaIpc } from "./cua.mjs";
 import { finishSpeech, startSpeech, stopSpeech } from "./speech.mjs";
+import { winStt } from "./speech-win.mjs";
 import { openBlankTerminal } from "./terminal-launch.mjs";
 import { orderedServerPorts, readSavedServerPort, saveServerPort } from "./server-port.mjs";
 import { startUpdater, registerUpdaterIpc } from "./updater.mjs";
@@ -471,20 +472,36 @@ ipcMain.handle("perm:open-settings", (_event, pane) => {
   return shell.openExternal(`x-apple.systempreferences:com.apple.preference.security?${anchor}`);
 });
 
-ipcMain.handle("speech:start", (event, options) => {
+ipcMain.handle("speech:start", async (event, options) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win) return;
-  if (process.platform !== "darwin") {
+  if (process.platform === "darwin") {
+    startSpeech(win, options);
+    return;
+  }
+  if (process.platform !== "win32") {
     win.webContents.send("speech:end", { code: 2, reason: "unsupported-platform" });
     return;
   }
-  startSpeech(win, options);
+  // Windows resolves only once the recognizer files are in place — the
+  // bridge starts renderer-side capture exactly when this settles.
+  try {
+    return await winStt.start(win, options);
+  } catch {
+    if (!win.isDestroyed()) win.webContents.send("speech:end", { code: 1, reason: "stt-setup-failed" });
+  }
 });
 ipcMain.handle("speech:stop", () => {
   if (process.platform === "darwin") stopSpeech();
+  else if (process.platform === "win32") winStt.stop();
 });
 ipcMain.handle("speech:finish", () => {
   if (process.platform === "darwin") finishSpeech();
+  else if (process.platform === "win32") void winStt.finish();
+});
+// renderer mic tap → the active Windows session
+ipcMain.on("speech:audio", (_event, chunk) => {
+  if (process.platform === "win32") winStt.pushAudio(chunk);
 });
 
 ipcMain.handle("desktop:capabilities", async () =>

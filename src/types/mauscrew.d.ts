@@ -17,7 +17,7 @@ declare global {
     };
     dictation: {
       available: boolean;
-      engine: "apple-speech" | "none";
+      engine: "apple-speech" | "whisper-local" | "none";
       onDevice: boolean;
       reasonCode?: string;
     };
@@ -43,6 +43,17 @@ declare global {
         cb: (line: { partial?: boolean; text?: string; error?: string }) => void,
       ): () => void;
       onSpeechEnd(cb: (info: { code: number | null; reason?: string }) => void): () => void;
+      /** Windows speech capture (see src/lib/stt/capture.ts). The app
+       * registers a mic tap at boot; speechStart hands off to it once the
+       * main process confirms the recognizer is ready. Absent in older
+       * shells, so every use is optional-chained. */
+      registerSttCapture?(impl: { start(): Promise<void>; stop(): void }): void;
+      /** One 16 kHz mono Float32 PCM block from the tap. */
+      sttAudio?(chunk: ArrayBuffer): void;
+      /** Main-process lifecycle commands for the tap: {cmd:"stop"}. */
+      onSttControl?(cb: (info: { cmd: string }) => void): () => void;
+      /** Recognizer download progress: {label, percent}. */
+      onSttStatus?(cb: (info: { label: string; percent: number }) => void): () => void;
       /** Absolute path of a dropped File ("" when the drag carried no
        * file on disk). Absent in older builds of the shell. */
       getPathForFile?(file: File): string;
