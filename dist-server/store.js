@@ -19,7 +19,7 @@ export function titleFromMessage(text) {
 const BOTS_FILE = join(DATA_DIR, "bots.json");
 const GROUPS_FILE = join(DATA_DIR, "groups.json");
 const messagesFile = (threadId) => join(DATA_DIR, `messages-${threadId}.json`);
-const COLORS = [
+export const COLORS = [
     "green",
     "blue",
     "red",
@@ -439,6 +439,21 @@ export class Store {
         Object.assign(bot, patch);
         this.saveBots();
         return bot;
+    }
+    /** Fold one turn's accounting into a bot's lifetime usage tally.
+     * Token events may arrive several times per turn; the turn itself is
+     * counted once, on its terminal turn.completed. */
+    addUsage(id, delta) {
+        const bot = this.bot(id);
+        if (!bot)
+            return;
+        bot.usage ??= { inputTokens: 0, outputTokens: 0, costUsd: 0, turns: 0, since: Date.now() };
+        bot.usage.inputTokens += Math.max(0, Math.round(delta.input ?? 0));
+        bot.usage.outputTokens += Math.max(0, Math.round(delta.output ?? 0));
+        bot.usage.costUsd = Number((bot.usage.costUsd + Math.max(0, delta.costUsd ?? 0)).toFixed(4));
+        if (delta.turn)
+            bot.usage.turns += 1;
+        this.saveBots();
     }
     /** Elect one Chief of Staff (or clear the role) as one persisted change.
      * The changed records are returned so the server can update every open

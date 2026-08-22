@@ -142,8 +142,12 @@ export function instanceConfigs(cfg) {
         };
     for (const entry of Object.values(map)) {
         entry.environment = {
-            ...(cfg.xai?.key ? { XAI_API_KEY: cfg.xai.key } : {}),
-            ...(cfg.box?.token ? { BOX_TOKEN: cfg.box.token } : {}),
+            // Scoped to the drivers that consume them — an xAI key belongs to the
+            // API-key Grok driver and a Box token to the box agent, not to every
+            // child process in the fleet (same rule as the DeepSeek key below,
+            // spec §12). Anything else needs a hand-written `environment` escape.
+            ...(entry.driver === "grok" && cfg.xai?.key ? { XAI_API_KEY: cfg.xai.key } : {}),
+            ...(entry.driver === "boxAgent" && cfg.box?.token ? { BOX_TOKEN: cfg.box.token } : {}),
             ...(entry.driver === "opencodeGo" && cfg.opencodeGo?.apiKey
                 ? { OPENCODE_API_KEY: cfg.opencodeGo.apiKey }
                 : {}),
