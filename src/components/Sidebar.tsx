@@ -1,8 +1,8 @@
 import { track } from "@/lib/analytics";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ArrowClockwise, ArrowLineDown, BellRinging, CalendarDots, Check, ClipboardText, Copy, Crown, EyeSlash, FileArrowUp, FolderPlus, Gear, MagnifyingGlass, Pencil, Plus, PushPin, PushPinSlash, PuzzlePiece, Robot as BotIcon, Spinner, Trash, Users } from "@phosphor-icons/react";
-import { api, useStore, formatTime, visibleMessages, type Bot, type Group } from "@/state/store";
+import { api, useStore, formatTime, visibleMessages, type Bot, type Group, type Message } from "@/state/store";
 import { MausAvatar, InitialsAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot";
 import { useUpdaterState } from "@/lib/updater";
@@ -102,11 +102,12 @@ function UpdateButton() {
   );
 }
 
-function preview(bot: Bot): string {
+function preview(bot: Bot, visible: Message[]): string {
   if (bot.busy) return "Working…";
   // the visible branch's tail — bot.messages holds every fork, so its last
-  // entry can belong to a version the user switched away from
-  const last = visibleMessages(bot).at(-1);
+  // entry can belong to a version the user switched away from. The walk is
+  // the caller's to memoize; this used to rebuild it per call.
+  const last = visible.at(-1);
   if (!last) return "";
   if (last.kind === "options" && last.card) return last.card.title;
   if (last.kind === "activity" && last.tool) return last.tool.name;
@@ -797,9 +798,14 @@ function BotListItem({ bot, onMenu }: { bot: Bot; onMenu: (menu: MenuState) => v
   const { state, dispatch } = useStore();
   const selected = state.activeView === "chat" && state.selectedId === bot.id;
   const mascotMotion = selected && state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
-  // the visible branch, so a version switch changes the row with the chat
-  const visible = visibleMessages(bot);
+  // the visible branch, so a version switch changes the row with the chat.
+  // Memoized on the bot record: a row re-renders on every store change (the
+  // context is whole-state), and an unmemoized walk rebuilt its parent Map
+  // over the full fork tree three times per render — here plus two preview
+  // calls that each walked again.
+  const visible = useMemo(() => visibleMessages(bot), [bot]);
   const last = visible.at(-1);
+  const previewText = preview(bot, visible);
   return (
     <button
       onClick={() => dispatch({ type: "select", id: bot.id })}
@@ -847,8 +853,8 @@ function BotListItem({ bot, onMenu }: { bot: Bot; onMenu: (menu: MenuState) => v
                 <Crown size={11} weight="fill" /> Chief of Staff
               </span>
             )}
-            {bot.chiefOfStaff && preview(bot) && <span className="shrink-0 text-ink-secondary/60">·</span>}
-            <span className="truncate">{preview(bot)}</span>
+            {bot.chiefOfStaff && previewText && <span className="shrink-0 text-ink-secondary/60">·</span>}
+            <span className="truncate">{previewText}</span>
           </span>
           {bot.unread && (
             <span className="size-2 shrink-0 rounded-full bg-accent" />
@@ -922,7 +928,7 @@ export function Sidebar({ open, onClose, onOpenDirectory }: { open: boolean; onC
         !q ||
         b.name.toLowerCase().includes(q) ||
         (b.title ?? "").toLowerCase().includes(q) ||
-        preview(b).toLowerCase().includes(q),
+        preview(b, visibleMessages(b)).toLowerCase().includes(q),
     );
   const chiefBot = matchingBots.find((bot) => bot.chiefOfStaff);
   const visibleBots = matchingBots

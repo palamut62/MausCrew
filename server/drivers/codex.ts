@@ -109,6 +109,12 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         stdio: ["pipe", "pipe", "pipe"],
       });
 
+      // The try/catch inside send() cannot see an async EPIPE: writing to an
+      // app-server that died mid-turn surfaces as an 'error' event on the
+      // pipe, and an unhandled one takes the whole server down with it (same
+      // guard as acp/core.ts). The child's own exit path settles the turn.
+      child.stdin.on("error", () => {});
+
       const state = { settled: false, lastText: "", sawStreamDelta: false };
       const asks = new Map<string, (behavior: string, message?: string) => void>();
       let nextId = 1;

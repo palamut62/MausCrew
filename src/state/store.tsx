@@ -144,6 +144,8 @@ export interface Bot {
   /** When this bot wants to talk to another bot (ask_bot/delegate_bot),
    * pause and ask the user first. Off by default. */
   approvePeerComms?: boolean;
+  /** lifetime token/cost tally, folded server-side from runtime events */
+  usage?: { inputTokens: number; outputTokens: number; costUsd: number; turns: number; since: number };
   messages: Message[];
   /** leaf of the visible conversation branch (see visibleMessages) */
   activeLeafId?: string | null;
@@ -345,6 +347,9 @@ type Action =
       alwaysAllow?: { botId: string; key: string };
     }
   | { type: "decisionFailed"; threadId: string; requestId: string }
+  | { type: "decisionSettled"; threadId: string; requestId: string }
+  | { type: "restoreCard"; botId: string; messageId: string; card: OptionCardData }
+  | { type: "botsRestored"; bots: Bot[]; groups: Group[]; selectedId: string }
   | { type: "newTask"; botId: string }
   | { type: "switchTask"; botId: string; threadId: string }
   | { type: "taskSwitched"; bot: Bot }
@@ -538,6 +543,24 @@ function reducer(state: AppState, action: Action): AppState {
       const { [key]: _failed, ...pendingDecisions } = state.pendingDecisions;
       return { ...state, pendingDecisions };
     }
+    // success clears its entry too — otherwise the map only ever grows
+    case "decisionSettled": {
+      const key = `${action.threadId}:${action.requestId}`;
+      if (!(key in state.pendingDecisions)) return state;
+      const { [key]: _settled, ...pendingDecisions } = state.pendingDecisions;
+      return { ...state, pendingDecisions };
+    }
+    // a failed answer/dismiss puts the card back exactly as it was
+    case "restoreCard":
+      return updateBot(state, action.botId, (b) => ({
+        ...b,
+        messages: b.messages.map((m) =>
+          m.id === action.messageId && m.card ? { ...m, card: action.card } : m,
+        ),
+      }));
+    // a failed delete puts the whole roster back, selection included
+    case "botsRestored":
+      return { ...state, bots: action.bots, groups: action.groups, selectedId: action.selectedId };
     case "botAdded":
       return withMascotMotion({
         ...state,
@@ -754,7 +777,12 @@ function reducer(state: AppState, action: Action): AppState {
       const bot = state.bots.find((b) => b.id === action.botId);
       if (!bot) return state;
       let cur = action.messageId;
+      // a corrupt parentId chain (bad import, bad webhook payload) must stop
+      // the walk, not spin the main thread forever
+      const seen = new Set<string>();
       for (;;) {
+        if (seen.has(cur)) break;
+        seen.add(cur);
         const children = bot.messages.filter((m) => m.parentId === cur);
         if (!children.length) break;
         cur = children.reduce((a, b) => (b.at >= a.at ? b : a)).id;
@@ -843,9 +871,13 @@ const initialState: AppState = {
 
 // ── API client ─────────────────────────────────────────────────────────
 export async function api(path: string, init?: RequestInit): Promise<any> {
+  // Every command carries a deadline. Without one a wedged server leaves a
+  // send invisible and the mascot stuck on "working" with no error at all.
+  const timeout = AbortSignal.timeout(60_000);
   const res = await fetch(path, {
     headers: { "content-type": "application/json" },
     ...init,
+    signal: init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout,
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error ?? `${res.status} ${res.statusText}`);
@@ -926,9 +958,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const patchTimers = useRef(new Map<string, { timer: ReturnType<typeof setTimeout>; patch: Record<string, unknown> }>());
 
   const dispatch = useMemo(() => {
+    let errorTimer: ReturnType<typeof setTimeout> | null = null;
     const showError = (e: unknown) => {
       rawDispatch({ type: "error", message: e instanceof Error ? e.message : String(e) });
-      setTimeout(() => rawDispatch({ type: "error", message: null }), 6000);
+      // reset the clock on each new error, so a second one is not cut short
+      // by the first one's cleanup
+      if (errorTimer) clearTimeout(errorTimer);
+      errorTimer = setTimeout(() => {
+        errorTimer = null;
+        rawDispatch({ type: "error", message: null });
+      }, 6000);
+    };
+    // a failed optimistic answer/dismiss puts the card back exactly as it was.
+    // The previous record is captured BEFORE rawDispatch lands: stateRef only
+    // reflects committed renders, so reading it inside a failure callback
+    // would return the already-optimistic card, not the original.
+    const rollbackCard = (action: { botId: string; messageId: string }, card: OptionCardData | null, e: unknown) => {
+      if (card) rawDispatch({ type: "restoreCard", botId: action.botId, messageId: action.messageId, card });
+      showError(e);
     };
     // fire-and-forget card persistence; the route is optional server-side
     const persistCard = (botId: string, messageId: string, patch: Partial<OptionCardData>) => {
@@ -940,6 +987,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
 
     const wrapped: React.Dispatch<Action> = (action) => {
+      // optimistic cases snapshot what a failure may need to undo — captured
+      // here, before rawDispatch, for the same committed-render reason as
+      // rollbackCard above
+      const prevRoster =
+        action.type === "deleteBot" || action.type === "deleteGroup"
+          ? {
+              bots: stateRef.current.bots,
+              groups: stateRef.current.groups,
+              selectedId: stateRef.current.selectedId,
+            }
+          : null;
+      const prevCard =
+        action.type === "answerCard" || action.type === "dismissCard"
+          ? (stateRef.current.bots
+              .find((b) => b.id === action.botId)
+              ?.messages.find((msg) => msg.id === action.messageId)?.card ?? null)
+          : null;
       rawDispatch(action);
       switch (action.type) {
         case "createRoutine":
@@ -994,7 +1058,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 behavior: action.behavior,
                 message: action.message,
               }),
-            }).catch(decisionFailed);
+            })
+              .then(() =>
+                rawDispatch({ type: "decisionSettled", threadId: action.threadId, requestId: action.requestId }),
+              )
+              .catch(decisionFailed);
           if (action.alwaysAllow) {
             const bot = stateRef.current.bots.find((b) => b.id === action.alwaysAllow!.botId);
             const next = [...new Set([...(bot?.alwaysAllow ?? []), action.alwaysAllow.key])];
@@ -1027,13 +1095,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 behavior,
                 message: behavior === "answer" ? action.answer : undefined,
               }),
-            }).catch(showError);
+            }).catch((e) => rollbackCard(action, prevCard, e));
           } else {
             persistCard(action.botId, action.messageId, { answered: action.answer });
             api(`/api/bots/${action.botId}/messages`, {
               method: "POST",
               body: JSON.stringify({ text: action.answer }),
-            }).catch(showError);
+            }).catch((e) => rollbackCard(action, prevCard, e));
           }
           break;
         }
@@ -1044,7 +1112,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             api(`/api/bots/${action.botId}/respond`, {
               method: "POST",
               body: JSON.stringify({ requestId: card.requestId, behavior: "deny", message: "Dismissed by user." }),
-            }).catch(() => {});
+              // the bot is still waiting on a denial that never landed — say so
+            }).catch((e) => rollbackCard(action, prevCard, e));
           } else {
             persistCard(action.botId, action.messageId, { dismissed: true });
           }
@@ -1080,7 +1149,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         }
         case "deleteBot":
-          api(`/api/bots/${action.botId}`, { method: "DELETE" }).catch(showError);
+          // the sidebar already dropped it optimistically; a failed DELETE
+          // must hand the roster back or the bot vanishes until the next hello
+          api(`/api/bots/${action.botId}`, { method: "DELETE" }).catch((e) => {
+            if (prevRoster) rawDispatch({ type: "botsRestored", ...prevRoster });
+            showError(e);
+          });
           break;
         case "markUnread":
           api(`/api/bots/${action.botId}`, { method: "PATCH", body: JSON.stringify({ unread: true }) }).catch(
@@ -1215,6 +1289,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     let hydrated = false;
     let hydrating = false;
     let rehydrateRequested = false;
+    let healsLeft = 3;
     const pendingFrames: any[] = [];
     let handleFrame: (frame: any) => void;
     const hydrate = () => {
@@ -1235,7 +1310,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           return;
         }
         hydrated = true;
-        for (const frame of pendingFrames.splice(0)) handleFrame(frame);
+        const replayed = pendingFrames.splice(0);
+        for (const frame of replayed) handleFrame(frame);
+        // A frame queued mid-flight can be OLDER than the snapshot that just
+        // landed (a busy flag flips both ways within milliseconds), so correct
+        // replay order can still regress one field and no later frame may come
+        // to fix it. A bounded number of quiet re-snapshots settles that
+        // without any protocol change; the bound keeps steady event traffic
+        // from chaining snapshots forever.
+        if (replayed.length > 0 && healsLeft > 0 && !rehydrateRequested) {
+          healsLeft -= 1;
+          setTimeout(() => alive && !hydrating && hydrate(), 250);
+        }
       });
     };
     // If SSE is unavailable, the app should still show its saved state. A

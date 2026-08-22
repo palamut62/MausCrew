@@ -290,9 +290,36 @@ function createWindow() {
     if (mainWindow === win) mainWindow = null;
   });
 
+  // Deep-link hardening. A window.open from the renderer reaches the OS
+  // browser only with an http(s) scheme pointing away from the app itself —
+  // file:// and custom protocol handlers never get to shell.openExternal,
+  // whatever a compromised server response tries to pop open. In-page
+  // navigation is the opposite trade: this is a single-origin SPA, so any
+  // foreign navigation is a bug or an attack and is stopped, not followed.
+  const appOrigin = app.isPackaged ? `http://127.0.0.1:${SERVER_PORT}` : new URL(DEV_URL).origin;
   win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    let parsed;
+    try {
+      parsed = new URL(url);
+    } catch {
+      return { action: "deny" };
+    }
+    if ((parsed.protocol === "https:" || parsed.protocol === "http:") && parsed.origin !== appOrigin) {
+      shell.openExternal(url);
+    }
     return { action: "deny" };
+  });
+  win.webContents.on("will-navigate", (event, url) => {
+    let parsed = null;
+    try {
+      parsed = new URL(url);
+    } catch {
+      /* unparseable — block below */
+    }
+    if (!parsed || parsed.origin !== appOrigin) {
+      event.preventDefault();
+      console.warn(`[main] blocked in-page navigation to ${url}`);
+    }
   });
 
   // Packaged CI smoke hook. It validates the real renderer/preload bridge and
