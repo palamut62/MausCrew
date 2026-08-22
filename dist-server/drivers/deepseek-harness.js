@@ -305,6 +305,9 @@ export async function createDeepSeekInstance(input, options = {}) {
                 // by a Linux runtime, and claiming otherwise would put a Local VM
                 // option in front of a user for whom every call would fail (§54).
                 agentsMcp: support.agentsMcp,
+                routinesMcp: support.routinesMcp,
+                // the one runtime with its own skill provider over .agents/skills
+                autoDiscoversSkills: true,
                 computerMcp: support.computerMcp,
                 composioMcp: support.composioMcp,
             },

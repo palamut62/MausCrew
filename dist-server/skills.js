@@ -288,6 +288,48 @@ export function listWorkspaceSkills(workspacePath) {
     skills.sort((a, b) => a.name.localeCompare(b.name));
     return { rootPath: root, skills };
 }
+/** Read-only sibling of listWorkspaceSkills, for the turn path.
+ *
+ * listWorkspaceSkills creates `<workspace>/.agents/skills` as a side effect,
+ * which is right when the user opens the Skill Center and wrong on every
+ * turn: it would litter a directory tree under every bot that never uses
+ * skills. This one touches nothing and reports "no skills" instead. */
+export function readWorkspaceSkills(workspacePath) {
+    const root = join(workspacePath, ".agents", "skills");
+    if (!workspacePath || !isAbsolute(workspacePath) || !existsSync(root))
+        return { rootPath: root, skills: [] };
+    try {
+        return listWorkspaceSkills(workspacePath);
+    }
+    catch {
+        // A malformed or unsafe skills directory must not take the turn down —
+        // the Skill Center is where the user gets told about it.
+        return { rootPath: root, skills: [] };
+    }
+}
+/** The skill index handed to engines that do not discover skills themselves.
+ *
+ * Without this, a SKILL.md the user wrote (or taught from a task) sits on
+ * disk and is invisible to the bot that owns it — which looks exactly like
+ * the skill being broken, with nothing in the UI to explain why. Returns ""
+ * when there is nothing usable, so the caller can concatenate it blind. */
+export function skillIndexPrompt(workspacePath) {
+    const { rootPath, skills } = readWorkspaceSkills(workspacePath);
+    // A malformed bundle is a Skill Center problem; advertising it here would
+    // send the agent to read a file that cannot be followed.
+    const usable = skills.filter((skill) => skill.valid && skill.modelInvocable);
+    if (!usable.length)
+        return "";
+    const index = usable
+        .map((skill) => {
+        const when = skill.whenToUse ? ` Use when: ${skill.whenToUse}` : "";
+        return ` • ${skill.name} — ${skill.description}${when} [${join(rootPath, skill.name, "SKILL.md")}]`;
+    })
+        .join("");
+    return (" This workspace has saved skills: reusable procedures for work already done once and worth repeating the same way." +
+        " Before starting a task, check whether one applies; if it does, read that SKILL.md in full and follow it instead of improvising." +
+        index);
+}
 export function createWorkspaceSkill(workspacePath, raw) {
     const input = validateSkillInput(raw);
     const root = skillRootForWorkspace(workspacePath);

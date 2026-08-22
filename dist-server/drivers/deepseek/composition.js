@@ -40,7 +40,7 @@ const NODE_ENV_FLAG = { ELECTRON_RUN_AS_NODE: "1" };
 const TOOL_CALL_TIMEOUT_MS = 60_000;
 export function mountSupport(config) {
     const stdio = config.runtime.mode !== "wsl";
-    return { computerMcp: stdio, agentsMcp: stdio, composioMcp: true };
+    return { computerMcp: stdio, agentsMcp: stdio, routinesMcp: stdio, composioMcp: true };
 }
 /** Translate a turn's integrations into MCP mounts.
  *
@@ -81,6 +81,9 @@ export function mountsFor(integrations, support) {
     }
     if (integrations.agents && support.agentsMcp) {
         mounts.push(stdioMount("agents", integrations.agents.command, integrations.agents.args, integrations.agents.env));
+    }
+    if (integrations.routines && support.routinesMcp) {
+        mounts.push(stdioMount("routines", integrations.routines.command, integrations.routines.args, integrations.routines.env));
     }
     if (integrations.dweb && support.composioMcp) {
         mounts.push(stdioMount("dweb", process.execPath, [proxyPath("drivers/dweb-proxy")], {
