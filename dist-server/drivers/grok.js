@@ -3,8 +3,14 @@ import { appendNative } from "./native.js";
 const DRIVER_KIND = "grok";
 const DEFAULT_URL = "https://api.x.ai/v1";
 const MODELS = {
-    default: "grok-4",
+    default: "grok-4.6",
+    // A menu, not an enumeration (contracts.ModelCatalog.extensible): xAI
+    // ships new ids continuously and GET /v1/models is key-scoped, so any id
+    // the account can serve is accepted even when unlisted here.
+    extensible: true,
     options: [
+        { id: "grok-4.6", label: "Grok 4.6" },
+        { id: "grok-4.5", label: "Grok 4.5" },
         { id: "grok-4", label: "Grok 4" },
         { id: "grok-4-fast", label: "Grok 4 Fast" },
         { id: "grok-3-mini", label: "Grok 3 Mini" },
@@ -44,7 +50,13 @@ export const GrokDriver = {
             const res = await fetch(`${config.url}/chat/completions`, {
                 method: "POST",
                 headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
-                body: JSON.stringify({ model, messages, stream: opts.stream }),
+                body: JSON.stringify({
+                    model,
+                    messages,
+                    stream: opts.stream,
+                    // grok-4.6 reasoning effort, per docs.x.ai: low | medium | high (default) | xhigh
+                    ...(opts.effort ? { reasoning_effort: opts.effort } : {}),
+                }),
                 signal: opts.signal ?? AbortSignal.timeout(120_000),
             });
             if (!res.ok) {
@@ -123,6 +135,7 @@ export const GrokDriver = {
                     const { text, usage } = await complete(messages, turn.model || MODELS.default, {
                         stream: true,
                         signal: abort.signal,
+                        effort: turn.effort,
                         onDelta: (delta) => emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "assistant_text", delta }),
                     });
                     appendNative(threadId, { dir: "in", source: "xai.chat.completions", msg: { text, usage } });
@@ -170,7 +183,10 @@ export const GrokDriver = {
             snapshot,
             adapter: {
                 provider: DRIVER_KIND,
-                capabilities: { sessionModelSwitch: "in-session" },
+                // reasoning_effort is a grok-4.6 API parameter (docs.x.ai), so the
+                // picker may offer the knob — same rule as computerMcp: never show
+                // one the driver cannot turn.
+                capabilities: { sessionModelSwitch: "in-session", effortLevels: ["low", "medium", "high", "xhigh"] },
                 sendTurn,
                 interruptTurn: async (threadId) => active.get(threadId)?.abort.abort(),
                 respondToRequest: async () => {
