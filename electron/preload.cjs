@@ -2,15 +2,42 @@
 // this narrow surface (window.mauscrew), never Node or ipcRenderer itself.
 const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
+// Set by the app at boot via registerSttCapture (see speech-win.mjs).
+let sttCapture = null;
+
 contextBridge.exposeInMainWorld("mauscrew", {
   /** Host platform ("darwin" | "win32" | "linux") — for platform-aware UI. */
   platform: process.platform,
   getCapabilities: () => ipcRenderer.invoke("desktop:capabilities"),
   /** One frame of this computer's screen as a data: URL when supported. */
   screenFrame: () => ipcRenderer.invoke("screen:frame"),
-  speechStart: (options) => ipcRenderer.invoke("speech:start", options),
+  // Windows dictation captures in the renderer (main has no mic access):
+  // the app registers a capture implementation at boot, and speechStart
+  // hands off to it once the main process confirms the recognizer is ready.
+  registerSttCapture: (impl) => {
+    sttCapture = impl;
+  },
+  speechStart: async (options) => {
+    const result = await ipcRenderer.invoke("speech:start", options);
+    if (result && result.mode === "renderer") await sttCapture?.start();
+    return result;
+  },
   speechStop: () => ipcRenderer.invoke("speech:stop"),
   speechFinish: () => ipcRenderer.invoke("speech:finish"),
+  /** One Float32 PCM chunk (ArrayBuffer, 16 kHz mono) from the tap. */
+  sttAudio: (chunk) => ipcRenderer.send("speech:audio", chunk),
+  /** Main-process lifecycle commands for the capture side: {cmd:"stop"}. */
+  onSttControl: (cb) => {
+    const handler = (_event, info) => cb(info);
+    ipcRenderer.on("stt:control", handler);
+    return () => ipcRenderer.removeListener("stt:control", handler);
+  },
+  /** Recognizer download progress: {label, percent} or null when idle. */
+  onSttStatus: (cb) => {
+    const handler = (_event, info) => cb(info);
+    ipcRenderer.on("stt:status", handler);
+    return () => ipcRenderer.removeListener("stt:status", handler);
+  },
   onSpeechTranscript: (cb) => {
     const handler = (_event, line) => cb(line);
     ipcRenderer.on("speech:transcript", handler);
