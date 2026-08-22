@@ -67,6 +67,11 @@ function routineScheduleLabel(routine: Routine) {
       minute: "2-digit",
     });
   }
+  if (routine.schedule.type === "interval") {
+    const every = routine.schedule.everyMinutes;
+    if (every % 60 !== 0) return `Every ${every} min`;
+    return every === 60 ? "Hourly" : `Every ${every / 60}h`;
+  }
   const days = routine.schedule.weekdays;
   const cadence =
     days.length === 7

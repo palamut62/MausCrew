@@ -405,6 +405,15 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         mcpServers.agents = { ...turn.integrations.agents };
         allowed.push("mcp__agents");
       }
+      // the bot's own Automations calendar via server/drivers/routines-proxy.ts.
+      // Pre-allowed like agents: an approval card on every create_routine
+      // would put the schedule back in the user's hands, which is the manual
+      // step this integration exists to remove. The routine shows up live in
+      // Automations, where the user can pause or delete it.
+      if (turn.integrations?.routines) {
+        mcpServers.routines = { ...turn.integrations.routines };
+        allowed.push("mcp__routines");
+      }
       // dweb network daemon (status / repo / opencode model access) via
       // server/drivers/dweb-proxy.ts — points at the configured dweb instance
       if (turn.integrations?.dweb) {
@@ -654,6 +663,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         capabilities: {
           sessionModelSwitch: "in-session",
           agentsMcp: true,
+          routinesMcp: true,
           computerMcp: true,
           composioMcp: true,
           genericMcp: true,

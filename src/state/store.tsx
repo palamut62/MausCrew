@@ -252,7 +252,7 @@ export interface InstanceInfo {
     version?: string | null;
   };
   models: { default: string; options: Array<{ id: string; label: string }> };
-  capabilities?: { computerMcp?: boolean; agentsMcp?: boolean; effortLevels?: readonly EffortLevel[] };
+  capabilities?: { computerMcp?: boolean; agentsMcp?: boolean; routinesMcp?: boolean; effortLevels?: readonly EffortLevel[] };
   install?: EngineInstall;
   /** A user-added Anthropic-compatible gateway rather than a built-in engine.
    * It rides the claudeAgent driver, so this is what stops the UI from
