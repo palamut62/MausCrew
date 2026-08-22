@@ -119,6 +119,16 @@ export function createAcpDriver(support) {
                 if (agents) {
                     servers.push({ name: "agents", command: agents.command, args: agents.args, env: acpEnv(agents.env) });
                 }
+                // The bot's own Automations calendar — same stdio baseline.
+                const routineTools = turn.integrations?.routines;
+                if (routineTools) {
+                    servers.push({
+                        name: "routines",
+                        command: routineTools.command,
+                        args: routineTools.args,
+                        env: acpEnv(routineTools.env),
+                    });
+                }
                 // The bot's computer, mounted exactly like the Claude driver does.
                 // Cloud boxes use the REST adapter; host and sandbox Cua connections
                 // expose Cua Driver's official MCP server directly.
@@ -559,6 +569,7 @@ export function createAcpDriver(support) {
                     capabilities: {
                         sessionModelSwitch: "unsupported",
                         agentsMcp: true,
+                        routinesMcp: true,
                         computerMcp: true,
                         genericMcp: true,
                         effortLevels: support.effortLevels,
