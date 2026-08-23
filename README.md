@@ -339,7 +339,8 @@ the security boundary.
 Early but real — the loop works end to end: message → agent → streamed reply → tools → approvals →
 computer use. Desktop packaging is configured for macOS, Windows, and Ubuntu 24.04 x64 with the capability
 limits above. Rough edges to expect: hosted/mobile connectivity is still being built, and webhook
-triggers currently use the local receiver rather than an always-on hosted relay.
+triggers currently use the local receiver rather than an always-on hosted relay
+(see [`docs/hosted-relay.md`](docs/hosted-relay.md) for the 24/7 readiness assessment).
 Voice needs an ElevenLabs key, and calls are macOS-only for now (they ride the same on-device dictation as
 the composer mic) — see [`docs/voice-mode.md`](docs/voice-mode.md) for the design and the known gaps.
 

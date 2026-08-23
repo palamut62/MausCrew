@@ -3009,7 +3009,12 @@ const server = createServer(async (req, res) => {
     // child proves it is OURS by echoing its pid (a stray dev server has
     // the same API shape but a different pid)
     if (method === "GET" && path === "/api/health") {
-      return json(res, 200, { app: "mauscrew", pid: process.pid, static: Boolean(STATIC_DIR) });
+      return json(res, 200, {
+        app: "mauscrew",
+        pid: process.pid,
+        static: Boolean(STATIC_DIR),
+        owner: { name: "Umut Palamut", x: "https://x.com/palamut62", github: "https://github.com/palamut62" },
+      });
     }
 
     // ── provider instances (model picker) ──
