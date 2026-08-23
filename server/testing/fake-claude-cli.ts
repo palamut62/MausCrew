@@ -7,6 +7,9 @@
 //   FAKE_CLAUDE_MODE   happy (default) | exit-early | hang | malformed
 //                      | stream (partial-message text deltas before the
 //                        whole-message frame, plus subagent noise to drop)
+//                      | model-rejected (what a gateway does with a model id
+//                        it does not serve: the refusal arrives as ordinary
+//                        assistant prose, then an is_error result)
 //   FAKE_CLAUDE_DUMP   path to write {argv, env, prompt, mcpConfig} as JSON,
 //                      so the test can assert on argv shape and env hygiene.
 //                      mcpConfig is read back from the --mcp-config file the
@@ -90,6 +93,14 @@ process.stdin.on("end", () => {
     // permission broker while a turn is officially in flight
     setInterval(() => {}, 1_000);
     return;
+  }
+
+  if (mode === "model-rejected") {
+    // verbatim shape of DeepSeek's 400, which is what the CLI relays
+    const text = `API Error: 400 The supported API model names are deepseek-v4-pro, deepseek-v4-flash, and deepseek-v4-flash-vision-exp, but you passed ${model}.`;
+    out({ type: "assistant", message: { content: [{ type: "text", text }] } });
+    out({ type: "result", is_error: true, stop_reason: "error", result: text });
+    process.exit(0);
   }
 
   if (mode === "malformed") {

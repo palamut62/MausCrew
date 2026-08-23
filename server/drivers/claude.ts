@@ -65,7 +65,7 @@ export function claudeSignedIn(
  * Keeping the probe and turn environments identical prevents setup from
  * claiming an API-key login that the turn itself would deliberately remove.
  */
-function claudeEnvironment(config?: Pick<ClaudeConfig, "baseUrl" | "authToken">): NodeJS.ProcessEnv {
+function claudeEnvironment(config?: Pick<ClaudeConfig, "baseUrl" | "authToken" | "models">): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, PATH: augmentedPath(), NPM_CONFIG_LOGLEVEL: "error" };
   delete env.ANTHROPIC_API_KEY;
   delete env.CLAUDECODE;
@@ -77,12 +77,34 @@ function claudeEnvironment(config?: Pick<ClaudeConfig, "baseUrl" | "authToken">)
   // an instance that opted in via config gets them back, one line below.
   delete env.ANTHROPIC_BASE_URL;
   delete env.ANTHROPIC_AUTH_TOKEN;
+  // Same argument for the tier overrides: an inherited mapping would make a
+  // plain claude.ai instance quietly run somebody else's model ids.
+  for (const key of TIER_MODEL_VARS) delete env[key];
   if (config?.baseUrl) {
     env.ANTHROPIC_BASE_URL = config.baseUrl;
     if (config.authToken) env.ANTHROPIC_AUTH_TOKEN = config.authToken;
+    // `--model` names the model of the turn itself and nothing else. Claude
+    // Code also makes its own calls — topic titles, file summaries, the
+    // compaction pass — against its haiku/sonnet/opus TIERS, which resolve to
+    // Anthropic ids a third-party endpoint has never heard of. That is the
+    // "supported API model names are …" 400 arriving out of nowhere in the
+    // middle of a working conversation. Pin every tier to something this
+    // gateway actually serves.
+    const tierModel = config.models?.[0];
+    if (tierModel) for (const key of TIER_MODEL_VARS) env[key] = tierModel;
   }
   return env;
 }
+
+/** The tier→model mapping Claude Code reads. `ANTHROPIC_SMALL_FAST_MODEL` is
+ * the deprecated spelling of the haiku one, set alongside it so an older CLI
+ * on someone's PATH is covered too. */
+const TIER_MODEL_VARS = [
+  "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+  "ANTHROPIC_DEFAULT_SONNET_MODEL",
+  "ANTHROPIC_DEFAULT_OPUS_MODEL",
+  "ANTHROPIC_SMALL_FAST_MODEL",
+] as const;
 
 const DRIVER_KIND = "claudeAgent";
 
@@ -122,15 +144,67 @@ const MODELS = {
  * Offering "Claude Sonnet 5" on someone's DeepSeek endpoint is an invitation
  * to pick a model that endpoint will reject — an error one turn later and
  * nowhere near the picker that caused it. Empty is honest, and `extensible`
- * keeps a hand-written selection working. */
+ * keeps a hand-written selection working until that list exists.
+ *
+ * Once the list DOES exist it is closed, unlike the other extensible catalogs
+ * here. The difference is who wrote it: xAI's list is ours and may lag their
+ * private builds, but a gateway's list is the operator's own answer to what
+ * this endpoint serves. A selection outside it is a stale id — from an earlier
+ * edit, or from another gateway — and closing the catalog is what lets
+ * model-selection.ts repair the bot instead of shipping that id as `--model`
+ * and turning it into a raw provider 400. Adding a model is one line in
+ * Settings → Claude gateways. */
 function modelsFor(config: ClaudeConfig): ModelCatalog {
   if (!config.baseUrl) return MODELS;
   if (!config.models?.length) return { default: "", options: [], extensible: true };
-  return {
-    default: config.models[0],
-    options: config.models.map((id) => ({ id, label: id })),
-    extensible: true,
-  };
+  return { default: config.models[0], options: config.models.map((id) => ({ id, label: id })) };
+}
+
+/** Whether this failure is the endpoint refusing the model id rather than
+ * anything a retry could fix. Matched on the sentence because that is all the
+ * CLI passes through — the HTTP body never reaches us — and these are the
+ * spellings DeepSeek, OpenRouter and the CLI itself actually use. Returns the
+ * provider's own words, so the advice can quote the source. */
+function modelRejection(text: string): string | null {
+  const line = text.trim();
+  if (!line) return null;
+  const rejected =
+    /supported api model names/i.test(line) ||
+    /issue with the selected model/i.test(line) ||
+    /\bmodel[_ ]not[_ ]found\b/i.test(line) ||
+    /(unknown|invalid|unsupported|no such) model/i.test(line);
+  return rejected ? line.slice(0, 300) : null;
+}
+
+/** Aggregators namespace their ids (`deepseek/deepseek-v4-pro`); a vendor's own
+ * endpoint serves bare ones (`deepseek-v4-pro`). Pasting one convention into
+ * the other is the most common way a correctly configured gateway rejects every
+ * turn, so name it rather than leave the user comparing two strings that differ
+ * by a prefix. */
+function namingHint(baseUrl: string, model: string): string {
+  if (!model) return "";
+  let host = "";
+  try {
+    host = new URL(baseUrl).hostname;
+  } catch {
+    host = "";
+  }
+  const aggregator = /(^|\.)(openrouter\.ai|llmgateway\.io|together\.xyz)$/i.test(host);
+  const namespaced = model.includes("/");
+  if (!aggregator && namespaced) {
+    const bare = model.split("/").slice(1).join("/");
+    return ` ${host || "This endpoint"} serves bare model ids — "${bare}", not "${model}". The namespaced form is OpenRouter's.`;
+  }
+  if (aggregator && !namespaced) return ` ${host} needs a namespaced id — "vendor/${model}", not "${model}".`;
+  return "";
+}
+
+/** The sentence shown beside a provider's refusal: what was asked for, who
+ * refused it, and the one screen that changes it. */
+function gatewayModelAdvice(config: ClaudeConfig, engine: string, model: string | undefined, complaint: string): string {
+  const asked = model || modelsFor(config).default;
+  if (!config.baseUrl) return `${engine} rejected the model "${asked}": ${complaint}`;
+  return `${engine} rejected the model "${asked}".${namingHint(config.baseUrl, asked)} Fix the id in Settings → Claude gateways — every bot on this engine uses that list. The endpoint said: ${complaint}`;
 }
 
 // proxy entry files live next to this one as .ts in dev (node type
@@ -516,6 +590,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       // text deltas for the current assistant message, so the whole-message
       // frame that follows doesn't re-emit the same text as one big delta
       let sawStreamDelta = false;
+      // last thing the model (or the CLI, speaking for it) said this turn
+      let lastAssistantText = "";
 
       const handleLine = (line: string) => {
         let o: any;
@@ -551,6 +627,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           case "assistant": {
             const msg = o.message ?? {};
             const text = firstText(msg.content);
+            // kept for the result branch: a provider refusal arrives as
+            // ordinary assistant prose, so this is the only legible copy of it
+            if (text.trim()) lastAssistantText = text;
             if (text.trim()) {
               // fallback delta for CLIs/paths that never streamed the block
               if (!sawStreamDelta) {
@@ -581,9 +660,23 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
               }
             }
             break;
-          case "result":
+          case "result": {
+            // A model the endpoint does not serve comes back as one line of
+            // prose and nothing else: no code, no setup flag, nothing naming
+            // the setting that caused it. Say what to change, and where.
+            const complaint =
+              o.is_error === true ? modelRejection(typeof o.result === "string" ? o.result : lastAssistantText) : null;
+            if (complaint) {
+              emit({
+                ...base(threadId, turnId),
+                type: "runtime.error",
+                setup: true,
+                message: gatewayModelAdvice(config, input.displayName ?? instanceId, turn.model, complaint),
+              });
+            }
             settle(o.is_error !== true, o.stop_reason ?? o.terminal_reason ?? null, o.total_cost_usd ?? null);
             break;
+          }
         }
       };
 
@@ -697,9 +790,15 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       },
       generateText: (prompt: string) =>
         new Promise((resolve, reject) => {
+          // Haiku is the cheap model of the claude.ai catalog and of no other
+          // one — naming it against a gateway is a guaranteed rejection, and it
+          // is what made thread titles fail on a DeepSeek endpoint. A gateway
+          // asks for its own default instead; one that has named no models yet
+          // passes no --model at all and lets the endpoint choose.
+          const cheapModel = config.baseUrl ? modelsFor(config).default : "claude-haiku-4-5";
           execCli(
             config.cli,
-            ["-p", prompt, "--model", "claude-haiku-4-5", "--output-format", "text"],
+            ["-p", prompt, ...(cheapModel ? ["--model", cheapModel] : []), "--output-format", "text"],
             // same environment as every other claude invocation in this driver:
             // stripped routing vars, plus the instance's own gateway if it has
             // one — a bare process.env silently reroutes a gateway instance

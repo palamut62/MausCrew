@@ -81,14 +81,14 @@ describe("ClaudeDriver turns (fake CLI)", () => {
   let recorder: EventRecorder;
   let scratch: string;
 
-  const create = async (mode?: string) => {
+  const create = async (mode?: string, gateway?: { baseUrl: string; models?: string[] }) => {
     if (mode) process.env.FAKE_CLAUDE_MODE = mode;
     instance = await ClaudeDriver.create({
       instanceId: "claude-test",
       displayName: "Claude Test",
       environment: {},
       enabled: true,
-      config: { cli: FAKE_CLI, permissionMode: "acceptEdits" },
+      config: { cli: FAKE_CLI, permissionMode: "acceptEdits", ...gateway },
     });
     recorder = recordEvents(instance.adapter);
   };
@@ -106,6 +106,87 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     recorder?.stop();
     await instance?.dispose();
     rmSync(scratch, { recursive: true, force: true });
+  });
+
+  it("pins every model tier to the gateway's own catalog", async () => {
+    // --model names the model of this turn. Claude Code's own background calls
+    // (titles, summaries, compaction) go to its haiku/sonnet/opus tiers, which
+    // resolve to Anthropic ids a third-party endpoint has never heard of — a
+    // 400 in the middle of a working conversation.
+    await create(undefined, {
+      baseUrl: "https://api.deepseek.com/anthropic",
+      models: ["deepseek-v4-flash", "deepseek-v4-pro"],
+    });
+    const dump = join(scratch, "tiers.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+
+    await instance.adapter.sendTurn({ threadId: "t-tiers", text: "hi", model: "deepseek-v4-pro" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const { env } = JSON.parse(readFileSync(dump, "utf8"));
+    expect(env.ANTHROPIC_BASE_URL).toBe("https://api.deepseek.com/anthropic");
+    for (const key of [
+      "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+      "ANTHROPIC_DEFAULT_SONNET_MODEL",
+      "ANTHROPIC_DEFAULT_OPUS_MODEL",
+      "ANTHROPIC_SMALL_FAST_MODEL",
+    ]) {
+      expect(env[key]).toBe("deepseek-v4-flash");
+    }
+  });
+
+  it("leaves a plain claude.ai instance on Anthropic's own tiers", async () => {
+    // The mapping is per-instance. An inherited one would quietly run a
+    // subscription instance on somebody else's model ids.
+    process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL = "deepseek/leaked";
+    try {
+      await create();
+      const dump = join(scratch, "no-tiers.json");
+      process.env.FAKE_CLAUDE_DUMP = dump;
+      await instance.adapter.sendTurn({ threadId: "t-plain", text: "hi" });
+      await recorder.until((e) => e.type === "turn.completed");
+      expect(JSON.parse(readFileSync(dump, "utf8")).env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBeUndefined();
+    } finally {
+      delete process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL;
+    }
+  });
+
+  it("turns a gateway's model refusal into an actionable setup error", async () => {
+    // Without this the whole event is one line of provider prose in the
+    // transcript: no code, no setup flag, nothing naming the setting.
+    await create("model-rejected", {
+      baseUrl: "https://api.deepseek.com/anthropic",
+      models: ["deepseek/deepseek-v4-flash-vision-exp"],
+    });
+    await instance.adapter.sendTurn({
+      threadId: "t-rejected",
+      text: "hi",
+      model: "deepseek/deepseek-v4-flash-vision-exp",
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const error = recorder.events.find((e) => e.type === "runtime.error") as any;
+    expect(error).toBeTruthy();
+    expect(error.setup).toBe(true);
+    expect(error.message).toContain("deepseek/deepseek-v4-flash-vision-exp");
+    // the prefix IS the mistake, so the sentence has to say so
+    expect(error.message).toContain("bare model ids");
+    expect(error.message).toContain("Settings → Claude gateways");
+    expect(recorder.events.at(-1)).toMatchObject({ type: "turn.completed", ok: false });
+  });
+
+  it("closes a gateway catalog so a stale model id can be repaired", async () => {
+    // Contrast with an empty list, which stays open: there is nothing to check
+    // against until the operator says what the endpoint serves.
+    await create(undefined, { baseUrl: "https://api.deepseek.com/anthropic", models: ["deepseek-v4-flash"] });
+    expect(instance.models).toEqual({
+      default: "deepseek-v4-flash",
+      options: [{ id: "deepseek-v4-flash", label: "deepseek-v4-flash" }],
+    });
+    await instance.dispose();
+
+    await create(undefined, { baseUrl: "https://api.deepseek.com/anthropic" });
+    expect(instance.models).toEqual({ default: "", options: [], extensible: true });
   });
 
   it("normalizes a full turn into the canonical event sequence", async () => {
