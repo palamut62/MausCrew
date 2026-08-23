@@ -1,9 +1,89 @@
-import { CURSOR_STATES, type CursorState } from "@/components/CursorAvatar";
+/** The mascot's behaviour vocabulary — 39 states, under the app's historical
+ * names. Lived in the retired CursorAvatar engine; the vocabulary is all that
+ * survives it. Order matters: expression indexes (PICKABLE_STATES comments)
+ * follow this declaration order. */
+export type MausState =
+  | "sleeping"
+  | "waking"
+  | "idle"
+  | "listening"
+  | "thinking"
+  | "searching"
+  | "working"
+  | "excited"
+  | "surprised"
+  | "suspicious"
+  | "angry"
+  | "drowsy"
+  | "happy"
+  | "curious"
+  | "confused"
+  | "bored"
+  | "proud"
+  | "shy"
+  | "sad"
+  | "laughing"
+  | "scared"
+  | "playful"
+  | "celebrate"
+  | "orbit"
+  | "radar"
+  | "progress"
+  | "spawning"
+  | "humming"
+  | "loading"
+  | "dictating"
+  | "sending"
+  | "receiving"
+  | "uploading"
+  | "writing"
+  | "notifying"
+  | "alerting"
+  | "bouncing"
+  | "dragging"
+  | "powering-down";
 
-/** The mascot's behaviour vocabulary — CursorAvatar's 39 states, under the
- * app's historical names. */
-export type MausState = CursorState;
-export const MAUS_STATES = CURSOR_STATES;
+export const MAUS_STATES: MausState[] = [
+  "sleeping",
+  "waking",
+  "idle",
+  "listening",
+  "thinking",
+  "searching",
+  "working",
+  "excited",
+  "surprised",
+  "suspicious",
+  "angry",
+  "drowsy",
+  "happy",
+  "curious",
+  "confused",
+  "bored",
+  "proud",
+  "shy",
+  "sad",
+  "laughing",
+  "scared",
+  "playful",
+  "celebrate",
+  "orbit",
+  "radar",
+  "progress",
+  "spawning",
+  "humming",
+  "loading",
+  "dictating",
+  "sending",
+  "receiving",
+  "uploading",
+  "writing",
+  "notifying",
+  "alerting",
+  "bouncing",
+  "dragging",
+  "powering-down",
+];
 
 /** CursorAvatar ships French group labels; the app shows these instead. The
  * memberships mirror its STATE_GROUPS exactly. */

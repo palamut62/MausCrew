@@ -457,8 +457,6 @@ function Call({ bot }: { bot: Bot }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [bot.id, listen]);
 
-  const mascotState =
-    phase === "listening" ? "listening" : phase === "speaking" ? "sending" : phase === "sending" ? "thinking" : "working";
   const status =
     phase === "listening"
       ? pushToTalk
@@ -480,7 +478,7 @@ function Call({ bot }: { bot: Bot }) {
         <X size={18} weight="bold" />
       </button>
 
-      <MausAvatar color={bot.color} name={bot.name} state={mascotState} size={220} animated trackPointer />
+      <MausAvatar color={bot.color} name={bot.name} size={220} />
 
       <div className="flex flex-col items-center gap-1.5 text-center">
         <div className="text-[20px] font-medium text-ink">{bot.name}</div>

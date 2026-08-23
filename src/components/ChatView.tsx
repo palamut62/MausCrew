@@ -12,7 +12,6 @@ import {
 } from "@/state/store";
 import { EngineSetup } from "./EngineSetup";
 import { MausAvatar } from "./Avatar";
-import { stateForBot } from "@/lib/mascot";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { OptionCard } from "./OptionCard";
 import { ApprovalCard } from "./ApprovalCard";
@@ -409,7 +408,7 @@ function ActivityChip({ message }: { message: Message }) {
           title={`Open the conversation with ${comm.withName}`}
           className="flex items-center gap-2 rounded-md border border-hairline bg-panel px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
         >
-          <MausAvatar color={comm.withColor} name={comm.withName} state="happy" size={16} />
+          <MausAvatar color={comm.withColor} name={comm.withName} size={16} />
           <span className="max-w-[480px] truncate font-mono tracking-tight">{tool.name}</span>
           <CaretRight size={13} weight="bold" />
         </button>
@@ -590,7 +589,7 @@ const MessagesList = memo(function MessagesList({
     <>
       {messages.length === 0 && !bot.busy && (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 py-24 text-center">
-          <MausAvatar color={bot.color} name={bot.name} state="idle" size={64} motion="none" motionKey={0} />
+          <MausAvatar color={bot.color} name={bot.name} size={64} />
           <div className="text-[17px] font-semibold text-ink">{bot.name}</div>
           <div className="max-w-[360px] text-[14px] text-ink-secondary">
             {bot.description || "Send a message to start the conversation."}
@@ -660,7 +659,6 @@ export function ChatView({ bot }: { bot: Bot }) {
   const streaming = stream.streaming[bot.threadId];
   const reasoning = stream.reasoning[bot.threadId];
   const provisioning = state.provisioning[bot.id];
-  const mascotMotion = state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
 
   // only the active branch is rendered; forks stay reachable via ‹ › nav
   const messages = useMemo(() => visibleMessages(bot), [bot]);
@@ -752,14 +750,7 @@ export function ChatView({ bot }: { bot: Bot }) {
           title="Bot settings"
           style={noDrag}
         >
-          <MausAvatar
-            color={bot.color}
-            name={bot.name}
-            state={stateForBot({ ...bot, messages })}
-            size={22}
-            motion={mascotMotion?.kind ?? "none"}
-            motionKey={mascotMotion?.nonce ?? 0}
-          />
+          <MausAvatar color={bot.color} name={bot.name} size={22} />
           <span className="text-[15px] font-semibold text-ink">{bot.name}</span>
           {bot.chiefOfStaff && (
             <span className="flex items-center gap-1 rounded-md bg-accent/12 px-2 py-0.5 font-mono text-[11px] font-medium tracking-tight text-accent">

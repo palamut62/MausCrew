@@ -13,7 +13,6 @@ import {
   type GroupDefaultResponder,
 } from "@/state/store";
 import { MausAvatar } from "./Avatar";
-import { normalizeState } from "@/lib/mascot";
 import { effectiveDefaultResponder, groupResponseHint } from "@/lib/group-routing";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { Composer } from "./Composer";
@@ -40,11 +39,7 @@ function ClusterLabel({ bot, name, color, at }: { bot?: Bot; name: string; color
       <MausAvatar
         color={(bot?.color ?? color) as Bot["color"]}
         name={name}
-        state={normalizeState(bot?.mascotExpression) ?? "happy"}
         size={16}
-        motion="none"
-        motionKey={0}
-        animated={false}
       />
       <span className="font-mono text-[10.5px] tracking-tight text-ink-secondary uppercase">
         {name}
@@ -261,13 +256,7 @@ export function GroupView({ group }: { group: Group }) {
                 group.busyBotId === b.id && "ring-2 ring-accent/50 ring-offset-1 ring-offset-app",
               )}
             >
-              <MausAvatar
-                color={b.color}
-                name={b.name}
-                state={normalizeState(b.mascotExpression) ?? "happy"}
-                size={24}
-                animated={false}
-              />
+              <MausAvatar color={b.color} name={b.name} size={24} />
               {group.busyBotId === b.id && (
                 <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full border border-app bg-accent" />
               )}
@@ -339,16 +328,7 @@ export function GroupView({ group }: { group: Group }) {
             <div className="flex flex-1 flex-col items-center justify-center gap-3 py-24 text-center">
               <div className="flex -space-x-2">
                 {members.slice(0, 3).map((b) => (
-                  <MausAvatar
-                    key={b.id}
-                    color={b.color}
-                    name={b.name}
-                    state="happy"
-                    size={44}
-                    motion="none"
-                    motionKey={0}
-                    animated={false}
-                  />
+                  <MausAvatar key={b.id} color={b.color} name={b.name} size={44} />
                 ))}
               </div>
               <div className="text-[17px] font-semibold text-ink">{group.name}</div>

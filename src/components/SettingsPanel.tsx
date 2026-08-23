@@ -3,8 +3,6 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { api, useStore, type Bot } from "@/state/store";
 import { MausAvatar } from "./Avatar";
 import {
-  PICKABLE_STATES,
-  stateForBot,
   MAUS_COLORS,
   MAUS_COLOR_NAMES,
 } from "@/lib/mascot";
@@ -64,8 +62,6 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
       >
     >,
   ) => dispatch({ type: "updateBot", botId: bot.id, patch: p });
-  const activeState = stateForBot(bot);
-  const mascotMotion = state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
   const engine = state.instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId);
   const canCoordinate = engine?.capabilities?.agentsMcp === true;
   const currentChief = state.bots.find((candidate) => candidate.chiefOfStaff);
@@ -139,14 +135,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
 
       <div className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-5 pb-5">
         <div className="flex justify-center py-5">
-          <MausAvatar
-            color={bot.color}
-            name={bot.name}
-            state={activeState}
-            size={112}
-            motion={mascotMotion?.kind ?? "none"}
-            motionKey={mascotMotion?.nonce ?? 0}
-          />
+          <MausAvatar color={bot.color} name={bot.name} size={112} />
         </div>
 
         <div className="flex flex-col gap-4">
@@ -164,27 +153,11 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
             </div>
 
             <div className="p-3">
+              {/* The old Expression picker is gone with the mascot engine:
+                  every choice rendered the same monogram tile, so fifteen
+                  buttons showed one picture. The stored value still matters
+                  to future engines, which is why Reset keeps clearing it. */}
               <div className="mb-2 font-mono text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
-                Expression
-              </div>
-              <div className="grid grid-cols-5 gap-2">
-                {PICKABLE_STATES.map((expression) => (
-                  <button
-                    key={expression}
-                    onClick={() => patch({ mascotExpression: expression })}
-                    className={cn(
-                      "flex h-[58px] items-center justify-center rounded-xl bg-inset transition-colors hover:bg-raised",
-                      activeState === expression && "ring-2 ring-accent-border",
-                    )}
-                    title={expression}
-                    aria-label={`Use ${expression} expression`}
-                  >
-                    <MausAvatar color={bot.color} name={bot.name} state={expression} size={42} animated={false} />
-                  </button>
-                ))}
-              </div>
-
-              <div className="mb-2 mt-4 font-mono text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
                 Color
               </div>
               <div className="flex flex-wrap gap-2.5">
