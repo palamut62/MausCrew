@@ -4,7 +4,7 @@ import { ArrowSquareOut, CalendarDot, CalendarDots, CaretLeft, CaretRight, Check
 import { MausAvatar } from "@/components/Avatar";
 import { WebhooksPanel } from "@/components/WebhooksPanel";
 import { cn } from "@/lib/cn";
-import { MAUS_COLORS, type MausState } from "@/lib/mascot";
+import { MAUS_COLORS } from "@/lib/mascot";
 import type { Routine, RoutineInput, RoutineRun, RoutineRunOn, RoutineRunStatus } from "@/lib/routines";
 import { api, useStore, type Bot } from "@/state/store";
 
@@ -99,24 +99,6 @@ function scheduleLabel(routine: Routine) {
 function canToggleRoutine(routine: Routine) {
   // Only a one-off that has already passed is beyond resuming.
   return routine.schedule.type !== "once" || routine.schedule.at > Date.now();
-}
-
-function statusState(status: RoutineRunStatus): MausState {
-  switch (status) {
-    case "queued":
-      return "drowsy";
-    case "running":
-      return "working";
-    case "waiting":
-      return "curious";
-    case "completed":
-      return "proud";
-    case "failed":
-    case "missed":
-      return "sad";
-    case "cancelled":
-      return "sleeping";
-  }
 }
 
 function statusTone(status: RoutineRunStatus) {
@@ -222,10 +204,7 @@ function RoutineCard({ item, bot, compact, onOpen }: { item: CalendarItem; bot: 
         <MausAvatar
           color={bot.color}
           name={bot.name}
-          state={status ? statusState(status) : "idle"}
           size={compact ? 32 : 38}
-          animated={animated}
-          trackPointer={animated}
           label={`${bot.name} — ${title}`}
         />
         <div className="min-w-0 flex-1">
@@ -447,7 +426,7 @@ export function RoutineEditor({
             <div className={cn("grid gap-2", lockedBotId ? "grid-cols-1" : "grid-cols-2 sm:grid-cols-3")}>
               {bots.map((bot) => (
                 <button key={bot.id} type="button" disabled={Boolean(lockedBotId)} onClick={() => setBotId(bot.id)} className={cn("flex min-w-0 items-center gap-2 rounded-xl border px-3 py-2 text-left", botId === bot.id ? "border-accent/70 bg-accent/10" : "border-hairline bg-inset hover:bg-raised/60")}>
-                  <MausAvatar color={bot.color} name={bot.name} state={botId === bot.id ? "happy" : "idle"} size={38} animated={false} />
+                  <MausAvatar color={bot.color} name={bot.name} size={38} />
                   <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">{bot.name}</span>
                   {lockedBotId && <span className="text-[11px] text-ink-secondary">Assigned from Computer</span>}
                 </button>
@@ -554,7 +533,7 @@ function RoutineDetails({ item, bot, onClose, onEdit }: { item: CalendarItem; bo
         <div className="relative overflow-hidden border-b border-hairline px-5 py-5" style={{ background: `linear-gradient(135deg, color-mix(in srgb, ${MAUS_COLORS[bot.color]} 28%, #111), #111)` }}>
           <button onClick={onClose} className="absolute right-3 top-3 rounded-lg p-2 text-white/60 hover:bg-white/10 hover:text-white"><X size={18} weight="bold" /></button>
           <div className="flex items-center gap-4 pr-10">
-            <MausAvatar color={bot.color} name={bot.name} state={run ? statusState(run.status) : "idle"} size={72} animated={run?.status === "running" || run?.status === "waiting"} label={bot.name} />
+            <MausAvatar color={bot.color} name={bot.name} size={72} label={bot.name} />
             <div className="min-w-0">
               <div className="truncate text-[20px] font-semibold text-white">{title}</div>
               <div className="mt-1 flex items-center gap-2 text-[13px] text-white/65"><span>{bot.name}</span><span>·</span><span className="font-mono tracking-tight">{niceDate(item.at)}, {niceTime(item.at)}</span></div>
@@ -616,7 +595,7 @@ function PausedRoutines({ routines, bots, onClose, onEdit }: { routines: Routine
             const bot = bots.find((candidate) => candidate.id === routine.botId);
             return (
               <div key={routine.id} className="flex items-center gap-3 rounded-xl border border-hairline bg-inset p-3">
-                {bot ? <MausAvatar color={bot.color} name={bot.name} state="sleeping" size={44} animated={false} label={bot.name} /> : <div className="flex size-11 items-center justify-center rounded-xl bg-raised text-ink-secondary"><CalendarDot size={20} /></div>}
+                {bot ? <MausAvatar color={bot.color} name={bot.name} size={44} label={bot.name} /> : <div className="flex size-11 items-center justify-center rounded-xl bg-raised text-ink-secondary"><CalendarDot size={20} /></div>}
                 <div className="min-w-0 flex-1"><div className="truncate text-[14px] font-semibold text-ink">{routine.name}</div><div className="mt-0.5 truncate text-[11.5px] text-ink-secondary">{bot?.name ?? "Deleted MAUS"} · {scheduleLabel(routine)}</div></div>
                 {bot && <button onClick={() => dispatch({ type: "updateRoutine", routineId: routine.id, patch: { enabled: true } })} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-app hover:brightness-110"><Play size={12} weight="bold" />Resume</button>}
                 <button onClick={() => onEdit(routine)} className="rounded-lg px-2 py-1.5 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink">Edit</button>
@@ -728,7 +707,7 @@ export function RoutinesPage() {
         <div className="flex min-h-0 flex-1 items-center justify-center p-8">
           <div className="max-w-[430px] text-center">
             <div className="relative mx-auto mb-5 flex h-28 w-44 items-end justify-center">
-              {visibleBots.slice(0, 3).map((bot, index) => <div key={bot.id} className="-ml-3 first:ml-0" style={{ transform: `translateY(${Math.abs(index - 1) * 9}px) rotate(${(index - 1) * 5}deg)` }}><MausAvatar color={bot.color} name={bot.name} state={index === 1 ? "excited" : "idle"} size={84} /></div>)}
+              {visibleBots.slice(0, 3).map((bot, index) => <div key={bot.id} className="-ml-3 first:ml-0" style={{ transform: `translateY(${Math.abs(index - 1) * 9}px) rotate(${(index - 1) * 5}deg)` }}><MausAvatar color={bot.color} name={bot.name} size={84} /></div>)}
               {visibleBots.length === 0 && <CalendarDot size={58} className="text-ink-secondary/40" />}
             </div>
             <h2 className="text-[18px] font-semibold text-ink">Put your MAUS team on a rhythm</h2>

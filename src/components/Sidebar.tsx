@@ -4,7 +4,6 @@ import { createPortal } from "react-dom";
 import { ArrowClockwise, ArrowLineDown, BellRinging, CalendarDots, Check, ClipboardText, Copy, Crown, EyeSlash, FileArrowUp, FolderPlus, Gear, MagnifyingGlass, Pencil, Plus, PushPin, PushPinSlash, PuzzlePiece, Robot as BotIcon, Spinner, Trash, Users } from "@phosphor-icons/react";
 import { api, useStore, formatTime, visibleMessages, type Bot, type Group, type Message } from "@/state/store";
 import { MausAvatar, InitialsAvatar } from "./Avatar";
-import { stateForBot } from "@/lib/mascot";
 import { useUpdaterState } from "@/lib/updater";
 import { cn } from "@/lib/cn";
 import { downloadSelectedTeam } from "@/lib/team-files";
@@ -138,7 +137,7 @@ function StackedMauses({ members }: { members: Bot[] }) {
     const b = members[0];
     return (
       <div className="flex size-9 shrink-0 items-center justify-center">
-        {b ? <MausAvatar color={b.color} name={b.name} state="happy" size={36} /> : <Users size={18} className="text-ink-secondary" />}
+        {b ? <MausAvatar color={b.color} name={b.name} size={36} /> : <Users size={18} className="text-ink-secondary" />}
       </div>
     );
   }
@@ -148,7 +147,7 @@ function StackedMauses({ members }: { members: Bot[] }) {
     <div className="flex size-9 shrink-0 items-center justify-center">
       <div className="flex items-center -space-x-2">
         {shown.map((b) => (
-          <MausAvatar key={b.id} color={b.color} name={b.name} state="happy" size={20} />
+          <MausAvatar key={b.id} color={b.color} name={b.name} size={20} />
         ))}
         {extra > 0 && (
           <span className="z-10 flex size-[15px] items-center justify-center rounded-full border border-hairline bg-raised font-mono text-[9px] font-medium tracking-tight text-ink-secondary">
@@ -557,7 +556,7 @@ function ExportTeamPanel({
                 onClick={() => toggle(bot.id)}
                 className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-raised/70 disabled:opacity-40"
               >
-                <MausAvatar color={bot.color} name={bot.name} state="happy" size={28} />
+                <MausAvatar color={bot.color} name={bot.name} size={28} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[14px] text-ink">{bot.name}</span>
                   {bot.title && <span className="block truncate text-[11.5px] text-ink-secondary">{bot.title}</span>}
@@ -659,7 +658,7 @@ function NewRoomPanel({ onClose }: { onClose: () => void }) {
               onClick={() => toggle(b.id)}
               className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-raised/50"
             >
-              <MausAvatar color={b.color} name={b.name} state="happy" size={28} />
+              <MausAvatar color={b.color} name={b.name} size={28} />
               <span className="min-w-0 flex-1 truncate text-[14px] text-ink">{b.name}</span>
               <span
                 className={cn(
@@ -797,7 +796,6 @@ function BotContextMenu({ menu, onClose }: { menu: MenuState; onClose: () => voi
 function BotListItem({ bot, onMenu }: { bot: Bot; onMenu: (menu: MenuState) => void }) {
   const { state, dispatch } = useStore();
   const selected = state.activeView === "chat" && state.selectedId === bot.id;
-  const mascotMotion = selected && state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
   // the visible branch, so a version switch changes the row with the chat.
   // Memoized on the bot record: a row re-renders on every store change (the
   // context is whole-state), and an unmemoized walk rebuilt its parent Map
@@ -824,14 +822,7 @@ function BotListItem({ bot, onMenu }: { bot: Bot; onMenu: (menu: MenuState) => v
             : "hover:bg-raised/60",
       )}
     >
-      <MausAvatar
-        color={bot.color}
-        name={bot.name}
-        state={stateForBot({ ...bot, messages: visible })}
-        size={36}
-        motion={mascotMotion?.kind ?? "none"}
-        motionKey={mascotMotion?.nonce ?? 0}
-      />
+      <MausAvatar color={bot.color} name={bot.name} size={36} />
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2">
           <span className="flex min-w-0 items-center gap-1.5 truncate text-[15px] font-semibold text-ink">

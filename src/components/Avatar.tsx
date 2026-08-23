@@ -1,18 +1,7 @@
 // Bot avatar — a compact coloured teammate face. Two asymmetric eye marks keep
 // even 20px avatars recognizable without importing another product's logo.
-import { forwardRef, memo, useImperativeHandle } from "react";
-import { MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
-
-/**
- * Legacy face-placement knobs from the Maus body era. Kept so the preview
- * harness's sliders keep compiling — the matching props are accepted and
- * ignored by the monogram tile.
- */
-export const FACE_X = 80;
-export const FACE_Y = 102;
-export const FACE_SCALE = 0.47;
-export const EYE_SCALE = 1.12;
-export const MOUTH_WEIGHT = 11;
+import { memo } from "react";
+import { MAUS_COLORS, type MausColor } from "@/lib/mascot";
 
 /** Tile metrics, proportional to the box so 16px and 220px both read right. */
 const GLYPH_RATIO = 0.38;
@@ -30,49 +19,17 @@ export function monogramFor(name: string | null | undefined): string {
   return (words[0][0] + words[1][0]).toUpperCase();
 }
 
-/** Imperative handle from the mascot era — accepted, no-op. */
-export type MausAvatarHandle = {
-  blink: () => void;
-  spin: (durationMs?: number) => void;
-  setExpression: (index: number) => void;
-};
-
 export type MausAvatarProps = {
   color: MausColor;
   /** Bot or group name the monogram is derived from; falls back to `label`. */
   name?: string;
   size?: number;
+  /** Accessible title/label when the avatar stands for something other
+   * than `name` (a run status, a webhook target). */
   label?: string;
-  /** Mascot-era knobs — accepted, ignored. */
-  state?: MausState;
-  expression?: number;
-  motion?: MausMotion;
-  motionKey?: number;
-  turn?: number;
-  gaze?: { x?: number; y?: number };
-  spring?: number;
-  eyeScale?: number;
-  showMouth?: boolean;
-  mouthStroke?: number;
-  forward?: boolean;
-  trackPointer?: boolean;
-  animated?: boolean;
-  eyeSpacing?: number;
-  faceX?: number;
-  faceY?: number;
-  faceScale?: number;
 };
 
-function MausAvatarComponent(
-  { color, name, size = 44, label }: MausAvatarProps,
-  ref: React.Ref<MausAvatarHandle>,
-) {
-  useImperativeHandle(ref, () => ({
-    blink: () => {},
-    spin: () => {},
-    setExpression: () => {},
-  }));
-
+function MausAvatarComponent({ color, name, size = 44, label }: MausAvatarProps) {
   const accent = MAUS_COLORS[color] ?? MAUS_COLORS.green;
   const title = label ?? name ?? undefined;
 
@@ -113,7 +70,7 @@ function MausAvatarComponent(
   );
 }
 
-export const MausAvatar = memo(forwardRef(MausAvatarComponent));
+export const MausAvatar = memo(MausAvatarComponent);
 
 export function InitialsAvatar({
   initials,

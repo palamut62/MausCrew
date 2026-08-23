@@ -9,7 +9,6 @@ import { PhoneSlash, Spinner, X } from "@phosphor-icons/react";
 import { currentCall, deferCallCleanup, endCall, useOnCall } from "@/lib/call";
 import { routeSpokenGroupMessage } from "@/lib/group-call";
 import { track } from "@/lib/analytics";
-import { normalizeState } from "@/lib/mascot";
 import { speaker } from "@/lib/tts";
 import { useSpeech } from "@/lib/tts/useSpeech";
 import { usePushToTalk, PUSH_TO_TALK_LABEL } from "@/lib/push-to-talk";
@@ -410,14 +409,6 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
         <div className="flex min-w-max items-end justify-center gap-3">
           {members.map((member) => {
             const focused = member.id === focusId;
-            const state =
-              speakingMember?.id === member.id
-                ? "sending"
-                : workingMember?.id === member.id
-                  ? "working"
-                  : phase === "listening"
-                    ? "listening"
-                    : normalizeState(member.mascotExpression) ?? "happy";
             return (
               <div
                 key={member.id}
@@ -426,15 +417,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
                   focused ? "scale-105 border border-hairline bg-raised/70" : "opacity-75",
                 )}
               >
-                <MausAvatar
-                  color={member.color}
-                  name={member.name}
-                  state={state}
-                  size={94}
-                  animated
-                  motion={workingMember?.id === member.id ? "working" : "none"}
-                  motionKey={workingMember?.id === member.id ? 1 : 0}
-                />
+                <MausAvatar color={member.color} name={member.name} size={94} />
                 <span className={cn("text-[13px] font-medium", focused ? "text-ink" : "text-ink-secondary")}>
                   {member.name}
                 </span>
