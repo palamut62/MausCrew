@@ -303,10 +303,29 @@ function broadcast(payload) {
             continue;
         try {
             client.res.write(frame);
+            // Backpressure: a client that stopped draining (suspended laptop, dead
+            // phone radio) would otherwise buffer every frame in memory forever.
+            // Past the ceiling it cannot catch up anyway — cut it loose; its
+            // EventSource reconnects and resumes from its own cursor.
+            if (client.res.writableLength > MAX_CLIENT_BUFFER_BYTES)
+                dropClient(client);
         }
         catch {
-            sseClients.delete(client);
+            dropClient(client);
         }
+    }
+}
+/** Queued-bytes ceiling per SSE client before it is dropped instead of
+ * buffered. Generous on purpose: a couple of large screen frames may sit in
+ * flight behind a momentarily slow link without meaning the client is gone. */
+const MAX_CLIENT_BUFFER_BYTES = 4 * 1024 * 1024;
+function dropClient(client) {
+    sseClients.delete(client);
+    try {
+        client.res.destroy();
+    }
+    catch {
+        /* already gone */
     }
 }
 // ── server-side event folding (upstream's ingestion worker, miniature) ──
@@ -2102,11 +2121,19 @@ const server = createServer(async (req, res) => {
                     res.write(": keepalive\n\n");
                 }
                 catch { }
+                // Same backpressure sweep as broadcast(): a stalled client must not
+                // survive just because no frames are flowing to give it the shove.
+                if (res.writableLength > MAX_CLIENT_BUFFER_BYTES)
+                    dropClient(client);
             }, 25_000);
-            req.on("close", () => {
+            const gone = () => {
                 clearInterval(keepalive);
                 sseClients.delete(client);
-            });
+            };
+            req.on("close", gone);
+            // A socket that dies mid-frame emits 'error' on the response; without
+            // this listener that is an unhandled error event, not a cleanup.
+            res.on("error", gone);
             return;
         }
         // ── bots ──
@@ -2905,7 +2932,12 @@ const server = createServer(async (req, res) => {
         // child proves it is OURS by echoing its pid (a stray dev server has
         // the same API shape but a different pid)
         if (method === "GET" && path === "/api/health") {
-            return json(res, 200, { app: "mauscrew", pid: process.pid, static: Boolean(STATIC_DIR) });
+            return json(res, 200, {
+                app: "mauscrew",
+                pid: process.pid,
+                static: Boolean(STATIC_DIR),
+                owner: { name: "Umut Palamut", x: "https://x.com/palamut62", github: "https://github.com/palamut62" },
+            });
         }
         // ── provider instances (model picker) ──
         if (method === "GET" && path === "/api/instances") {
