@@ -186,7 +186,7 @@ function GroupListItem({ group, onMenu }: { group: Group; onMenu: (menu: { group
         </div>
         <div className="flex items-center justify-between gap-2">
           <span className="truncate text-[13px] text-ink-secondary">{groupPreview(group, state.bots)}</span>
-          {group.unread && <span className="size-2 shrink-0 rounded-full bg-accent" />}
+          {group.unread && <span className="size-2 shrink-0 rounded-full bg-accent" role="img" aria-label="Unread messages" />}
         </div>
       </div>
     </button>
@@ -616,6 +616,7 @@ function NewRoomPanel({ onClose }: { onClose: () => void }) {
   const { state, dispatch } = useStore();
   const [name, setName] = useState("");
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  const cardRef = useRef<HTMLDivElement>(null);
   const bots = state.bots.filter((b) => !b.hidden);
   const toggle = (id: string) =>
     setPicked((prev) => {
@@ -624,6 +625,36 @@ function NewRoomPanel({ onClose }: { onClose: () => void }) {
       else next.add(id);
       return next;
     });
+  // Modal keyboard containment: Escape closes from anywhere in the dialog
+  // (capture phase, so handlers behind the overlay don't also fire), and Tab
+  // wraps inside the card instead of escaping to the sidebar beneath.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onClose();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const focusables = cardRef.current?.querySelectorAll<HTMLElement>(
+        'input, button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      );
+      if (!focusables?.length) return;
+      const list = [...focusables];
+      const first = list[0];
+      const last = list[list.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey && (active === first || !cardRef.current?.contains(active))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [onClose]);
   const create = () => {
     if (!picked.size) return;
     dispatch({ type: "createGroup", memberIds: [...picked], name: name.trim() || undefined });
@@ -635,7 +666,13 @@ function NewRoomPanel({ onClose }: { onClose: () => void }) {
       className="fixed inset-0 z-40 flex items-center justify-center bg-black/40"
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="w-[340px] rounded-xl border border-hairline bg-card p-4">
+      <div
+        ref={cardRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="New Room"
+        className="w-[340px] rounded-xl border border-hairline bg-card p-4"
+      >
         <div className="mb-3 text-[15px] font-semibold text-ink">New Room</div>
         <input
           autoFocus
@@ -643,7 +680,6 @@ function NewRoomPanel({ onClose }: { onClose: () => void }) {
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") create();
-            if (e.key === "Escape") onClose();
           }}
           placeholder="Room name (optional)"
           className="mb-3 w-full rounded-lg bg-raised/70 px-3 py-2 text-[14px] text-ink placeholder:text-ink-secondary focus:outline-none"
@@ -848,7 +884,7 @@ function BotListItem({ bot, onMenu }: { bot: Bot; onMenu: (menu: MenuState) => v
             <span className="truncate">{previewText}</span>
           </span>
           {bot.unread && (
-            <span className="size-2 shrink-0 rounded-full bg-accent" />
+            <span className="size-2 shrink-0 rounded-full bg-accent" role="img" aria-label="Unread messages" />
           )}
         </div>
       </div>

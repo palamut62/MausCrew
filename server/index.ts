@@ -377,9 +377,28 @@ function broadcast(payload: Record<string, unknown>) {
     if (!wants(client, kind)) continue;
     try {
       client.res.write(frame);
+      // Backpressure: a client that stopped draining (suspended laptop, dead
+      // phone radio) would otherwise buffer every frame in memory forever.
+      // Past the ceiling it cannot catch up anyway — cut it loose; its
+      // EventSource reconnects and resumes from its own cursor.
+      if (client.res.writableLength > MAX_CLIENT_BUFFER_BYTES) dropClient(client);
     } catch {
-      sseClients.delete(client);
+      dropClient(client);
     }
+  }
+}
+
+/** Queued-bytes ceiling per SSE client before it is dropped instead of
+ * buffered. Generous on purpose: a couple of large screen frames may sit in
+ * flight behind a momentarily slow link without meaning the client is gone. */
+const MAX_CLIENT_BUFFER_BYTES = 4 * 1024 * 1024;
+
+function dropClient(client: SseClient) {
+  sseClients.delete(client);
+  try {
+    client.res.destroy();
+  } catch {
+    /* already gone */
   }
 }
 
@@ -2210,11 +2229,18 @@ const server = createServer(async (req, res) => {
         try {
           res.write(": keepalive\n\n");
         } catch {}
+        // Same backpressure sweep as broadcast(): a stalled client must not
+        // survive just because no frames are flowing to give it the shove.
+        if (res.writableLength > MAX_CLIENT_BUFFER_BYTES) dropClient(client);
       }, 25_000);
-      req.on("close", () => {
+      const gone = () => {
         clearInterval(keepalive);
         sseClients.delete(client);
-      });
+      };
+      req.on("close", gone);
+      // A socket that dies mid-frame emits 'error' on the response; without
+      // this listener that is an unhandled error event, not a cleanup.
+      res.on("error", gone);
       return;
     }
 
