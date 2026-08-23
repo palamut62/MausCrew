@@ -19,7 +19,10 @@ const PRESETS: { id: string; label: string; baseUrl: string; models: string }[] 
   {
     id: "openrouter",
     label: "OpenRouter",
-    baseUrl: "https://openrouter.ai/api/v1",
+    // Not /api/v1: the CLI appends `/v1/messages` to whatever this names, so
+    // pasting OpenRouter's OpenAI base here asks for /api/v1/v1/messages and
+    // every turn 404s.
+    baseUrl: "https://openrouter.ai/api",
     models: "anthropic/claude-sonnet-5, deepseek/deepseek-v4-pro",
   },
   { id: "kimi", label: "Kimi", baseUrl: "https://api.moonshot.ai/anthropic", models: "kimi-k2-turbo" },
@@ -34,6 +37,51 @@ interface GatewayDraft {
   /** null = leave the stored token alone; "" = clear it. */
   token: string | null;
   configured: boolean;
+}
+
+/** Endpoints that serve many vendors and therefore namespace their model ids
+ * (`deepseek/deepseek-v4-pro`). A vendor's own endpoint serves bare ones. The
+ * two conventions look interchangeable and are not: the wrong one is accepted
+ * by this form, saved, and then rejected by every single turn. */
+const AGGREGATORS = /(^|\.)(openrouter\.ai|llmgateway\.io|together\.xyz)$/i;
+
+const hostOf = (url: string): string => {
+  try {
+    return new URL(url.trim()).hostname;
+  } catch {
+    return "";
+  }
+};
+
+/** What is wrong with this row's model ids, in one sentence, or null. Advice
+ * rather than a block: an unknown proxy may well accept either convention, and
+ * only the operator knows. */
+function modelIdWarning(baseUrl: string, models: string): string | null {
+  const host = hostOf(baseUrl);
+  if (!host) return null;
+  const ids = models
+    .split(",")
+    .map((m) => m.trim())
+    .filter(Boolean);
+  if (!ids.length) return null;
+  if (AGGREGATORS.test(host)) {
+    const bare = ids.filter((id) => !id.includes("/"));
+    return bare.length ? `${host} namespaces model ids by vendor — ${bare.join(", ")} needs a "vendor/" prefix.` : null;
+  }
+  // A vendor endpoint answers a namespaced id with "the supported API model
+  // names are deepseek-v4-pro, deepseek-v4-flash, …".
+  const namespaced = ids.filter((id) => id.includes("/"));
+  if (!namespaced.length) return null;
+  const bare = namespaced[0].split("/").slice(1).join("/");
+  return `${host} serves bare model ids. ${namespaced.join(", ")} is OpenRouter naming — drop the prefix ("${bare}").`;
+}
+
+/** The CLI appends `/v1/messages` itself, so a base URL that already ends in a
+ * version segment produces `/v1/v1/messages` and 404s on every turn. */
+function baseUrlWarning(baseUrl: string): string | null {
+  const url = baseUrl.trim();
+  if (!url || !hostOf(url) || !/\/v\d+\/?$/.test(url)) return null;
+  return `The Claude CLI adds /v1/messages itself — a base URL ending in /v1 becomes /v1/v1/messages. Try ${url.replace(/\/v\d+\/?$/, "")}.`;
 }
 
 const trimmedUrl = (url: string) => url.trim();
@@ -197,6 +245,21 @@ export function ClaudeGateways() {
               <span>Without model ids the picker offers Claude models, which this gateway will reject.</span>
             </div>
           )}
+          {/* Both of these are settings that look right and fail on every turn
+              — a path that 404s, an id the endpoint has never heard of. Said
+              here, beside the field, rather than as a provider error in a chat
+              thread an hour later. */}
+          {[baseUrlWarning(row.baseUrl), modelIdWarning(row.baseUrl, row.models)]
+            .filter((text): text is string => Boolean(text))
+            .map((text) => (
+              <div
+                key={text}
+                className="mt-2 flex gap-1.5 rounded-lg border border-warning/25 bg-warning/10 px-2 py-1.5 text-[11px] leading-[1.4] text-warning"
+              >
+                <Warning size={13} weight="bold" className="mt-px shrink-0" aria-hidden="true" />
+                <span>{text}</span>
+              </div>
+            ))}
         </div>
       ))}
 

@@ -42,7 +42,23 @@ import { DeepSeekBridgeError } from "./errors.ts";
  * program listening on the same pipe, so we refuse it rather than drive it. */
 export const RUNTIME_SERVER_NAME = "deepseek-harness-sdk-runtime";
 
-export const INITIALIZE_TIMEOUT_MS = 20_000;
+/** The handshake budget.
+ *
+ * 20s was a stopwatch reading from a warm Linux host, and it is the wrong
+ * number everywhere else: a first launch under WSL2 pays for the distribution
+ * waking up, a cold single-file runtime pays for its own extraction, and a
+ * Windows machine mid-scan pays for the antivirus reading every byte of it.
+ * All three answer eventually, and all three used to present as "the runtime
+ * did not respond in time" — which reads as a broken install and is not one.
+ * The ceiling still exists, because a runtime that accepts stdin and never
+ * answers must not hang the first turn forever; it is simply no longer tighter
+ * than a legitimate cold start. Overridable for an unusually slow machine. */
+export const INITIALIZE_TIMEOUT_MS = envTimeoutMs("MAUSCREW_DEEPSEEK_INIT_TIMEOUT_MS", 90_000);
+
+function envTimeoutMs(name: string, fallback: number): number {
+  const raw = Number(process.env[name]);
+  return Number.isFinite(raw) && raw >= 1_000 ? Math.floor(raw) : fallback;
+}
 const PROMPT_TIMEOUT_MS = 30_000;
 const MAX_RESTARTS = 3;
 const RESTART_BACKOFF_MS = [1_000, 4_000, 16_000];
@@ -188,6 +204,22 @@ export class NativeDeepSeekBridge {
   }
 
   private startupError(error: unknown): DeepSeekBridgeError {
+    // A handshake timeout is the one failure that arrives with no reason at
+    // all, because nothing crashed — the process is sitting right there.
+    // Whatever it printed before going quiet is the only evidence, and it is
+    // usually the whole answer: a distribution that is not running, a refused
+    // mount, a runtime waiting on input. Carry it, and say what to check when
+    // there is nothing to carry.
+    if (error instanceof DeepSeekBridgeError && error.kind === "timeout") {
+      const tail = this.stderrTail.trim().slice(-300);
+      return new DeepSeekBridgeError(
+        "timeout",
+        tail
+          ? `${error.message}. It printed: ${tail}`
+          : `${error.message} and printed nothing. Check the runtime in App Settings → DeepSeek Harness — on Windows it starts inside WSL, so a distribution that is not running answers nothing. Raise MAUSCREW_DEEPSEEK_INIT_TIMEOUT_MS if this machine is simply slow to start it.`,
+        { cause: error },
+      );
+    }
     if (error instanceof DeepSeekBridgeError) return error;
     const tail = this.stderrTail.trim().slice(-300);
     const message = error instanceof Error ? error.message : String(error);

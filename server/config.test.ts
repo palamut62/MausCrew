@@ -83,7 +83,7 @@ describe("Claude gateways", () => {
     const instances = instanceConfigs({
       claudeGateways: [
         { id: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com/anthropic", authToken: "sk", models: ["deepseek-v4-pro"] },
-        { id: "openrouter", baseUrl: "https://openrouter.ai/api/v1" },
+        { id: "openrouter", baseUrl: "https://openrouter.ai/api" },
       ],
     });
 
