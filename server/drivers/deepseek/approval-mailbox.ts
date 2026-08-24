@@ -59,9 +59,11 @@ export interface ApprovalRequest {
   /** When the plugin wrote the request, as epoch ms. Used only to discard
    * requests older than the deadline. */
   createdAt: number;
+  kind: "permission" | "question";
+  choices?: string[];
 }
 
-export type ApprovalDecision = "allow" | "deny";
+export type ApprovalDecision = "allow" | "deny" | "answer";
 
 export interface ApprovalMailboxOptions {
   /** The instance's session root. The mailbox is a directory inside it. */
@@ -225,6 +227,10 @@ export class ApprovalMailbox {
       tool,
       summary: typeof o.summary === "string" ? o.summary.slice(0, 8_192) : "",
       createdAt: typeof o.createdAt === "number" && Number.isFinite(o.createdAt) ? o.createdAt : 0,
+      kind: o.kind === "question" ? "question" : "permission",
+      ...(Array.isArray(o.choices)
+        ? { choices: o.choices.filter((choice): choice is string => typeof choice === "string" && Boolean(choice)).slice(0, 12) }
+        : {}),
     };
   }
 }

@@ -198,6 +198,10 @@ export class ApprovalMailbox {
             tool,
             summary: typeof o.summary === "string" ? o.summary.slice(0, 8_192) : "",
             createdAt: typeof o.createdAt === "number" && Number.isFinite(o.createdAt) ? o.createdAt : 0,
+            kind: o.kind === "question" ? "question" : "permission",
+            ...(Array.isArray(o.choices)
+                ? { choices: o.choices.filter((choice) => typeof choice === "string" && Boolean(choice)).slice(0, 12) }
+                : {}),
         };
     }
 }

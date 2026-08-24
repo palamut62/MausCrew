@@ -13,6 +13,7 @@
 // stdout is the MCP channel — never console.log here.
 import { connect } from "node:net";
 import { randomUUID } from "node:crypto";
+import { permissionQuestion } from "./permission-question.js";
 const socketPath = process.argv[2] ?? "";
 const waiting = new Map();
 const conn = connect(socketPath);
@@ -94,7 +95,7 @@ async function handle(msg) {
         const name = msg.params?.name;
         const args = msg.params?.arguments ?? {};
         const askId = randomUUID();
-        const isQuestion = name === "ask_user";
+        const question = permissionQuestion(name, args);
         // the CLI may include its own suggested permission rules; on allow we
         // hand them straight back as updatedPermissions so claude stops asking
         // at its own layer — no invented rule syntax (agentcal)
@@ -107,8 +108,8 @@ async function handle(msg) {
             waiting.set(askId, resolve);
             if (conn.destroyed)
                 return dead();
-            const ask = isQuestion
-                ? { t: "ask", id: askId, kind: "question", tool: "ask_user", input: { question: args.question, choices: args.choices } }
+            const ask = question
+                ? { t: "ask", id: askId, kind: "question", tool: "ask_user", input: { question: question.question, choices: question.choices } }
                 : { t: "ask", id: askId, tool: args.tool_name, input: args.input };
             try {
                 conn.write(JSON.stringify(ask) + "\n");
@@ -117,8 +118,10 @@ async function handle(msg) {
                 dead();
             }
         });
-        const text = isQuestion
-            ? answer.message || "No answer was given — use your best judgment."
+        const text = question
+            ? question.intercepted
+                ? JSON.stringify({ behavior: "deny", message: `The user answered: ${answer.message || "No answer"}` })
+                : answer.message || "No answer was given — use your best judgment."
             : JSON.stringify(answer.behavior === "allow"
                 ? {
                     behavior: "allow",

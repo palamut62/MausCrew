@@ -29,6 +29,7 @@ import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 
 export const name = 'mauscrew-approval'
+export const inject = ['userQuestions']
 
 /** Must match MAILBOX_VERSION in approval-mailbox.ts. */
 const MAILBOX_VERSION = 1
@@ -257,6 +258,26 @@ export function apply(ctx, config = {}) {
   const ready = Boolean(root) && ensureDir(root)
   const dynamicDefinitions = new Map()
 
+  // The stock runtime exposes ask_user_question but has no UI provider in a
+  // desktop embedding. Route each question through the same private mailbox
+  // as approvals so MausCrew can render choices and return the selected label.
+  ctx.userQuestions.registerProvider({
+    async ask(request) {
+      const answers = []
+      for (const question of request.questions) {
+        const answer = askQuestion(root, {
+          sessionId: String(request.agent?.id || ''),
+          question,
+          signal: request.signal,
+          timeoutMs,
+        })
+        if (!answer) throw new Error('ask_user_question was cancelled before the user answered')
+        answers.push(answer)
+      }
+      return { answers }
+    },
+  })
+
   // Observe the immutable final result so failed or later-vetoed definitions
   // never become approval evidence for a future cordis_run call.
   ctx.on('tools/result', (exec, result) => {
@@ -351,6 +372,58 @@ function ask(root, request) {
   }
 }
 
+/** Ask one selectable question and translate the desktop answer back to the
+ * structured value expected by ctx.userQuestions. */
+function askQuestion(root, request) {
+  if (!root || !ensureDir(root)) return null
+  const id = randomUUID()
+  const requestPath = join(root, `${id}.req.json`)
+  const responsePath = join(root, `${id}.res.json`)
+  const question = request.question
+
+  try {
+    writeAtomic(
+      requestPath,
+      JSON.stringify({
+        v: MAILBOX_VERSION,
+        id,
+        kind: 'question',
+        sessionId: request.sessionId,
+        tool: 'ask_user_question',
+        summary: String(question.question || ''),
+        choices: Array.isArray(question.options)
+          ? question.options.map(option => String(option.label || '')).filter(Boolean)
+          : [],
+        createdAt: Date.now(),
+      }),
+    )
+  } catch {
+    return null
+  }
+
+  const deadline = Date.now() + request.timeoutMs
+  try {
+    for (;;) {
+      if (request.signal?.aborted) return null
+      const response = readQuestionAnswer(responsePath, id)
+      if (response) {
+        if (response.decision !== 'answer') return null
+        const offered = Array.isArray(question.options)
+          ? question.options.map(option => String(option.label || '')).filter(Boolean)
+          : []
+        return offered.includes(response.message)
+          ? { id: String(question.id || ''), selected: [response.message] }
+          : { id: String(question.id || ''), selected: [], custom: response.message }
+      }
+      if (Date.now() >= deadline) return null
+      sleep(POLL_INTERVAL_MS)
+    }
+  } finally {
+    remove(requestPath)
+    remove(responsePath)
+  }
+}
+
 function readAnswer(path, id) {
   let parsed
   try {
@@ -361,5 +434,18 @@ function readAnswer(path, id) {
   if (!parsed || typeof parsed !== 'object') return null
   if (parsed.v !== MAILBOX_VERSION || parsed.id !== id) return null
   if (parsed.decision !== 'allow' && parsed.decision !== 'deny') return null
+  return { decision: parsed.decision, message: typeof parsed.message === 'string' ? parsed.message : '' }
+}
+
+function readQuestionAnswer(path, id) {
+  let parsed
+  try {
+    parsed = JSON.parse(readFileSync(path, 'utf8'))
+  } catch {
+    return null
+  }
+  if (!parsed || typeof parsed !== 'object') return null
+  if (parsed.v !== MAILBOX_VERSION || parsed.id !== id) return null
+  if (!['answer', 'deny'].includes(parsed.decision)) return null
   return { decision: parsed.decision, message: typeof parsed.message === 'string' ? parsed.message : '' }
 }
