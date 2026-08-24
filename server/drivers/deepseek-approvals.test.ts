@@ -87,9 +87,9 @@ describe("DeepSeekHarnessDriver approvals", () => {
   };
 
   /** Play the plugin: start a turn, ask, wait for the card. */
-  const askFor = async (threadId: string, id: string, tool = "bash") => {
+  const askFor = async (threadId: string, id: string, tool = "bash", extra: Record<string, unknown> = {}) => {
     await instance.adapter.sendTurn({ threadId, text: "do it", cwd: scratch });
-    writeRequest(threadId, id, tool);
+    writeRequest(threadId, id, tool, extra);
     return recorder.until((e) => e.type === "request.opened");
   };
 
@@ -138,6 +138,26 @@ describe("DeepSeekHarnessDriver approvals", () => {
     // `answer` is the shape a question takes, and this broker asks none.
     await instance.adapter.respondToRequest("t-answer", "id-answer-01", { behavior: "answer", message: "sure" });
     expect(answer("id-answer-01")).toMatchObject({ decision: "deny" });
+  });
+
+  it("shows ask_user_question choices and returns the selected answer", async () => {
+    await start();
+    const opened = await askFor("t-question", "id-question-01", "ask_user_question", {
+      kind: "question",
+      summary: "Should I continue?",
+      choices: ["Yes", "No"],
+    });
+    expect(opened).toMatchObject({
+      requestType: "question",
+      summary: "Should I continue?",
+      choices: ["Yes", "No"],
+    });
+
+    await instance.adapter.respondToRequest("t-question", "id-question-01", {
+      behavior: "answer",
+      message: "Yes",
+    });
+    expect(answer("id-question-01")).toMatchObject({ decision: "answer", message: "Yes" });
   });
 
   it("refuses an approval that comes from a different conversation", async () => {

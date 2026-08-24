@@ -117,8 +117,8 @@ export async function createDeepSeekInstance(input, options = {}) {
             // card still open on this thread resolves to no (spec §43, P3-07) —
             // leaving it open would mean a click minutes from now authorizing a
             // tool call that already gave up waiting.
-            for (const [id, threadId] of [...approvalThread]) {
-                if (threadId !== turn.threadId)
+            for (const [id, pending] of [...approvalThread]) {
+                if (pending.threadId !== turn.threadId)
                     continue;
                 approvalThread.delete(id);
                 mailbox.respond(id, "deny", "the turn ended before this was answered");
@@ -146,17 +146,17 @@ export async function createDeepSeekInstance(input, options = {}) {
                     mailbox.respond(request.id, "deny", "this request arrived for a conversation that is no longer waiting");
                     return;
                 }
-                approvalThread.set(request.id, turn.threadId);
+                approvalThread.set(request.id, { threadId: turn.threadId, kind: request.kind });
                 emit({
                     ...baseEvent(turn),
                     requestId: request.id,
                     type: "request.opened",
-                    requestType: "permission",
+                    requestType: request.kind,
                     tool: request.tool,
-                    // No `choices`: a permission card's buttons are the app's own
-                    // Allow/Deny, and supplying labels here would only make this
-                    // provider's cards look different from every other one's.
+                    // Permission buttons are supplied by the app; questions carry the
+                    // labels the model gave ask_user_question.
                     summary: request.summary,
+                    ...(request.kind === "question" && request.choices?.length ? { choices: request.choices } : {}),
                 });
             },
         });
@@ -446,13 +446,15 @@ export async function createDeepSeekInstance(input, options = {}) {
                 // The id has to belong to this thread. A permission granted from the
                 // wrong conversation is a permission granted by someone who was not
                 // shown what they were granting (spec §87, P3-10).
-                if (approvalThread.get(requestId) !== threadId)
+                const pending = approvalThread.get(requestId);
+                if (pending?.threadId !== threadId)
                     return;
                 approvalThread.delete(requestId);
-                // "answer" is a free-text reply to a question, and this broker only
-                // ever asks yes-or-no ones. Treating it as consent would be reading
-                // approval into an input that never expressed it.
-                const behavior = decision.behavior === "allow" ? "allow" : "deny";
+                // A typed answer is valid only for a question. Conversely, approval
+                // buttons cannot manufacture a selected option for a question.
+                const behavior = pending.kind === "question"
+                    ? decision.behavior === "answer" ? "answer" : "deny"
+                    : decision.behavior === "allow" ? "allow" : "deny";
                 mailbox.respond(requestId, behavior, decision.message);
                 const turn = byThread.get(threadId);
                 if (turn) {
