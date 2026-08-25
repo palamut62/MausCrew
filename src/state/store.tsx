@@ -14,14 +14,14 @@ import {
   type ReactNode,
 } from "react";
 import type { EffortLevel, SubagentActivity } from "../../server/contracts.ts";
-import type { MausColor } from "@/lib/mascot";
+import type { MausColor } from "@/lib/colors";
 import type { Routine, RoutineInput, RoutineRun } from "@/lib/routines";
 import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "@/lib/webhooks";
 import { currentCall } from "@/lib/call";
 import { showNotification } from "@/lib/notify";
 import { speaker } from "@/lib/tts";
 
-export type { MausColor } from "@/lib/mascot";
+export type { MausColor } from "@/lib/colors";
 
 export interface OptionCardData {
   title: string;
@@ -119,7 +119,6 @@ export interface Bot {
   description: string;
   notifications: boolean;
   color: MausColor;
-  mascotExpression?: string | null;
   unread: boolean;
   busy?: boolean;
   modelSelection: ModelSelection;
@@ -230,6 +229,10 @@ export interface ConfigStatus {
   tts?: { configured: boolean; ready: boolean; voice: string };
   /** who's using the app — collected in onboarding, shown in the sidebar */
   profile?: { name: string; email: string };
+  /** Product usage analytics. `enabled` gates whether PostHog is loaded at
+   * all; `locked` means MAUSCREW_DISABLE_ANALYTICS refused it machine-wide and
+   * the toggle is not the user's to flip. */
+  analytics?: { enabled: boolean; locked: boolean };
 }
 
 /** How an engine gets installed — declared by its driver, mirrors
@@ -380,7 +383,6 @@ type Action =
           | "notifications"
           | "computer"
           | "color"
-          | "mascotExpression"
           | "autoApprove"
           | "speakReplies"
           | "voice"

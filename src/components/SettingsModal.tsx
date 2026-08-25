@@ -64,6 +64,63 @@ function ProfileFields() {
   );
 }
 
+/** The one place MausCrew sends anything about you off this machine, so it
+ * gets a switch and a plain sentence rather than a buried default. */
+function AnalyticsRow() {
+  const { state, dispatch } = useStore();
+  const analytics = state.config?.analytics;
+  const enabled = analytics?.enabled ?? false;
+  const locked = analytics?.locked ?? false;
+
+  const toggle = () => {
+    if (locked) return;
+    void fetch("/api/config", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ analytics: { enabled: !enabled } }),
+    })
+      .then((r) => r.json())
+      .then((config) => dispatch({ type: "configStatus", config }))
+      .catch(() => {});
+  };
+
+  return (
+    <Card
+      title="Usage analytics"
+      subtitle="A short list of product events (app opened, message sent, bot created) and the email you gave at first run. Never message text, never transcripts, never keys. Turning this off stops the analytics library from loading at all."
+    >
+      <div className="flex items-center gap-3">
+        <div className="min-w-0 flex-1 text-[13px] text-ink-secondary">
+          {locked
+            ? "Disabled for this machine by MAUSCREW_DISABLE_ANALYTICS."
+            : enabled
+              ? "Sending anonymous product events."
+              : "Nothing leaves this machine."}
+        </div>
+        <button
+          role="switch"
+          aria-checked={enabled}
+          aria-label="Usage analytics"
+          disabled={locked}
+          onClick={toggle}
+          title={locked ? "MAUSCREW_DISABLE_ANALYTICS is set" : undefined}
+          className={cn(
+            "relative h-[26px] w-[44px] shrink-0 rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+            enabled ? "bg-accent" : "bg-raised",
+          )}
+        >
+          <span
+            className={cn(
+              "absolute top-[3px] size-5 rounded-sm bg-white transition-all",
+              enabled ? "left-[21px]" : "left-[3px]",
+            )}
+          />
+        </button>
+      </div>
+    </Card>
+  );
+}
+
 function UpdatesRow() {
   const s = useUpdaterState();
   if (!window.mauscrew?.updater) return null;
@@ -215,6 +272,7 @@ export function SettingsModal() {
                 <Card title="Profile" subtitle="Shown in the sidebar. Saved as you go.">
                   <ProfileFields />
                 </Card>
+                <AnalyticsRow />
                 <UpdatesRow />
               </>
             )}

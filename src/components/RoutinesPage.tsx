@@ -4,7 +4,7 @@ import { ArrowSquareOut, CalendarDot, CalendarDots, CaretLeft, CaretRight, Check
 import { MausAvatar } from "@/components/Avatar";
 import { WebhooksPanel } from "@/components/WebhooksPanel";
 import { cn } from "@/lib/cn";
-import { MAUS_COLORS } from "@/lib/mascot";
+import { MAUS_COLORS } from "@/lib/colors";
 import type { Routine, RoutineInput, RoutineRun, RoutineRunOn, RoutineRunStatus } from "@/lib/routines";
 import { api, useStore, type Bot } from "@/state/store";
 
@@ -445,7 +445,7 @@ export function RoutineEditor({
               ))}
             </div>
             {kind === "once" ? (
-              <input type="datetime-local" value={at} onChange={(event) => setAt(event.target.value)} className="block rounded-xl border border-hairline bg-inset px-3.5 py-2.5 text-[14px] text-ink outline-none focus:border-accent/70 [color-scheme:dark]" />
+              <input type="datetime-local" aria-label="Run at" value={at} onChange={(event) => setAt(event.target.value)} className="block rounded-xl border border-hairline bg-inset px-3.5 py-2.5 text-[14px] text-ink outline-none focus:border-accent/70 [color-scheme:dark]" />
             ) : kind === "interval" ? (
               <div className="flex flex-wrap gap-1.5">
                 {INTERVAL_CHOICES.map(({ minutes, label }) => (
@@ -464,7 +464,7 @@ export function RoutineEditor({
               </div>
             ) : (
               <div className="space-y-3">
-                <input type="time" value={time} onChange={(event) => setTime(event.target.value)} className="rounded-xl border border-hairline bg-inset px-3.5 py-2.5 text-[14px] text-ink outline-none focus:border-accent/70 [color-scheme:dark]" />
+                <input type="time" aria-label="Time of day" value={time} onChange={(event) => setTime(event.target.value)} className="rounded-xl border border-hairline bg-inset px-3.5 py-2.5 text-[14px] text-ink outline-none focus:border-accent/70 [color-scheme:dark]" />
                 <div className="flex flex-wrap gap-1.5">
                   {DAY_NAMES.map((label, day) => (
                     <button key={label} type="button" onClick={() => setWeekdays((current) => current.includes(day) ? (current.length === 1 ? current : current.filter((value) => value !== day)) : [...current, day].sort())} className={cn("size-10 rounded-xl border text-[11px] font-medium", weekdays.includes(day) ? "border-accent bg-accent text-app" : "border-hairline bg-inset text-ink-secondary hover:text-ink")}>{label.slice(0, 2)}</button>

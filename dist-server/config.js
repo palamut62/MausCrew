@@ -19,6 +19,21 @@ export function claudeGateways(cfg) {
     }
     return list;
 }
+/** Whether the renderer may load PostHog at all.
+ *
+ * Two ways to say no, and they are not equal. MAUSCREW_DISABLE_ANALYTICS is a
+ * hard refusal that config.json cannot re-enable — it is how a packaged build,
+ * a CI rig or an always-on host opts out for everyone. The stored flag is the
+ * user's own switch. Absent means enabled: this is an opt-OUT, and changing
+ * that default is a product decision, not a code one. */
+export function analyticsEnabled(cfg) {
+    return !analyticsLocked() && cfg.analytics?.enabled !== false;
+}
+/** The env refusal is in force, so the UI toggle has nothing to offer. */
+export function analyticsLocked() {
+    const off = process.env.MAUSCREW_DISABLE_ANALYTICS;
+    return off === "1" || off?.toLowerCase() === "true";
+}
 // MAUSCREW_DATA_DIR isolates test/soak rigs from the user's real fleet.
 // OMB_DATA_DIR remains a compatibility alias for existing scripts.
 export const DATA_DIR = process.env.MAUSCREW_DATA_DIR ?? process.env.OMB_DATA_DIR ?? join(homedir(), ".mauscrew");
@@ -84,6 +99,7 @@ export function saveConfig(patch) {
         "tts",
         "profile",
         "remoteAccess",
+        "analytics",
     ]) {
         if (patch[key] && typeof patch[key] === "object") {
             disk[key] = { ...disk[key], ...patch[key] };

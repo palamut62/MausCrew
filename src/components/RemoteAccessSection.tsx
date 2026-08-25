@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Check, Copy, DeviceMobile, LinkSimple, Trash } from "@phosphor-icons/react";
 import { QRCodeSVG } from "qrcode.react";
 import { Card, CommandLine } from "./SettingsPrimitives";
@@ -9,6 +9,7 @@ interface Status { enabled: boolean; publicUrl: string; localPort: number; devic
 export function RemoteAccessSection() {
   const [status, setStatus] = useState<Status>({ enabled: false, publicUrl: "", localPort: 8799, devices: [] });
   const [url, setUrl] = useState("");
+  const urlId = useId();
   const [pairing, setPairing] = useState<{ code: string; url: string; expiresAt: number } | null>(null);
   const [message, setMessage] = useState("");
   const [copied, setCopied] = useState(false);
@@ -42,8 +43,8 @@ export function RemoteAccessSection() {
     <div className="flex flex-col gap-4">
       <Card title="Secure mobile access" subtitle="Expose the loopback server with an HTTPS reverse proxy such as Tailscale Serve, then enter its exact address here. The agent server itself never opens a LAN port.">
         <div className="mb-4"><CommandLine command={`tailscale serve --bg localhost:${status.localPort}`} /></div>
-        <label className="text-[12px] text-ink-secondary">HTTPS address</label>
-        <input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://your-pc.tailnet.ts.net" className="mt-1.5 min-h-11 w-full rounded-lg border border-hairline bg-inset px-3 text-[14px] text-ink outline-none focus:border-accent" />
+        <label htmlFor={urlId} className="text-[12px] text-ink-secondary">HTTPS address</label>
+        <input id={urlId} value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://your-pc.tailnet.ts.net" className="mt-1.5 min-h-11 w-full rounded-lg border border-hairline bg-inset px-3 text-[14px] text-ink outline-none focus:border-accent" />
         <div className="mt-3 flex flex-wrap gap-2">
           <button onClick={() => void save(true)} className="min-h-11 rounded-lg bg-accent px-4 text-[13px] font-semibold text-app">Enable</button>
           {status.enabled && <button onClick={() => void save(false)} className="min-h-11 rounded-lg border border-hairline px-4 text-[13px] text-ink hover:bg-raised">Disable</button>}

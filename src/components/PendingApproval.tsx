@@ -58,7 +58,7 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
   index: number;
 }) {
   return (
-    <div className="rounded-t-2xl border-b border-hairline bg-raised/40 px-4 py-3">
+    <div role="status" aria-live="polite" aria-atomic="true" className="rounded-t-2xl border-b border-hairline bg-raised/40 px-4 py-3">
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-ink-secondary">Pending approval</span>
         {count > 1 && (
@@ -106,7 +106,7 @@ export function PendingApprovalActions({
 
   const base = "rounded-md px-3.5 py-1.5 text-[13.5px] transition-colors disabled:cursor-wait disabled:opacity-55";
   return (
-    <div className="flex flex-wrap items-center justify-end gap-2 px-2 py-2">
+    <div role="group" aria-label={`Decide ${pending.tool} approval`} className="flex flex-wrap items-center justify-end gap-2 px-2 py-2">
       <button disabled={Boolean(submitting)} onClick={onCancelTurn} className={cn(base, "text-ink-secondary hover:bg-raised hover:text-ink")}>
         Cancel turn
       </button>

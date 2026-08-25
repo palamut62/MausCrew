@@ -11,14 +11,26 @@ const TOKEN = "phc_m2hP39w8y2gLPvHgDvSXAu6xcZ3agjf4ruL56rGcMZEe";
 
 let ready = false;
 
-export function initAnalytics() {
-  if (ready) return;
+/** Called once the harness has reported the setting — never before. Opting out
+ * has to mean PostHog is never loaded, not that it loads and is asked to stay
+ * quiet: an init'd client still resolves the host and writes its own storage. */
+export function initAnalytics(enabled: boolean) {
+  if (ready || !enabled) return;
   posthog.init(TOKEN, {
     api_host: "https://us.i.posthog.com",
     autocapture: false, // never capture clicked-element text (conversation leak)
     capture_pageview: false, // single-window desktop app — no page routes
     person_profiles: "identified_only",
     persistence: "localStorage",
+    // Left to itself posthog-js pulls two more scripts off us-assets at
+    // runtime — a remote config blob and surveys.js. That is third-party code
+    // executing in a renderer that can drive the whole local harness, for
+    // features this app does not use. The bundled library is all we want, so
+    // external loading is refused and the CSP has no remote script host.
+    disable_external_dependency_loading: true,
+    disable_surveys: true,
+    advanced_disable_flags: true, // no feature flags here, so no /flags request
+    disable_session_recording: true,
   });
   ready = true;
   const platform = navigator.userAgent.includes("Electron") ? "desktop" : "browser";

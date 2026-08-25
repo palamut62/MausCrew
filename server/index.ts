@@ -6,7 +6,7 @@ import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { isIP } from "node:net";
 import { homedir } from "node:os";
-import { dirname, extname, isAbsolute, join, resolve } from "node:path";
+import { dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { approvalKey, autoDecision, requiresOneTimeApproval } from "./auto-approve.ts";
@@ -32,6 +32,8 @@ import {
   type LifecycleAction,
 } from "./container-computer.ts";
 import {
+  analyticsEnabled,
+  analyticsLocked,
   claudeGateways,
   ensureDirs,
   gatewayInstanceId,
@@ -54,6 +56,7 @@ import { GovernanceGateway } from "./governance/gateway.ts";
 import { ensureDefaultPolicy, loadPolicy, savePolicy } from "./governance/policy-loader.ts";
 import { buildNotification, type Notification } from "./notify.ts";
 import { isEffortLevel, type ModelSelection, type RuntimeEvent, type SubagentActivity } from "./contracts.ts";
+import { CONTENT_SECURITY_POLICY } from "./csp.ts";
 
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { describeBaseUrl } from "./drivers/deepseek/config.ts";
@@ -105,6 +108,16 @@ import { extractStructuredUi } from "./ui-runtime/schema.ts";
 import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./webhook-ingress.ts";
 import { WebhookManager } from "./webhooks.ts";
 
+/** Kept as a literal rather than read from package.json at runtime: the
+ * packaged layout copies dist-server to resources/server while package.json
+ * lives inside app.asar, so the lookup would quietly resolve to nothing in
+ * exactly the build that ships. Drift is caught by the /api/health test
+ * instead, which compares this against package.json from the repo.
+ *
+ * It had already drifted — this said "Umut Palamut" while package.json,
+ * LICENSE, the README and the About panel all said "Umut Çelik". */
+const OWNER_NAME = "Umut Çelik";
+
 const PORT = Number(process.env.MAUSCREW_PORT || 8799);
 const WEBHOOK_PORT = Number(process.env.MAUSCREW_WEBHOOK_PORT || PORT + 1);
 const STATIC_DIR = process.env.MAUSCREW_STATIC_DIR || null;
@@ -117,7 +130,10 @@ const MIME: Record<string, string> = {
   ".png": "image/png",
   ".ico": "image/x-icon",
   ".json": "application/json",
+  ".webmanifest": "application/manifest+json",
   ".woff2": "font/woff2",
+  ".txt": "text/plain; charset=utf-8",
+  ".map": "application/json",
 };
 
 ensureDirs();
@@ -1671,6 +1687,11 @@ function configStatus() {
     tts: tts.describeVoice(cfg),
     // not a secret — the sidebar shows it
     profile: { name: cfg.profile?.name ?? "", email: cfg.profile?.email ?? "" },
+    // The renderer must not load PostHog before it has heard this, so the flag
+    // rides the status payload every client already folds rather than a second
+    // fetch. `locked` means MAUSCREW_DISABLE_ANALYTICS refused it for the whole
+    // machine and the toggle has nothing left to offer.
+    analytics: { enabled: analyticsEnabled(cfg), locked: analyticsLocked() },
   };
 }
 
@@ -1824,7 +1845,16 @@ const server = createServer(async (req, res) => {
     // through it (except the one-time claim) needs a paired-device cookie.
     const localRequest = isLoopbackHost(req.headers.host);
     const remoteUrl = configuredRemoteUrl();
-    const remoteRequest = !localRequest && remoteUrl?.host.toLowerCase() === req.headers.host?.toLowerCase();
+    // Both operands must actually exist. A request with no Host header at all
+    // is legal in HTTP/1.0 and Node hands it through as `undefined`; comparing
+    // it to `remoteUrl?.host` when remote access is off compared undefined to
+    // undefined, which is true, so the untrusted-host refusal below never ran
+    // and the request read as "remote" on a machine that has no remote ingress.
+    const requestHost = req.headers.host?.toLowerCase();
+    const remoteRequest = !localRequest
+      && remoteUrl !== null
+      && requestHost !== undefined
+      && remoteUrl.host.toLowerCase() === requestHost;
     if (!localRequest && !remoteRequest) return json(res, 403, { error: "forbidden: untrusted host" });
     const origin = req.headers.origin;
     if (localRequest && origin && !isAllowedOrigin(origin)) {
@@ -2391,7 +2421,6 @@ const server = createServer(async (req, res) => {
               title: member.title,
               description: member.description,
               color: member.appearance.color,
-              mascotExpression: member.appearance.mascotExpression,
               modelSelection: selection,
             }),
           );
@@ -2466,6 +2495,7 @@ const server = createServer(async (req, res) => {
       if (!group) return json(res, 404, { error: "no such room" });
       lastReply.delete(group.threadId);
       store.deleteGroup(group.id);
+      bus.discard(group.threadId);
       for (const dir of [EVENTS_DIR, NATIVE_DIR]) {
         try {
           unlinkSync(join(dir, `${group.threadId}.ndjson`));
@@ -2629,7 +2659,7 @@ const server = createServer(async (req, res) => {
         }
       }
       const patch: Record<string, unknown> = {};
-      for (const key of ["name", "title", "description", "notifications", "modelSelection", "unread", "computer", "color", "mascotExpression", "pinned", "hidden", "speakReplies", "voice"] as const) {
+      for (const key of ["name", "title", "description", "notifications", "modelSelection", "unread", "computer", "color", "pinned", "hidden", "speakReplies", "voice"] as const) {
         if (body[key] !== undefined) patch[key] = body[key];
       }
       if (body.workspacePath !== undefined) {
@@ -2717,6 +2747,7 @@ const server = createServer(async (req, res) => {
       cancelBotCreationApprovalsFor(bot.id);
       discardDelegations(commsBus, bot.threadId);
       store.deleteBot(bot.id);
+      bus.discard(bot.threadId);
       for (const dir of [EVENTS_DIR, NATIVE_DIR]) {
         try {
           unlinkSync(join(dir, `${bot.threadId}.ndjson`));
@@ -3013,7 +3044,7 @@ const server = createServer(async (req, res) => {
         app: "mauscrew",
         pid: process.pid,
         static: Boolean(STATIC_DIR),
-        owner: { name: "Umut Palamut", x: "https://x.com/palamut62", github: "https://github.com/palamut62" },
+        owner: { name: OWNER_NAME, x: "https://x.com/palamut62", github: "https://github.com/palamut62" },
       });
     }
 
@@ -3388,9 +3419,20 @@ const server = createServer(async (req, res) => {
           });
         }
       }
+      // A boolean, not a string, and not merely truthy: `{enabled: "false"}`
+      // would otherwise persist as an opt-IN and the toggle would lie.
+      const rawAnalytics = body.analytics;
+      if (rawAnalytics !== undefined) {
+        if (!rawAnalytics || typeof rawAnalytics !== "object" || Array.isArray(rawAnalytics)) {
+          return json(res, 400, { error: "analytics must be an object" });
+        }
+        if (typeof (rawAnalytics as { enabled?: unknown }).enabled !== "boolean") {
+          return json(res, 400, { error: "analytics.enabled must be true or false" });
+        }
+      }
       const patch: Record<string, object> = {};
       if (gatewaysPatch) patch.claudeGateways = gatewaysPatch;
-      for (const key of ["xai", "composio", "box", "opencodeGo", "deepseekHarness", "tts", "profile", "remoteAccess"] as const) {
+      for (const key of ["xai", "composio", "box", "opencodeGo", "deepseekHarness", "tts", "profile", "remoteAccess", "analytics"] as const) {
         if (body[key] && typeof body[key] === "object") patch[key] = body[key];
       }
       if (!Object.keys(patch).length) return json(res, 400, { error: "nothing to save" });
@@ -3443,7 +3485,10 @@ const server = createServer(async (req, res) => {
       // provider keys change the fleet; a profile or voice edit must not
       // kill in-flight turns with a pointless reload — no driver reads
       // either, and picking a voice mid-turn should be free
-      if (Object.keys(patch).some((k) => k !== "profile" && k !== "tts" && k !== "remoteAccess")) await reloadProviders();
+      // no driver reads profile, voice, the remote address or the analytics
+      // flag — reloading the fleet for them would kill in-flight turns for free
+      const NO_RELOAD = new Set(["profile", "tts", "remoteAccess", "analytics"]);
+      if (Object.keys(patch).some((k) => !NO_RELOAD.has(k))) await reloadProviders();
       const status = configStatus();
       broadcast({ kind: "config", ...status });
       return json(res, 200, status);
@@ -3561,20 +3606,44 @@ const server = createServer(async (req, res) => {
     // packaged app: the server serves the built UI too (window → :8799 for
     // everything, no dev proxy to die). MAUSCREW_STATIC_DIR is set by Electron.
     if (method === "GET" && !path.startsWith("/api/") && STATIC_DIR) {
-      const safe = path === "/" ? "/index.html" : path.replace(/\.\./g, "");
-      const file = join(STATIC_DIR, safe);
-      try {
-        const data = readFileSync(file);
-        res.writeHead(200, { "content-type": MIME[extname(file)] ?? "application/octet-stream" });
+      const root = resolve(STATIC_DIR);
+      const file = resolve(join(root, path === "/" ? "/index.html" : path));
+      // Containment, not sanitisation. Stripping ".." from the path left the
+      // whole guarantee resting on URL dot-segment normalisation happening to
+      // run first; asking where the path actually landed cannot be spelled
+      // around. `root + sep` so a sibling directory named `distevil` is not
+      // read as being inside `dist`.
+      const contained = file === root || file.startsWith(root.endsWith(sep) ? root : root + sep);
+      const serve = (data: Buffer, type: string, immutable: boolean) => {
+        res.writeHead(200, {
+          "content-type": type,
+          "content-security-policy": CONTENT_SECURITY_POLICY,
+          "x-content-type-options": "nosniff",
+          // Hashed asset names are safe to keep forever; the shell and the
+          // service worker must never be, or an updated app keeps booting the
+          // build it replaced.
+          "cache-control": immutable ? "public, max-age=31536000, immutable" : "no-cache",
+        });
         return res.end(data);
-      } catch {
-        // SPA fallback
+      };
+      const shell = () => {
         try {
-          const data = readFileSync(join(STATIC_DIR, "index.html"));
-          res.writeHead(200, { "content-type": "text/html" });
-          return res.end(data);
+          return serve(readFileSync(join(root, "index.html")), "text/html", false);
         } catch {
-          /* fall through to 404 */
+          return null; // no packaged UI — fall through to the 404 below
+        }
+      };
+      if (!contained) {
+        const fallback = shell();
+        if (fallback) return fallback;
+      } else {
+        try {
+          const data = readFileSync(file);
+          return serve(data, MIME[extname(file)] ?? "application/octet-stream", path.startsWith("/assets/"));
+        } catch {
+          // SPA fallback: a client-side route is not a missing file
+          const fallback = shell();
+          if (fallback) return fallback;
         }
       }
     }
@@ -3590,6 +3659,11 @@ server.listen(PORT, "127.0.0.1", () => {
   console.log(`mauscrew server on http://127.0.0.1:${PORT}`);
 });
 
+// Backstop for every other way this process ends — an uncaught throw, a parent
+// that kills the utilityProcess, `process.exit` from the signal path above.
+// appendFileSync is legal here; anything async would not run.
+process.on("exit", () => bus.flush());
+
 let shutdownSignals = 0;
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
@@ -3599,6 +3673,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     localVmIdle.cancel();
     routines?.stop();
     webhookIngress?.server.close();
+    bus.flush();
     // A wedged child process must not hold the exit hostage: dispose
     // best-effort, then force the exit either way.
     const forced = setTimeout(() => process.exit(1), 5_000);

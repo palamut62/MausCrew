@@ -93,7 +93,7 @@ export function autoDecision(
   if (requiresOneTimeApproval(tool)) return null;
   // the guards come first, so an "always allow" can never widen into them
   if (looksDestructive(summary) || looksDestructive(tool)) return null;
-  if (looksSensitive(summary)) return null;
+  if (looksSensitive(summary) || looksSensitive(tool)) return null;
   const key = approvalKey(tool, summary);
   if (bot.alwaysAllow?.includes(key)) return `auto-approved ${key} (always allowed)`;
   if (bot.autoApprove) return `auto-approved ${tool}`;

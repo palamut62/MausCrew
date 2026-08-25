@@ -10,6 +10,8 @@ import type { RuntimeEvent } from "../contracts.ts";
 import { makeFakeDriver } from "../testing/fake-driver.ts";
 import { EventBus } from "./bus.ts";
 
+const NEWLINE = "\n";
+
 const testEvent = (over: Partial<RuntimeEvent> = {}): RuntimeEvent =>
   ({
     eventId: "ev-1",
@@ -64,6 +66,7 @@ describe("EventBus", () => {
   it("tees every published event to the per-thread NDJSON log", () => {
     const bus = new EventBus();
     bus.publish(testEvent({ threadId: "log-me" }));
+    bus.flush();
 
     const logged = readFileSync(join(EVENTS_DIR, "log-me.ndjson"), "utf8")
       .trim()
@@ -81,7 +84,45 @@ describe("EventBus", () => {
 
     bus.publish(testEvent());
     expect(seen).toHaveLength(1);
+    bus.flush();
     expect(existsSync(EVENTS_DIR)).toBe(false);
+  });
+
+  // The tee is batched so a token stream costs a handful of syscalls instead
+  // of one per delta. Delivery must stay immediate, order must survive the
+  // buffer, and threads must not bleed into each other's file.
+  it("batches the log without delaying delivery, reordering, or mixing threads", () => {
+    const bus = new EventBus();
+    const seen: RuntimeEvent[] = [];
+    bus.subscribe((e) => seen.push(e));
+
+    for (let i = 0; i < 50; i++) {
+      bus.publish(testEvent({ eventId: `a-${i}`, threadId: "batch-a" }));
+      bus.publish(testEvent({ eventId: `b-${i}`, threadId: "batch-b" }));
+    }
+    expect(seen).toHaveLength(100);
+    expect(existsSync(join(EVENTS_DIR, "batch-a.ndjson"))).toBe(false);
+
+    bus.flush();
+    const read = (thread: string) =>
+      readFileSync(join(EVENTS_DIR, `${thread}.ndjson`), "utf8")
+        .trim()
+        .split(NEWLINE)
+        .map((line) => JSON.parse(line).eventId);
+    expect(read("batch-a")).toEqual(Array.from({ length: 50 }, (_, i) => `a-${i}`));
+    expect(read("batch-b")).toEqual(Array.from({ length: 50 }, (_, i) => `b-${i}`));
+  });
+
+  it("discard drops a deleted thread's buffer so a later flush cannot resurrect its log", () => {
+    const bus = new EventBus();
+    bus.publish(testEvent({ threadId: "doomed" }));
+    bus.publish(testEvent({ threadId: "kept" }));
+
+    bus.discard("doomed");
+    bus.flush();
+
+    expect(existsSync(join(EVENTS_DIR, "doomed.ndjson"))).toBe(false);
+    expect(existsSync(join(EVENTS_DIR, "kept.ndjson"))).toBe(true);
   });
 
   it("a throwing listener does not starve the others", () => {

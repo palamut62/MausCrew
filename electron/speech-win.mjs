@@ -18,6 +18,7 @@ import {
   readdirSync,
   rmSync,
   unlinkSync,
+  writeFileSync,
   writeSync,
 } from "node:fs";
 import os from "node:os";

@@ -24,7 +24,6 @@ export interface TeamManifestMember {
   description: string;
   appearance: {
     color: MausColor;
-    mascotExpression?: string;
   };
 }
 
@@ -54,7 +53,6 @@ interface ExportableBot {
   title: string;
   description: string;
   color: MausColor;
-  mascotExpression?: string | null;
 }
 
 interface ExportableTeam {
@@ -117,11 +115,9 @@ export function parseTeamManifest(value: unknown): TeamManifestV1 {
     if (typeof appearance.color !== "string" || !COLORS.includes(appearance.color as MausColor)) {
       throw new Error(`${field}.appearance.color is not supported`);
     }
-    const mascotExpression = optionalString(
-      appearance.mascotExpression,
-      `${field}.appearance.mascotExpression`,
-      80,
-    );
+    // appearance.mascotExpression is read and dropped on purpose: manifests
+    // exported before the mascot engine was retired still carry it, and an
+    // unknown-field error would make those files unimportable for no gain.
 
     return {
       key,
@@ -130,7 +126,6 @@ export function parseTeamManifest(value: unknown): TeamManifestV1 {
       description: optionalString(raw.description, `${field}.description`, 4_000) ?? "",
       appearance: {
         color: appearance.color as MausColor,
-        ...(mascotExpression ? { mascotExpression } : {}),
       },
     };
   });
@@ -200,7 +195,6 @@ export function createTeamManifest(team: ExportableTeam, bots: ExportableBot[]):
       description: bot.description,
       appearance: {
         color: bot.color,
-        ...(bot.mascotExpression ? { mascotExpression: bot.mascotExpression } : {}),
       },
     };
   });

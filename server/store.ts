@@ -28,7 +28,6 @@ export type MausColor =
  * string rather than a union: bots saved under the app's earlier ten-face
  * vocabulary still carry those names, and the client resolves both on read.
  */
-export type MausExpression = string;
 
 export interface OptionCardData {
   title: string;
@@ -159,7 +158,6 @@ export interface BotRecord {
   description: string;
   notifications: boolean;
   color: MausColor;
-  mascotExpression?: MausExpression | null;
   unread: boolean;
   modelSelection: ModelSelection;
   /** Absolute host folder used as this bot's coding workspace. Unset lets
@@ -599,7 +597,7 @@ export class Store {
 
   createBot(
     profile: Partial<
-      Pick<BotRecord, "name" | "title" | "description" | "color" | "mascotExpression" | "modelSelection">
+      Pick<BotRecord, "name" | "title" | "description" | "color" | "modelSelection">
     > = {},
   ): BotRecord {
     const name = profile.name?.trim() || pickBotName(this.bots.map((b) => b.name));
@@ -611,7 +609,6 @@ export class Store {
       description: profile.description ?? "",
       notifications: true,
       color: profile.color ?? COLORS[this.bots.length % COLORS.length],
-      ...(profile.mascotExpression ? { mascotExpression: profile.mascotExpression } : {}),
       unread: false,
       modelSelection: profile.modelSelection ?? this.defaultSelection(),
       resumeCursors: {},

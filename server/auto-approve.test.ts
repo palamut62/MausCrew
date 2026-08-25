@@ -111,6 +111,16 @@ describe("autoDecision", () => {
     expect(autoDecision({ alwaysAllow: ["Bash"] }, "Bash", "sudo rm -rf /var")).toBeNull();
   });
 
+  // The destructive guard has always read both the tool name and the summary;
+  // the sensitive one read only the summary. A tool whose own name is the
+  // secret - an MCP server exposing `read_dotenv` - walked straight through.
+  it("stops a sensitive TOOL NAME, not just a sensitive command", () => {
+    expect(autoDecision({ autoApprove: true }, "mcp__vault__read_ssh_id_rsa", "")).toBeNull();
+    expect(autoDecision({ alwaysAllow: ["mcp__vault__read_ssh_id_rsa"] }, "mcp__vault__read_ssh_id_rsa", "")).toBeNull();
+    // and an innocent tool with an innocent summary still passes
+    expect(autoDecision({ autoApprove: true }, "Read", "notes.md")).toBeTruthy();
+  });
+
   it("never delegates Dynamic Cordis code activation", () => {
     expect(requiresOneTimeApproval("cordis_run")).toBe(true);
     expect(autoDecision({ autoApprove: true }, "cordis_run", "Run plugin")).toBeNull();

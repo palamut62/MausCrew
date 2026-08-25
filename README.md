@@ -133,9 +133,9 @@ you what it's doing while it works, and asks for approvals out loud.
 Bring your own ElevenLabs key — paste it once in App Settings, pick a voice, and every bot can talk.
 Give a bot its own voice and a room stops sounding like one person.
 
-**Also in the box:** streaming replies with tool-run activity chips · native macOS dictation from the
-composer mic (on-device Apple speech recognition — desktop app) · SupaMaus cursor mascots with role-aware
-expressions · screenshots of the bot's work folded into the transcript.
+**Also in the box:** streaming replies with tool-run activity chips · on-device dictation from the
+composer mic (Apple speech on macOS, whisper.cpp on Windows — desktop app) · per-bot accent colours and
+monogram avatars · screenshots of the bot's work folded into the transcript.
 
 ## How it works
 
@@ -333,6 +333,23 @@ remote host other than the exact configured HTTPS origin.
 
 See [`docs/mobile-remote.md`](docs/mobile-remote.md) for setup, revocation and
 the security boundary.
+
+## Telemetry
+
+MausCrew sends a short list of product events to PostHog: `app_first_open`, `app_opened`,
+`message_sent`, `onboarding_step`, `onboarding_completed`, `email_submitted`, `email_skipped`,
+`bot_created`, `room_created`, `team_imported`, `team_exported`, `call_started`,
+`group_call_started`. Each carries at most a coarse property — the platform, the engine id, a member
+count. If you give an email at first run it is used to identify you in that stream.
+
+Autocapture is **off** on purpose: it would ship the text of clicked elements, and the sidebar and
+option cards render model output and message previews. Message text, transcripts, file contents,
+prompts, API keys and workspace paths are never sent. Everything else — bots, threads, events, keys
+— stays in `~/.mauscrew`.
+
+Turn it off in **App Settings → General → Usage analytics**, and the analytics library is never
+loaded. For a packaged build, a CI rig or an always-on host, set `MAUSCREW_DISABLE_ANALYTICS=1`;
+that refuses it machine-wide and the in-app toggle cannot re-enable it.
 
 ## Status
 
