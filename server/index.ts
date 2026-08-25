@@ -1333,7 +1333,7 @@ async function startTurn(
       const coordinationPrompt = bot.chiefOfStaff
         ? chiefOfStaffSystemPrompt(bot.id, store.bots, Boolean(integrations.agents))
         : integrations.agents
-          ? "You can work with the user's other bots through the agents tools — list_bots shows who's available, ask_bot sends one of them a message and returns their reply."
+          ? "You can work with the user's other bots through the agents tools — list_bots shows who's available, ask_bot sends one of them a message and returns their reply, and ask_bots puts independent questions to several of them at once instead of waiting out one peer before starting the next."
           : "";
 
       // The interrupt endpoint can run while the awaits above are still
