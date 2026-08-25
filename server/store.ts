@@ -125,6 +125,15 @@ export interface TaskRecord {
   createdAt: number;
   /** provider-native continuation per instance, for THIS task only */
   resumeCursors: Record<string, unknown>;
+  /** Everything older than the sent transcript, folded into prose. A resume
+   * cursor continues a session the engine still holds; this survives that
+   * session being lost, and it is what the bot is told it already knows. */
+  digest?: {
+    text: string;
+    throughMessageId: string;
+    messageCount: number;
+    at: number;
+  };
 }
 
 /** What a task is called before its first message names it. */

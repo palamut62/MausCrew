@@ -57,6 +57,8 @@ import { ensureDefaultPolicy, loadPolicy, savePolicy } from "./governance/policy
 import { buildNotification, type Notification } from "./notify.ts";
 import { isEffortLevel, type ModelSelection, type RuntimeEvent, type SubagentActivity } from "./contracts.ts";
 import { CONTENT_SECURITY_POLICY } from "./csp.ts";
+import { digestSystemBlock } from "./summarization/digest.ts";
+import { partitionThread } from "./summarization/partition.ts";
 
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { describeBaseUrl } from "./drivers/deepseek/config.ts";
@@ -1101,12 +1103,21 @@ async function startTurn(
   }
 
   // transcript for API-backed drivers: settled text turns on the ACTIVE
-  // branch only — abandoned forks never reach the model
-  const transcript = store
+  // branch only — abandoned forks never reach the model.
+  //
+  // This used to be a bare `.slice(-40)`. Everything older fell off with no
+  // summary and no notice, so an hour into a session a bot would contradict
+  // what it had agreed to at the start and say it could not remember. The
+  // partition keeps the same recent tail and hands the rest to the digest,
+  // which reaches the bot through the system prompt instead of vanishing.
+  const eligible = store
     .activePath(threadId)
-    .filter((m) => m.kind === "text" && m.text && m.id !== userMessage.id)
-    .slice(-40)
-    .map((m) => ({ role: m.role === "user" ? ("user" as const) : ("assistant" as const), text: m.text! }));
+    .filter((m) => m.kind === "text" && m.text && m.id !== userMessage.id);
+  const { keep: transcriptSource } = partitionThread({ messages: eligible, keepRecent: 40 });
+  const transcript = transcriptSource.map((m) => ({
+    role: m.role === "user" ? ("user" as const) : ("assistant" as const),
+    text: m.text!,
+  }));
 
   // After a rewind (edit / branch switch) the provider's native session
   // still contains the abandoned branch: start a fresh session instead of
@@ -1347,6 +1358,9 @@ async function startTurn(
         runtimeFeatures: { dynamicCordis: bot.dynamicCordis === true },
         system:
           persona +
+          // what fell out of the transcript above, so it is knowledge the bot
+          // has rather than history it lost
+          digestSystemBlock(task.digest) +
           (computerKind === "vm"
             ? " You have a shared, isolated Cua sandbox: a Linux desktop in a container on this machine. Only /home/cua/workspace is durable; save downloads, repositories, working files, and browser profiles there because everything else inside the VM is disposable. No other host folder is mounted. Use the computer tools for desktop, accessibility, window, and shell work. Inspect the desktop state before acting, prefer accessibility targets over raw coordinates, and work carefully."
             : computerKind === "box" && instance.driverKind !== "boxAgent"
