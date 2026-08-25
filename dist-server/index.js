@@ -28,6 +28,8 @@ import { ensureDefaultPolicy, loadPolicy, savePolicy } from "./governance/policy
 import { buildNotification } from "./notify.js";
 import { isEffortLevel } from "./contracts.js";
 import { CONTENT_SECURITY_POLICY } from "./csp.js";
+import { digestSystemBlock } from "./summarization/digest.js";
+import { partitionThread } from "./summarization/partition.js";
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.js";
 import { describeBaseUrl } from "./drivers/deepseek/config.js";
 import { defaultWorkspaceFor } from "./drivers/deepseek/session-manager.js";
@@ -997,12 +999,21 @@ async function startTurn(botId, text, opts) {
         broadcast({ kind: "message", threadId, message: userMessage });
     }
     // transcript for API-backed drivers: settled text turns on the ACTIVE
-    // branch only — abandoned forks never reach the model
-    const transcript = store
+    // branch only — abandoned forks never reach the model.
+    //
+    // This used to be a bare `.slice(-40)`. Everything older fell off with no
+    // summary and no notice, so an hour into a session a bot would contradict
+    // what it had agreed to at the start and say it could not remember. The
+    // partition keeps the same recent tail and hands the rest to the digest,
+    // which reaches the bot through the system prompt instead of vanishing.
+    const eligible = store
         .activePath(threadId)
-        .filter((m) => m.kind === "text" && m.text && m.id !== userMessage.id)
-        .slice(-40)
-        .map((m) => ({ role: m.role === "user" ? "user" : "assistant", text: m.text }));
+        .filter((m) => m.kind === "text" && m.text && m.id !== userMessage.id);
+    const { keep: transcriptSource } = partitionThread({ messages: eligible, keepRecent: 40 });
+    const transcript = transcriptSource.map((m) => ({
+        role: m.role === "user" ? "user" : "assistant",
+        text: m.text,
+    }));
     // After a rewind (edit / branch switch) the provider's native session
     // still contains the abandoned branch: start a fresh session instead of
     // resuming, and for cursor-resuming drivers replay the surviving path
@@ -1209,7 +1220,7 @@ async function startTurn(botId, text, opts) {
             const coordinationPrompt = bot.chiefOfStaff
                 ? chiefOfStaffSystemPrompt(bot.id, store.bots, Boolean(integrations.agents))
                 : integrations.agents
-                    ? "You can work with the user's other bots through the agents tools — list_bots shows who's available, ask_bot sends one of them a message and returns their reply."
+                    ? "You can work with the user's other bots through the agents tools — list_bots shows who's available, ask_bot sends one of them a message and returns their reply, and ask_bots puts independent questions to several of them at once instead of waiting out one peer before starting the next."
                     : "";
             // The interrupt endpoint can run while the awaits above are still
             // preparing integrations. Consume that request before spawning the
@@ -1232,10 +1243,13 @@ async function startTurn(botId, text, opts) {
                 cwd: bot.workspacePath || undefined,
                 runtimeFeatures: { dynamicCordis: bot.dynamicCordis === true },
                 system: persona +
+                    // what fell out of the transcript above, so it is knowledge the bot
+                    // has rather than history it lost
+                    digestSystemBlock(task.digest) +
                     (computerKind === "vm"
                         ? " You have a shared, isolated Cua sandbox: a Linux desktop in a container on this machine. Only /home/cua/workspace is durable; save downloads, repositories, working files, and browser profiles there because everything else inside the VM is disposable. No other host folder is mounted. Use the computer tools for desktop, accessibility, window, and shell work. Inspect the desktop state before acting, prefer accessibility targets over raw coordinates, and work carefully."
                         : computerKind === "box" && instance.driverKind !== "boxAgent"
-                            ? " You have your own cloud computer. In Chrome, prefer browser_snapshot with browser_click/browser_fill for semantic, trusted actions; use screenshot/click/type_text for visual or non-browser UI, open_url for navigation, and computer_exec for Linux tasks. Every action already returns the resulting screen, so don't follow it with screenshot; batch predictable pixel actions with computer_batch."
+                            ? " You have your own cloud computer. In Chrome, prefer browser_snapshot with browser_click/browser_fill/browser_select_option/browser_press_key for semantic, trusted actions; browser_read_text to read a page rather than squinting at a screenshot; browser_tabs to see and switch tabs, because every other browser tool acts on the front one. Use screenshot/click/type_text for visual or non-browser UI, open_url for navigation, and computer_exec for Linux tasks. Every action already returns the resulting screen, so don't follow it with screenshot; batch predictable pixel actions with computer_batch."
                             : computerKind === "local"
                                 ? " You can act on the user's computer through the computer tools — take a screenshot or read the desktop state first, prefer accessibility actions over raw coordinates, and act carefully."
                                 : "") +
