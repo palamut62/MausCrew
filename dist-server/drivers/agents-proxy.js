@@ -45,6 +45,28 @@ const TOOLS = [
         },
     },
     {
+        name: "ask_bots",
+        description: "Ask several bots at once and wait for all of them. Use this instead of repeated ask_bot calls when the questions are independent: those run one after another, each blocking until its peer finishes, so three questions cost three turns of waiting. Each peer still runs under its own model and permissions. A peer that is busy or unreachable is reported alongside the others rather than failing the batch.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                requests: {
+                    type: "array",
+                    description: "One entry per bot. At most 6, and one entry per bot - a bot can only run one turn at a time.",
+                    items: {
+                        type: "object",
+                        properties: {
+                            bot_id: { type: "string", description: "The target bot's id (from list_bots)." },
+                            message: { type: "string", description: "What to ask that bot." },
+                        },
+                        required: ["bot_id", "message"],
+                    },
+                },
+            },
+            required: ["requests"],
+        },
+    },
+    {
         name: "delegate_bot",
         description: "Hand a task to another bot ASYNCHRONOUSLY: returns immediately and the peer runs after your current turn finishes. Use this when you want to keep working or hand off a long-running subtask without waiting. The user sees the peer's reply as its own turn; you do NOT receive the reply inline.",
         inputSchema: {
@@ -75,6 +97,8 @@ const send = (msg) => process.stdout.write(JSON.stringify(msg) + "\n");
 const ok = (id, result) => send({ jsonrpc: "2.0", id, result });
 const rpcErr = (id, code, message) => send({ jsonrpc: "2.0", id, error: { code, message } });
 const textResult = (id, text, isError = false) => ok(id, { content: [{ type: "text", text }], isError });
+/** A bot can wait on a handful of peers; twenty is a stampede, not a plan. */
+const MAX_PARALLEL_ASKS = 6;
 async function api(path, init) {
     const res = await fetch(HARNESS + path, {
         ...init,
@@ -112,6 +136,62 @@ async function callTool(name, args) {
         if (r.error)
             return { text: `Couldn't reach that bot: ${r.error}`, isError: true };
         return { text: `${r.botName ?? "Bot"} replied:\n${r.text ?? "(no reply)"}` };
+    }
+    if (name === "ask_bots") {
+        const raw = Array.isArray(args.requests) ? args.requests : [];
+        // One turn per bot at a time, so a second question to the same peer would
+        // only ever come back "busy". Collapsing them here turns a wasted round
+        // trip into a clear instruction.
+        const seen = new Set();
+        const duplicates = [];
+        const requests = [];
+        for (const entry of raw) {
+            const botId = String(entry?.bot_id ?? "").trim();
+            const message = String(entry?.message ?? "").trim();
+            if (!botId || !message)
+                continue;
+            if (seen.has(botId)) {
+                duplicates.push(botId);
+                continue;
+            }
+            seen.add(botId);
+            requests.push({ botId, message });
+        }
+        if (!requests.length) {
+            return { text: "ask_bots needs a requests array of { bot_id, message }.", isError: true };
+        }
+        if (requests.length > MAX_PARALLEL_ASKS) {
+            return { text: `ask_bots takes at most ${MAX_PARALLEL_ASKS} bots at a time; you asked for ${requests.length}.`, isError: true };
+        }
+        const settled = await Promise.allSettled(requests.map((request) => api(`/api/internal/ask-bot`, {
+            method: "POST",
+            body: JSON.stringify({
+                fromBotId: BOT_ID,
+                fromThreadId: THREAD_ID,
+                toBotId: request.botId,
+                message: request.message,
+                depth: DEPTH,
+            }),
+        })));
+        const blocks = settled.map((outcome, index) => {
+            const request = requests[index];
+            if (outcome.status === "rejected") {
+                const detail = outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
+                return `### ${request.botId} - unreachable\n${detail}`;
+            }
+            const reply = outcome.value;
+            if (reply.busy)
+                return `### ${request.botId} - busy, did not run`;
+            if (reply.error)
+                return `### ${request.botId} - failed\n${String(reply.error)}`;
+            return `### ${reply.botName ?? request.botId}\n${reply.text ?? "(no reply)"}`;
+        });
+        if (duplicates.length) {
+            blocks.push(`### skipped\nAsked the same bot twice in one batch (${[...new Set(duplicates)].join(", ")}); only the first question was sent.`);
+        }
+        // Not an error even when every peer failed: the caller asked for a set of
+        // answers and is owed the set, with each outcome named.
+        return { text: `Replies from ${requests.length} bot(s):\n\n${blocks.join("\n\n")}` };
     }
     if (name === "delegate_bot") {
         const toBotId = String(args.bot_id ?? "").trim();

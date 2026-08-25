@@ -435,6 +435,34 @@ const TOOLS = [
         },
     },
     {
+        name: "browser_tabs",
+        description: "List Chrome's open tabs, or bring one to the front by its ref. Every other browser tool acts on the front tab, so switch here before working in a tab you opened.",
+        inputSchema: { type: "object", properties: { target: { type: "string" } } },
+    },
+    {
+        name: "browser_select_option",
+        description: "Choose an option in a dropdown ref from the most recent browser_snapshot. Dropdowns ignore browser_fill, and clicking one opens a menu the page cannot see.",
+        inputSchema: {
+            type: "object",
+            properties: { ref: { type: "string" }, value: { type: "string" }, ...OBSERVE_PROPS },
+            required: ["ref", "value"],
+        },
+    },
+    {
+        name: "browser_press_key",
+        description: "Send one key to the page — Enter to submit, Escape to dismiss, Tab to move on. Optionally focus a ref first. Reaches the page whether or not Chrome owns the desktop focus.",
+        inputSchema: {
+            type: "object",
+            properties: { key: { type: "string" }, ref: { type: "string" }, ...OBSERVE_PROPS },
+            required: ["key"],
+        },
+    },
+    {
+        name: "browser_read_text",
+        description: "Read the front tab's visible text. Use this to read an article or result page; browser_snapshot lists controls, not prose.",
+        inputSchema: { type: "object", properties: { maxChars: { type: "number" } } },
+    },
+    {
         name: "browser_fill",
         description: "Replace the text in one field ref from the most recent browser_snapshot and return the resulting screen.",
         inputSchema: {
@@ -659,13 +687,21 @@ async function actAndObserve(id, actions, note, args, timeoutMs = 60_000) {
     return observed(id, full, await frameFrom(out));
 }
 async function semanticActAndObserve(id, action, ref, value, args) {
-    if (!semanticBrowserUrl || !semanticBrowserRefs.has(ref)) {
+    // A key can be sent to the page without naming an element; everything else
+    // needs a ref the last snapshot actually handed out.
+    const needsRef = action !== "key" || Boolean(ref);
+    if (needsRef && (!semanticBrowserUrl || !semanticBrowserRefs.has(ref))) {
         return text(id, "that browser ref is stale or unknown — take a new browser_snapshot", true);
+    }
+    if (!semanticBrowserUrl) {
+        return text(id, "no semantic browser page — take a browser_snapshot first", true);
     }
     const observe = wantsFrame(args);
     const semantic = semanticBrowserCommand(action, {
-        ref,
+        ...(ref ? { ref } : {}),
         ...(action === "fill" ? { text: value ?? "" } : {}),
+        ...(action === "select" ? { value: value ?? "" } : {}),
+        ...(action === "key" ? { key: value ?? "" } : {}),
         url: semanticBrowserUrl,
     });
     const guarded = `if ${semantic}; then SEM=ok; else SEM=failed; fi`;
@@ -751,6 +787,51 @@ async function call(id, name, args) {
     if (name === "browser_fill") {
         const ref = String(args.ref ?? "");
         return semanticActAndObserve(id, "fill", ref, String(args.text ?? ""), args);
+    }
+    if (name === "browser_tabs") {
+        const target = String(args.target ?? "");
+        const out = await runOnBox(semanticBrowserCommand("tabs", target ? { target } : {}), 20_000);
+        if (!out.ok)
+            return text(id, "Chrome is not reachable. Open it with open_url.", true);
+        try {
+            const parsed = JSON.parse(out.stdout);
+            if (!target) {
+                const tabs = (parsed.tabs ?? []);
+                if (tabs.length === 0)
+                    return text(id, "No open browser tabs.");
+                const lines = tabs.map((tab) => `- [${tab.ref}]${tab.active ? " (front)" : ""} ${tab.title || "Untitled"}: ${safeBrowserUrl(tab.url) ?? "URL unavailable"}`);
+                return text(id, `Browser tabs\n${lines.join("\n")}`);
+            }
+            // switching tabs invalidates every ref the last snapshot handed out
+            semanticBrowserUrl = null;
+            semanticBrowserRefs.clear();
+            return text(id, `Switched to ${parsed.title || "Untitled"}: ${safeBrowserUrl(String(parsed.url ?? "")) ?? "URL unavailable"}. Take a new browser_snapshot for refs on this tab.`);
+        }
+        catch {
+            return text(id, "Chrome returned an unreadable tab list.", true);
+        }
+    }
+    if (name === "browser_select_option") {
+        return semanticActAndObserve(id, "select", String(args.ref ?? ""), String(args.value ?? ""), args);
+    }
+    if (name === "browser_press_key") {
+        return semanticActAndObserve(id, "key", String(args.ref ?? ""), String(args.key ?? ""), args);
+    }
+    if (name === "browser_read_text") {
+        const out = await runOnBox(semanticBrowserCommand("text", { maxChars: Number(args.maxChars) || undefined }), 25_000);
+        if (!out.ok)
+            return text(id, "Chrome is not reachable, or the page has no readable text.", true);
+        try {
+            const parsed = JSON.parse(out.stdout);
+            observations.noteStructuredObservation();
+            const body = String(parsed.text ?? "").trim();
+            if (!body)
+                return text(id, "That page has no readable text; try screenshot.", true);
+            return text(id, `${parsed.title || "Untitled"} — ${safeBrowserUrl(String(parsed.url ?? "")) ?? "URL unavailable"}\n\n${body}${parsed.truncated ? "\n\n[truncated]" : ""}`);
+        }
+        catch {
+            return text(id, "Chrome returned unreadable page text.", true);
+        }
     }
     if (name === "wait_for_navigation") {
         const url = String(args.url ?? "");
