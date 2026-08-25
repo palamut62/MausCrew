@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, ArrowSquareOut, Check, MagnifyingGlass, Robot, Spinner, X } from "@phosphor-icons/react";
+import { Spin } from "./Spin";
+import { ArrowLeft, ArrowRight, ArrowSquareOut, Check, MagnifyingGlass, Robot, X } from "@phosphor-icons/react";
 import { api, useStore, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 
@@ -118,7 +119,7 @@ export function BotDirectoryPanel({ onClose }: { onClose: () => void }) {
         <div className="grid min-h-0 flex-1 md:grid-cols-[360px_minmax(0,1fr)]">
           <section className="min-h-0 overflow-y-auto border-b border-hairline md:border-b-0 md:border-r">
             {loading ? (
-              <div className="flex items-center justify-center gap-2 py-12 text-[13px] text-ink-secondary"><Spinner size={15} weight="fill" className="animate-spin" /> Loading directory...</div>
+              <div className="flex items-center justify-center gap-2 py-12 text-[13px] text-ink-secondary"><Spin size={15} weight="fill" /> Loading directory...</div>
             ) : result?.bots.length ? result.bots.map((bot) => (
               <button key={bot.slug} onClick={() => setSelected(bot)} className={cn("block w-full border-b border-hairline px-4 py-3 text-left", selected?.slug === bot.slug ? "bg-raised" : "bg-card hover:bg-raised/60")}>
                 <div className="flex items-start justify-between gap-3"><span className="text-[14px] font-semibold text-ink">{bot.name}</span><span className="shrink-0 rounded-full bg-inset px-2 py-0.5 font-mono text-[10px] text-ink-secondary">{bot.category}</span></div>
@@ -137,7 +138,7 @@ export function BotDirectoryPanel({ onClose }: { onClose: () => void }) {
               <h3 className="mt-5 font-mono text-[11px] uppercase tracking-wider text-ink-secondary">Suggested apps</h3>
               <div className="mt-2 flex flex-wrap gap-2">{selected.integrations.length ? selected.integrations.map((item) => <span key={item} className="rounded-lg border border-hairline bg-panel px-2.5 py-1.5 text-[12px] text-ink">{item}</span>) : <span className="text-[13px] text-ink-secondary">No connected apps required.</span>}</div>
               <div className="mt-6 flex flex-wrap items-center gap-3">
-                <button disabled={Boolean(importing)} onClick={() => void importBot(selected)} className="flex min-w-[150px] items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2.5 text-[13px] font-semibold text-white disabled:opacity-60">{importing === selected.slug ? <><Spinner size={14} weight="fill" className="animate-spin" /> Adding...</> : imported === selected.slug ? <><Check size={15} weight="bold" /> Added</> : "Add to my bots"}</button>
+                <button disabled={Boolean(importing)} onClick={() => void importBot(selected)} className="flex min-w-[150px] items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2.5 text-[13px] font-semibold text-white disabled:opacity-60">{importing === selected.slug ? <><Spin size={14} weight="fill" /> Adding...</> : imported === selected.slug ? <><Check size={15} weight="bold" /> Added</> : "Add to my bots"}</button>
                 <a href={selected.detailUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-[12px] text-ink-secondary hover:text-ink">View source <ArrowSquareOut size={13} weight="bold" /></a>
               </div>
               <p className="mt-3 text-[12px] leading-5 text-ink-secondary">The template becomes this bot's persistent instructions. Connect any suggested apps separately from Plugins.</p>

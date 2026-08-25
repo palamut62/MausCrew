@@ -4,7 +4,8 @@
 // one — DeepSeek and OpenRouter are not alternatives to each other, and
 // neither replaces the plain claude.ai sign-in. Hence a list, not one form.
 import { useState } from "react";
-import { Check, Spinner, Warning } from "@phosphor-icons/react";
+import { Spin } from "./Spin";
+import { Check, Warning } from "@phosphor-icons/react";
 import { api, useStore, type ConfigStatus } from "@/state/store";
 
 /** Starting points for the endpoints people actually use. Model ids are
@@ -289,7 +290,7 @@ export function ClaudeGateways() {
           className="flex w-[72px] shrink-0 items-center justify-center gap-1.5 rounded-lg bg-raised py-2 text-[13px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50"
         >
           {saving ? (
-            <Spinner size={13} weight="fill" className="animate-spin" />
+            <Spin size={13} weight="fill" />
           ) : (
             <>
               <Check size={13} weight="fill" />

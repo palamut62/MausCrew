@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { CheckCircle, Flask, Plus, Spinner, Trash, WarningCircle } from "@phosphor-icons/react";
+import { Spin } from "./Spin";
+import { CheckCircle, Flask, Plus, Trash, WarningCircle } from "@phosphor-icons/react";
 
 import { useStore, type ConfigStatus } from "@/state/store";
 
@@ -106,7 +107,7 @@ export function AguiAgents() {
               <div className="mt-0.5 truncate font-mono text-[10.5px] text-ink-secondary" title={agent.endpoint}>{agent.endpoint}</div>
             </div>
             <button onClick={() => void test(agent)} disabled={Boolean(busy)} className="rounded-md p-2 text-ink-secondary hover:bg-raised hover:text-ink" title="Test connection">
-              {busy === `test:${agent.id}` ? <Spinner size={15} className="animate-spin" /> : <Flask size={15} />}
+              {busy === `test:${agent.id}` ? <Spin size={15} /> : <Flask size={15} />}
             </button>
             <button onClick={() => void remove(agent)} disabled={Boolean(busy)} className="rounded-md p-2 text-danger hover:bg-danger/10" title="Remove agent">
               <Trash size={15} />
@@ -125,7 +126,7 @@ export function AguiAgents() {
             <Flask size={14} /> Test
           </button>
           <button onClick={() => void save()} disabled={!label.trim() || !endpoint.trim() || Boolean(busy)} className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[12px] font-semibold text-black disabled:opacity-40">
-            {busy === "save" ? <Spinner size={14} className="animate-spin" /> : <Plus size={14} weight="bold" />} Add agent
+            {busy === "save" ? <Spin size={14} /> : <Plus size={14} weight="bold" />} Add agent
           </button>
         </div>
       </div>

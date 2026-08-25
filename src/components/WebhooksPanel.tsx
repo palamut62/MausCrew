@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowClockwise, ArrowSquareOut, CaretDown, Check, Cloud, Copy, DotsThree, Laptop, PaperPlaneTilt, Pause, Play, Plus, Spinner, Trash, WebhooksLogo, X } from "@phosphor-icons/react";
+import { Spin } from "./Spin";
+import { ArrowClockwise, ArrowSquareOut, CaretDown, Check, Cloud, Copy, DotsThree, Laptop, PaperPlaneTilt, Pause, Play, Plus, Trash, WebhooksLogo, X } from "@phosphor-icons/react";
 
 import { MausAvatar } from "@/components/Avatar";
 import { cn } from "@/lib/cn";
@@ -109,7 +110,7 @@ function WebhookEditor({ webhook, bots, onClose, onCredential }: { webhook?: Web
           </details>
           {error && <div className="rounded-xl border border-danger/30 bg-danger/10 px-3.5 py-3 text-[12px] text-danger">{error}</div>}
         </div>
-        <div className="flex justify-end gap-2 border-t border-hairline px-5 py-4"><button onClick={onClose} className="rounded-xl px-4 py-2 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink">Cancel</button><button disabled={saving || !botId} onClick={() => void save()} className="flex items-center gap-2 rounded-xl bg-accent px-4 py-2 text-[13px] font-medium text-app hover:brightness-110 disabled:opacity-40">{saving && <Spinner size={14} weight="fill" className="animate-spin" />}{webhook ? "Save changes" : "Create local webhook"}</button></div>
+        <div className="flex justify-end gap-2 border-t border-hairline px-5 py-4"><button onClick={onClose} className="rounded-xl px-4 py-2 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink">Cancel</button><button disabled={saving || !botId} onClick={() => void save()} className="flex items-center gap-2 rounded-xl bg-accent px-4 py-2 text-[13px] font-medium text-app hover:brightness-110 disabled:opacity-40">{saving && <Spin size={14} weight="fill" />}{webhook ? "Save changes" : "Create local webhook"}</button></div>
       </div>
     </div>
   );
@@ -306,7 +307,7 @@ export function WebhooksPanel({ bots }: { bots: Bot[] }) {
                     ) : (
                       <div className="mt-4">
                         <p className="max-w-[560px] text-[10.5px] leading-relaxed text-ink-secondary">The private URL is shown once. Generate a replacement to copy your webhook command; any older command for this webhook will stop working.</p>
-                        <button disabled={Boolean(working) || !ingress?.available} onClick={() => void createAndCopyCommand(selected)} className="mt-3 flex items-center gap-2 rounded-xl bg-accent px-3.5 py-2.5 text-[12px] font-medium text-app hover:brightness-110 disabled:opacity-40">{working === `${selected.id}:command` ? <Spinner size={14} weight="fill" className="animate-spin" /> : <ArrowClockwise size={14} weight="bold" />}Generate new private URL</button>
+                        <button disabled={Boolean(working) || !ingress?.available} onClick={() => void createAndCopyCommand(selected)} className="mt-3 flex items-center gap-2 rounded-xl bg-accent px-3.5 py-2.5 text-[12px] font-medium text-app hover:brightness-110 disabled:opacity-40">{working === `${selected.id}:command` ? <Spin size={14} weight="fill" /> : <ArrowClockwise size={14} weight="bold" />}Generate new private URL</button>
                       </div>
                     )}
                     <div className="mt-3 flex items-start gap-2 text-[10.5px] leading-relaxed text-ink-secondary"><Laptop size={12} weight="bold" className="mt-0.5 shrink-0" /><span>Local only for now. Keep MausCrew open while sending the request.</span></div>

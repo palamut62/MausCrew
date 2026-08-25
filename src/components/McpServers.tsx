@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { CheckCircle, Flask, Plus, Spinner, Trash, WarningCircle } from "@phosphor-icons/react";
+import { Spin } from "./Spin";
+import { CheckCircle, Flask, Plus, Trash, WarningCircle } from "@phosphor-icons/react";
 
 import { useStore, type ConfigStatus } from "@/state/store";
 
@@ -122,7 +123,7 @@ export function McpServers() {
             </div>
           </div>
           <button onClick={() => void remove(server)} disabled={Boolean(busy)} className="rounded-md p-2 text-danger hover:bg-danger/10" title="Remove MCP server">
-            {busy === `remove:${server.id}` ? <Spinner size={15} className="animate-spin" /> : <Trash size={15} />}
+            {busy === `remove:${server.id}` ? <Spin size={15} /> : <Trash size={15} />}
           </button>
         </div>
       ))}
@@ -151,7 +152,7 @@ export function McpServers() {
           </div>
         )}
         <button onClick={() => void testAndAdd()} disabled={!name.trim() || !command.trim() || Boolean(busy)} className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[12px] font-semibold text-black disabled:opacity-40">
-          {busy === "add" ? <Spinner size={14} className="animate-spin" /> : <><Flask size={14} /><Plus size={13} weight="bold" /></>} Test and add
+          {busy === "add" ? <Spin size={14} /> : <><Flask size={14} /><Plus size={13} weight="bold" /></>} Test and add
         </button>
       </div>
 

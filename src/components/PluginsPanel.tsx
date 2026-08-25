@@ -3,7 +3,8 @@
 // Composio API key is configured, a curated set otherwise. Icons resolve
 // logo → favicon → monogram.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowClockwise, ArrowSquareOut, Check, Copy, Spinner, X } from "@phosphor-icons/react";
+import { Spin } from "./Spin";
+import { ArrowClockwise, ArrowSquareOut, Check, Copy, X } from "@phosphor-icons/react";
 import { api, useStore } from "@/state/store";
 import { cn } from "@/lib/cn";
 
@@ -211,7 +212,7 @@ export function PluginsPanel() {
               className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
               title="Refresh connection status"
             >
-              <ArrowClockwise size={15} weight="bold" className={cn(refreshing && "animate-spin")} />
+              <ArrowClockwise size={15} weight="bold" className={cn(refreshing && "maus-spin")} />
             </button>
             <button
               onClick={() => dispatch({ type: "togglePlugins", open: false })}
@@ -335,7 +336,7 @@ export function PluginsPanel() {
         <div className="mt-4 grid min-h-0 flex-1 grid-cols-1 content-start gap-2 overflow-y-auto md:grid-cols-2">
           {cards === null ? (
             <div className="flex items-center justify-center gap-2 py-8 text-[13px] text-ink-secondary">
-              <Spinner size={14} weight="fill" className="animate-spin" /> Loading catalog…
+              <Spin size={14} weight="fill" /> Loading catalog…
             </div>
           ) : (
             visible.map((card) => {
@@ -365,7 +366,7 @@ export function PluginsPanel() {
                     )}
                   >
                     {busy ? (
-                      <Spinner size={13} weight="fill" className="mx-auto animate-spin" />
+                      <Spin size={13} weight="fill" className="mx-auto" />
                     ) : connected ? (
                       "Disconnect"
                     ) : (

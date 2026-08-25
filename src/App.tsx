@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { List, Spinner } from "@phosphor-icons/react";
+import { Spin } from "@/components/Spin";
+import { List } from "@phosphor-icons/react";
 import { StoreProvider, useStore } from "@/state/store";
 import { Onboarding } from "@/components/Onboarding";
 import { emailGateDone, initAnalytics } from "@/lib/analytics";
@@ -115,7 +116,7 @@ function Shell() {
         <ChatView bot={bot} />
       ) : (
         <main className="flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-3 bg-app text-ink-secondary">
-          <Spinner size={20} weight="fill" className="animate-spin" />
+          <Spin size={20} weight="fill" />
           <div className="text-[14px]">
             {state.connected ? "No bots yet" : "Connecting to the bot server…"}
           </div>

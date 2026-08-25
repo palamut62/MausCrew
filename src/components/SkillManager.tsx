@@ -1,4 +1,5 @@
-import { ArrowClockwise, CaretLeft, Check, FileText, FloppyDisk, GraduationCap, MagnifyingGlass, Plus, Spinner, Trash, Warning, X } from "@phosphor-icons/react";
+import { ArrowClockwise, CaretLeft, Check, FileText, FloppyDisk, GraduationCap, MagnifyingGlass, Plus, Trash, Warning, X } from "@phosphor-icons/react";
+import { Spin } from "./Spin";
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
 
 import { cn } from "@/lib/cn";
@@ -328,7 +329,7 @@ export function SkillManager({ bot, onClose }: { bot: Bot; onClose: () => void }
                   onClick={() => void save()}
                   className="flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-[12.5px] font-medium text-app hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {busy ? <Spinner size={14} weight="fill" className="animate-spin" /> : <FloppyDisk size={14} weight="bold" />} Save skill
+                  {busy ? <Spin size={14} weight="fill" /> : <FloppyDisk size={14} weight="bold" />} Save skill
                 </button>
               </div>
             </div>
@@ -354,7 +355,7 @@ export function SkillManager({ bot, onClose }: { bot: Bot; onClose: () => void }
                 title="Refresh skills"
                 className="rounded-lg border border-hairline bg-card px-2.5 text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-50"
               >
-                <ArrowClockwise size={15} weight="bold" className={cn(refreshing && "animate-spin")} />
+                <ArrowClockwise size={15} weight="bold" className={cn(refreshing && "maus-spin")} />
               </button>
               <button type="button" onClick={openNew} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 text-[12.5px] font-medium text-app hover:brightness-110">
                 <Plus size={15} weight="bold" /> New
@@ -366,7 +367,7 @@ export function SkillManager({ bot, onClose }: { bot: Bot; onClose: () => void }
               disabled={busy}
               className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-accent/25 bg-accent/10 px-3 py-2 text-[12px] font-medium text-accent hover:bg-accent/15 disabled:opacity-50"
             >
-              {busy ? <Spinner size={14} weight="fill" className="animate-spin" /> : <GraduationCap size={15} weight="bold" />}
+              {busy ? <Spin size={14} weight="fill" /> : <GraduationCap size={15} weight="bold" />}
               Teach from current task
             </button>
             <div className="mt-1.5 text-[10.5px] leading-relaxed text-ink-secondary">
@@ -376,7 +377,7 @@ export function SkillManager({ bot, onClose }: { bot: Bot; onClose: () => void }
 
           <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
             {skills === null ? (
-              <div className="flex items-center justify-center gap-2 py-12 text-[13px] text-ink-secondary"><Spinner size={15} weight="fill" className="animate-spin" /> Loading skills…</div>
+              <div className="flex items-center justify-center gap-2 py-12 text-[13px] text-ink-secondary"><Spin size={15} weight="fill" /> Loading skills…</div>
             ) : visible.length === 0 ? (
               <div className="rounded-xl border border-dashed border-hairline px-5 py-10 text-center">
                 <FileText size={24} className="mx-auto text-ink-secondary" />

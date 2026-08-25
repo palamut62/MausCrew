@@ -1,7 +1,8 @@
 import { track } from "@/lib/analytics";
+import { Spin } from "./Spin";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowClockwise, ArrowLineDown, BellRinging, CalendarDots, Check, ClipboardText, Copy, Crown, EyeSlash, FileArrowUp, FolderPlus, Gear, MagnifyingGlass, Pencil, Plus, PushPin, PushPinSlash, PuzzlePiece, Robot as BotIcon, Spinner, Trash, Users } from "@phosphor-icons/react";
+import { ArrowClockwise, ArrowLineDown, BellRinging, CalendarDots, Check, ClipboardText, Copy, Crown, EyeSlash, FileArrowUp, FolderPlus, Gear, MagnifyingGlass, Pencil, Plus, PushPin, PushPinSlash, PuzzlePiece, Robot as BotIcon, Trash, Users } from "@phosphor-icons/react";
 import { api, useStore, formatTime, visibleMessages, type Bot, type Group, type Message } from "@/state/store";
 import { MausAvatar, InitialsAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot-motion";
@@ -87,7 +88,7 @@ function UpdateButton() {
       className="relative rounded-md p-2 text-accent hover:bg-raised disabled:opacity-60"
     >
       {working ? (
-        <Spinner size={18} weight="fill" className="animate-spin" />
+        <Spin size={18} weight="fill" />
       ) : upToDate ? (
         <Check size={18} weight="fill" />
       ) : status === "available" ? (
@@ -417,7 +418,7 @@ function ImportTeamPanel({
             disabled={working}
             className="flex items-center gap-2 rounded-lg bg-accent px-3.5 py-2 text-[13.5px] font-medium text-app hover:bg-accent/90 disabled:opacity-60"
           >
-            {working ? <Spinner size={15} weight="fill" className="animate-spin" /> : <FileArrowUp size={15} weight="bold" />}
+            {working ? <Spin size={15} weight="fill" /> : <FileArrowUp size={15} weight="bold" />}
             {working ? "Importing…" : "Import Team"}
           </button>
         </div>
@@ -601,7 +602,7 @@ function ExportTeamPanel({
               disabled={working || !name.trim() || picked.size === 0}
               className="flex items-center gap-2 rounded-lg bg-accent px-3.5 py-2 text-[13.5px] font-medium text-app hover:bg-accent/90 disabled:opacity-40"
             >
-              {working ? <Spinner size={15} weight="fill" className="animate-spin" /> : <ArrowLineDown size={15} weight="bold" />}
+              {working ? <Spin size={15} weight="fill" /> : <ArrowLineDown size={15} weight="bold" />}
               {working ? "Exporting…" : "Export"}
             </button>
           </div>

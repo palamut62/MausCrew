@@ -1,5 +1,6 @@
 import { Component, memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ArrowClockwise, ArrowDown, Brain, CaretDown, CaretLeft, CaretRight, Check, Copy, Crown, GitFork, Monitor, Pencil, Spinner, Square, Warning, WebhooksLogo, X } from "@phosphor-icons/react";
+import { Spin } from "./Spin";
+import { ArrowClockwise, ArrowDown, Brain, CaretDown, CaretLeft, CaretRight, Check, Copy, Crown, GitFork, Monitor, Pencil, Square, Warning, WebhooksLogo, X } from "@phosphor-icons/react";
 import {
   useStore,
   useStreaming,
@@ -426,7 +427,7 @@ function ActivityChip({ message }: { message: Message }) {
         )}
       >
         {tool.ok === undefined ? (
-          <Spinner size={13} weight="fill" className="animate-spin" />
+          <Spin size={13} weight="fill" />
         ) : failed ? (
           <X size={13} weight="bold" />
         ) : (
@@ -464,7 +465,7 @@ function SubagentActivityCard({ message }: { message: Message }) {
           className="flex w-full items-center gap-2 px-3 py-2 text-left"
         >
           {running ? (
-            <Spinner size={14} weight="fill" className="shrink-0 animate-spin text-accent" />
+            <Spin size={14} weight="fill" className="shrink-0 text-accent" />
           ) : failed ? (
             <X size={14} weight="bold" className="shrink-0 text-danger" />
           ) : (
@@ -757,7 +758,7 @@ export function ChatView({ bot }: { bot: Bot }) {
               <Crown size={11} weight="fill" /> Chief of Staff
             </span>
           )}
-          {bot.busy && <Spinner size={14} weight="fill" className="animate-spin text-accent" />}
+          {bot.busy && <Spin size={14} weight="fill" className="text-accent" />}
         </button>
         <div className="flex items-center gap-2" style={noDrag}>
           {bot.busy && (
@@ -836,7 +837,7 @@ export function ChatView({ bot }: { bot: Bot }) {
           {provisioning && (
             <div className="flex justify-start">
               <div className="flex items-center gap-2 rounded-md border border-hairline bg-panel px-3 py-1.5 text-[13px] text-ink-secondary">
-                <Spinner size={13} weight="fill" className="animate-spin" />
+                <Spin size={13} weight="fill" />
                 Setting up this bot's computer…
               </div>
             </div>

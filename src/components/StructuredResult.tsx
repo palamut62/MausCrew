@@ -1,4 +1,5 @@
-import { Check, Circle, Spinner, WarningCircle, X } from "@phosphor-icons/react";
+import { Check, Circle, WarningCircle, X } from "@phosphor-icons/react";
+import { Spin } from "./Spin";
 
 import type { Message } from "@/state/store";
 
@@ -16,7 +17,7 @@ export function StructuredResult({ message }: { message: Message }) {
     case "table":
       return <div className={`${shell} overflow-x-auto`}><table className="w-full min-w-[420px] border-collapse text-left text-[12px]"><thead className="bg-inset text-ink-secondary"><tr>{props.columns.map((column: string, index: number) => <th key={index} className="border-b border-hairline px-3 py-2 font-medium">{column}</th>)}</tr></thead><tbody>{props.rows.map((row: unknown[], rowIndex: number) => <tr key={rowIndex} className="border-b border-hairline last:border-0">{props.columns.map((_column: string, cellIndex: number) => <td key={cellIndex} className="max-w-[320px] px-3 py-2 text-ink">{String(row[cellIndex] ?? "")}</td>)}</tr>)}</tbody></table></div>;
     case "task-list":
-      return <div className={`${shell} p-3`}>{props.title && <div className="mb-2 px-1 text-[13px] font-medium text-ink">{props.title}</div>}<div className="space-y-1">{props.items.map((item: any, index: number) => <div key={index} className="flex items-center gap-2 rounded-lg bg-inset px-3 py-2 text-[12px] text-ink">{item.status === "done" ? <Check size={14} className="text-success" /> : item.status === "failed" ? <X size={14} className="text-danger" /> : item.status === "running" ? <Spinner size={14} className="animate-spin text-accent" /> : <Circle size={13} className="text-ink-secondary" />}<span>{item.label}</span></div>)}</div></div>;
+      return <div className={`${shell} p-3`}>{props.title && <div className="mb-2 px-1 text-[13px] font-medium text-ink">{props.title}</div>}<div className="space-y-1">{props.items.map((item: any, index: number) => <div key={index} className="flex items-center gap-2 rounded-lg bg-inset px-3 py-2 text-[12px] text-ink">{item.status === "done" ? <Check size={14} className="text-success" /> : item.status === "failed" ? <X size={14} className="text-danger" /> : item.status === "running" ? <Spin size={14} className="text-accent" /> : <Circle size={13} className="text-ink-secondary" />}<span>{item.label}</span></div>)}</div></div>;
     case "timeline":
       return <div className={`${shell} p-4`}>{props.title && <div className="mb-3 text-[13px] font-medium text-ink">{props.title}</div>}<div className="space-y-3 border-l border-accent/30 pl-4">{props.items.map((item: any, index: number) => <div key={index} className="relative"><span className="absolute -left-[19px] top-1 size-2 rounded-full bg-accent" /><div className="flex items-start justify-between gap-3"><span className="text-[12.5px] font-medium text-ink">{item.title}</span>{item.time && <span className="font-mono text-[10px] text-ink-secondary">{item.time}</span>}</div>{item.detail && <div className="mt-0.5 text-[11.5px] text-ink-secondary">{item.detail}</div>}</div>)}</div></div>;
     case "status-grid":

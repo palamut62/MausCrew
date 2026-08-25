@@ -565,3 +565,19 @@ body {
 
   .maus-eyes { transform: none; }
 }
+
+/* One spinner phase for the whole window. Tailwind's animate-spin starts when
+   its element mounts, so spinners that appear at different moments never agree;
+   .maus-spin pairs this with a negative animation-delay computed at mount
+   (lib/spin-sync) so they all show the same angle. */
+@keyframes maus-spin {
+  to { transform: rotate(360deg); }
+}
+
+.maus-spin {
+  animation: maus-spin 1000ms linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .maus-spin { animation: none; }
+}
