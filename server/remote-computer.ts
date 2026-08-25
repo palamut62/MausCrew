@@ -22,8 +22,18 @@ const REMOTE_CUA_WHEELS = {
 const CDP_HELPER_SOURCE = String.raw`const [action, encoded = ""] = process.argv.slice(2);
 const input = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8") || "{}");
 const pages = await fetch("http://127.0.0.1:9222/json/list").then((r) => r.json());
-const page = pages.find((item) => item.type === "page" && item.webSocketDebuggerUrl);
-if (!page) throw new Error("no debuggable browser page");
+const tabs = pages.filter((item) => item.type === "page" && item.webSocketDebuggerUrl);
+if (action === "tabs" && !input.target) {
+  process.stdout.write(JSON.stringify({ tabs: tabs.map((tab, index) => ({ ref: "t" + index, title: String(tab.title ?? "").slice(0, 200), url: tab.url, active: index === 0 })) }));
+  process.exit(0);
+}
+// Every action used to run against tabs[0]. Chrome lists the most recently
+// active page first, so it was usually right and silently wrong the moment a
+// bot opened a second tab: the snapshot described one page while the click
+// landed on another. A target makes the choice explicit.
+const targetMatch = /^t(\d+)$/.exec(String(input.target ?? ""));
+const page = targetMatch ? tabs[Number(targetMatch[1])] : tabs[0];
+if (!page) throw new Error(targetMatch ? "no such browser tab; take a new browser_tabs listing" : "no debuggable browser page");
 if (input.url && page.url !== input.url) throw new Error("page changed; take a new browser snapshot");
 const socket = new WebSocket(page.webSocketDebuggerUrl);
 await new Promise((resolve, reject) => {
@@ -85,6 +95,48 @@ if (action === "snapshot") {
   await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Backspace", code: "Backspace" });
   await send("Input.insertText", { text: String(input.text ?? "") });
   process.stdout.write(JSON.stringify({ ok: true, ref: input.ref }));
+} else if (action === "tabs") {
+  await send("Page.bringToFront");
+  process.stdout.write(JSON.stringify({ ok: true, activated: input.target, title: String(page.title ?? "").slice(0, 200), url: page.url }));
+} else if (action === "select") {
+  // A native <select> ignores typing, and clicking it opens a popup the OS
+  // draws - invisible to the accessibility tree and unclickable by ref. Set
+  // the value on the element and fire the events a page listens for instead.
+  const backendNodeId = refId(input.ref);
+  const { object } = await send("DOM.resolveNode", { backendNodeId });
+  if (!object?.objectId) throw new Error("element is gone; take a new snapshot");
+  const { result, exceptionDetails } = await send("Runtime.callFunctionOn", {
+    objectId: object.objectId,
+    functionDeclaration: "function(wanted){if(this.tagName!=='SELECT')return 'not-a-select';const options=Array.from(this.options);const hit=options.find(o=>o.value===wanted)||options.find(o=>o.label===wanted)||options.find(o=>(o.textContent||'').trim()===wanted);if(!hit)return 'no-option:'+options.map(o=>(o.textContent||'').trim()).slice(0,25).join(' | ');this.value=hit.value;this.dispatchEvent(new Event('input',{bubbles:true}));this.dispatchEvent(new Event('change',{bubbles:true}));return 'ok';}",
+    arguments: [{ value: String(input.value ?? "") }],
+    returnByValue: true,
+  });
+  if (exceptionDetails) throw new Error("could not set the option");
+  const outcome = String(result?.value ?? "");
+  if (outcome === "not-a-select") throw new Error("that ref is not a dropdown; use browser_click or browser_fill");
+  if (outcome.startsWith("no-option:")) throw new Error("no such option. Available: " + outcome.slice(10));
+  process.stdout.write(JSON.stringify({ ok: true, ref: input.ref, value: input.value }));
+} else if (action === "key") {
+  // Page-scoped, unlike the desktop press_key: it reaches the focused element
+  // whether or not the browser window happens to own OS focus.
+  const key = String(input.key ?? "");
+  const named = { Enter: { code: "Enter", keyCode: 13, text: "\r" }, Tab: { code: "Tab", keyCode: 9 }, Escape: { code: "Escape", keyCode: 27 }, Backspace: { code: "Backspace", keyCode: 8 }, Delete: { code: "Delete", keyCode: 46 }, ArrowUp: { code: "ArrowUp", keyCode: 38 }, ArrowDown: { code: "ArrowDown", keyCode: 40 }, ArrowLeft: { code: "ArrowLeft", keyCode: 37 }, ArrowRight: { code: "ArrowRight", keyCode: 39 }, PageDown: { code: "PageDown", keyCode: 34 }, PageUp: { code: "PageUp", keyCode: 33 }, Home: { code: "Home", keyCode: 36 }, End: { code: "End", keyCode: 35 } }[key];
+  if (!named) throw new Error("unsupported key: " + key);
+  if (input.ref) await send("DOM.focus", { backendNodeId: refId(input.ref) });
+  const base = { key, code: named.code, windowsVirtualKeyCode: named.keyCode, nativeVirtualKeyCode: named.keyCode };
+  await send("Input.dispatchKeyEvent", { type: named.text ? "keyDown" : "rawKeyDown", ...base, ...(named.text ? { text: named.text } : {}) });
+  await send("Input.dispatchKeyEvent", { type: "keyUp", ...base });
+  process.stdout.write(JSON.stringify({ ok: true, key }));
+} else if (action === "text") {
+  // The snapshot lists controls, not prose. Asking a bot to read an article
+  // left it with nothing but a screenshot to squint at.
+  const { result } = await send("Runtime.evaluate", {
+    expression: "(()=>{const drop=document.querySelectorAll('script,style,noscript,svg');for(const n of drop)n.remove();const main=document.querySelector('main,article,[role=main]')||document.body;return (main.innerText||'').replace(/\n{3,}/g,'\n\n').trim();})()",
+    returnByValue: true,
+  });
+  const full = String(result?.value ?? "");
+  const limit = Math.min(Number(input.maxChars) || 20000, 60000);
+  process.stdout.write(JSON.stringify({ title: String(page.title ?? "").slice(0, 200), url: page.url, text: full.slice(0, limit), truncated: full.length > limit }));
 } else {
   throw new Error("unknown browser action");
 }
@@ -147,7 +199,9 @@ export function remoteComputerBootstrapCommand(botName: string): string {
   ].join("\n");
 }
 
-export function semanticBrowserCommand(action: "snapshot" | "click" | "fill", input: unknown): string {
+export type SemanticBrowserAction = "snapshot" | "click" | "fill" | "tabs" | "select" | "key" | "text";
+
+export function semanticBrowserCommand(action: SemanticBrowserAction, input: unknown): string {
   const encoded = Buffer.from(JSON.stringify(input ?? {})).toString("base64url");
   return `node ${REMOTE_CDP_HELPER} ${action} ${shellQuote(encoded)}`;
 }

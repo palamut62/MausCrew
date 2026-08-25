@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 
@@ -42,5 +43,35 @@ describe("remote Cua computer setup", () => {
     expect(command).toContain("mauscrew-cdp.mjs fill");
     expect(command).not.toContain("don't expand");
     expect(command).not.toContain("$HOME");
+  });
+  // The CDP helper is shipped as a string and run on the box, so nothing in
+  // this repo's toolchain would notice if it stopped being valid JavaScript.
+  it("ships a browser helper that actually parses, and covers every action", () => {
+    const source = readFileSync(new URL("./remote-computer.ts", import.meta.url), "utf8");
+    const helperPattern = new RegExp("const CDP_HELPER_SOURCE = String.raw`([\\s\\S]*?)`;");
+    const helper = helperPattern.exec(source)?.[1];
+    expect(helper, "CDP helper source not found").toBeTruthy();
+    expect(() => new Function(`return (async () => {${helper}})`)).not.toThrow();
+    for (const action of ["snapshot", "click", "fill", "tabs", "select", "key", "text"]) {
+      expect(helper, `helper handles ${action}`).toContain(`action === "${action}"`);
+    }
+  });
+
+  // Every browser tool but browser_tabs acts on the front tab. Before the
+  // target existed they all silently ran against whichever page Chrome listed
+  // first, so a bot that opened a second tab described one page and clicked
+  // another.
+  it("lets a caller name the tab instead of always taking the first", () => {
+    const command = semanticBrowserCommand("snapshot", { target: "t2" });
+    const decoded = JSON.parse(
+      Buffer.from(command.split(" ").pop()!.replace(/'/g, ""), "base64url").toString("utf8"),
+    );
+    expect(decoded.target).toBe("t2");
+  });
+
+  it("keeps a dropdown value out of the shell", () => {
+    const command = semanticBrowserCommand("select", { ref: "b3", value: "$(whoami)" });
+    expect(command).toContain("mauscrew-cdp.mjs select");
+    expect(command).not.toContain("whoami");
   });
 });
