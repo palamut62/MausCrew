@@ -18,7 +18,8 @@
 // it happens, which is why waiting feels like listening to someone work
 // rather than listening to nothing.
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { Phone, PhoneSlash, Spinner, X } from "@phosphor-icons/react";
+import { Spin } from "./Spin";
+import { Phone, PhoneSlash, X } from "@phosphor-icons/react";
 
 import { useStore, visibleMessages, type Bot } from "@/state/store";
 import { currentCall, deferCallCleanup, endCall, startCall, useOnCall } from "@/lib/call";
@@ -483,7 +484,7 @@ function Call({ bot }: { bot: Bot }) {
       <div className="flex flex-col items-center gap-1.5 text-center">
         <div className="text-[20px] font-medium text-ink">{bot.name}</div>
         <div className="flex items-center gap-2 text-[13.5px] text-ink-secondary">
-          {(phase === "working" || phase === "sending") && <Spinner size={13} weight="fill" className="animate-spin" />}
+          {(phase === "working" || phase === "sending") && <Spin size={13} weight="fill" />}
           {status}
         </div>
       </div>

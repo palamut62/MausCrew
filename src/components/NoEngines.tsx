@@ -4,7 +4,8 @@
 // completely functional until the first message, then fails with a raw spawn
 // error. Every engine unavailable is a setup state, not an error state, so it
 // gets a screen that says what to do rather than a bot that can't answer.
-import { ArrowClockwise, Spinner } from "@phosphor-icons/react";
+import { ArrowClockwise } from "@phosphor-icons/react";
+import { Spin } from "./Spin";
 import { useState } from "react";
 import { useStore } from "@/state/store";
 import { EngineSetup, installCommandFor } from "@/components/EngineSetup";
@@ -60,7 +61,7 @@ export function NoEngines() {
           disabled={rechecking}
           className="mt-6 flex items-center gap-2 rounded-lg bg-raised px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-60"
         >
-          {rechecking ? <Spinner size={14} weight="fill" className="animate-spin" /> : <ArrowClockwise size={14} weight="bold" />}
+          {rechecking ? <Spin size={14} weight="fill" /> : <ArrowClockwise size={14} weight="bold" />}
           {rechecking ? "Checking…" : "Check again"}
         </button>
       </div>

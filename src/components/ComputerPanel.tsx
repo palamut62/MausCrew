@@ -5,7 +5,8 @@
 // bridge — box endpoints are never touched); off → parked. Auto (unset)
 // prefers a ready Local VM, then an existing cloud box, then this computer.
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { ArrowClockwise, ArrowSquareOut, CalendarDot, CalendarDots, Gear, Monitor, Moon, Plus, Power, Spinner, Trash, X } from "@phosphor-icons/react";
+import { Spin } from "./Spin";
+import { ArrowClockwise, ArrowSquareOut, CalendarDot, CalendarDots, Gear, Monitor, Moon, Plus, Power, Trash, X } from "@phosphor-icons/react";
 import { useStore, type Bot } from "@/state/store";
 import type { Routine } from "@/lib/routines";
 import { ApiKeyRow } from "./ApiKeys";
@@ -438,7 +439,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
           ) : (
             <div className="flex flex-col items-center gap-2 px-6 text-center text-ink-secondary">
               {phase === "checking" || phase === "starting" || phase === "local" || phase === "vm" ? (
-                <Spinner size={18} weight="fill" className="animate-spin" />
+                <Spin size={18} weight="fill" />
               ) : phase === "off" ? (
                 <Power size={22} />
               ) : (
@@ -500,7 +501,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
               disabled={pending === "join"}
               className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-raised py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
             >
-              {pending === "join" ? <Spinner size={14} weight="fill" className="animate-spin" /> : <ArrowSquareOut size={14} weight="bold" />}
+              {pending === "join" ? <Spin size={14} weight="fill" /> : <ArrowSquareOut size={14} weight="bold" />}
               Open desktop
             </button>
             {boxState !== "archived" && (
@@ -510,7 +511,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
                 className="flex items-center justify-center gap-2 rounded-lg bg-raised px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
                 title="Put the computer to sleep"
               >
-                {pending === "sleep" ? <Spinner size={14} weight="fill" className="animate-spin" /> : <Moon size={14} weight="bold" />}
+                {pending === "sleep" ? <Spin size={14} weight="fill" /> : <Moon size={14} weight="bold" />}
                 Sleep
               </button>
             )}
@@ -520,7 +521,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
               className="flex items-center justify-center gap-2 rounded-lg bg-raised px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
               title="Replace this computer but keep the bot"
             >
-              {pending === "reset" ? <Spinner size={14} weight="fill" className="animate-spin" /> : <ArrowClockwise size={14} weight="bold" />}
+              {pending === "reset" ? <Spin size={14} weight="fill" /> : <ArrowClockwise size={14} weight="bold" />}
               Reset
             </button>
             <button
@@ -529,7 +530,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
               className="flex items-center justify-center gap-2 rounded-lg border border-danger/25 px-3 py-2 text-[13px] text-danger hover:bg-danger/10 disabled:opacity-50"
               title="Permanently delete this computer"
             >
-              {pending === "destroy" ? <Spinner size={14} weight="fill" className="animate-spin" /> : <Trash size={14} weight="bold" />}
+              {pending === "destroy" ? <Spin size={14} weight="fill" /> : <Trash size={14} weight="bold" />}
               Delete
             </button>
           </div>
@@ -625,7 +626,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
               onClick={() => dispatch({ type: "showRoutines" })}
               className="mt-3 flex w-full items-center gap-2 rounded-lg border border-accent/25 bg-accent/10 px-3 py-2 text-left text-[12px] text-accent hover:bg-accent/15"
             >
-              <Spinner size={13} weight="fill" className={activeRoutineRun.status === "queued" ? "" : "animate-spin"} />
+              <Spin size={13} weight="fill" spinning={activeRoutineRun.status !== "queued"} />
               <span className="min-w-0 flex-1 truncate font-mono tracking-tight">
                 {activeRoutineRun.routineName} · {activeRoutineRun.status === "waiting" ? "needs you" : activeRoutineRun.status}
               </span>

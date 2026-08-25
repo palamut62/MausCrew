@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Check, Microphone, Spinner, Warning } from "@phosphor-icons/react";
+import { Spin } from "./Spin";
+import { Check, Microphone, Warning } from "@phosphor-icons/react";
 import { MausAvatar } from "./Avatar";
 import { identifyEmail, setEmailGateDone, track } from "@/lib/analytics";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
@@ -194,7 +195,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             <div className="mt-4 flex flex-col gap-2.5">
               {!instances ? (
                 <div className="flex items-center gap-2 py-6 text-ink-secondary">
-                  <Spinner size={16} weight="fill" className="animate-spin" /> Checking…
+                  <Spin size={16} weight="fill" /> Checking…
                 </div>
               ) : (
                 <>

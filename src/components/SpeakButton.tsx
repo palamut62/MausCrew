@@ -1,4 +1,5 @@
-import { SpeakerHigh, Spinner, Square } from "@phosphor-icons/react";
+import { SpeakerHigh, Square } from "@phosphor-icons/react";
+import { Spin } from "./Spin";
 
 import { speaker } from "@/lib/tts";
 import { useSpeech } from "@/lib/tts/useSpeech";
@@ -52,7 +53,7 @@ export function SpeakButton({
         className,
       )}
     >
-      {preparing ? <Spinner size={14} weight="fill" className="animate-spin" /> : mine ? <Square size={14} weight="fill" /> : <SpeakerHigh size={14} weight="bold" />}
+      {preparing ? <Spin size={14} weight="fill" /> : mine ? <Square size={14} weight="fill" /> : <SpeakerHigh size={14} weight="bold" />}
     </button>
   );
 }

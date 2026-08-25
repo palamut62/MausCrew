@@ -3,7 +3,8 @@
 // The voice list comes from the harness, which holds the key — the
 // renderer never talks to ElevenLabs itself.
 import { useEffect, useState } from "react";
-import { Check, SpeakerHigh, Spinner } from "@phosphor-icons/react";
+import { Spin } from "./Spin";
+import { Check, SpeakerHigh } from "@phosphor-icons/react";
 
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import { speaker } from "@/lib/tts";
@@ -87,7 +88,7 @@ export function VoiceSettings() {
             disabled={saving || !key.trim()}
             className="flex w-[72px] shrink-0 items-center justify-center gap-1.5 rounded-lg bg-raised py-2 text-[13px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {saving ? <Spinner size={13} weight="fill" className="animate-spin" /> : <><Check size={13} weight="fill" />Save</>}
+            {saving ? <Spin size={13} weight="fill" /> : <><Check size={13} weight="fill" />Save</>}
           </button>
         </div>
         {!configured && (

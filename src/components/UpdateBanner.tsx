@@ -2,7 +2,8 @@
 // It stays out of the way while idle/checking and appears only when the user
 // can act on an update (or when a manual attempt needs retrying).
 import { useEffect, useState } from "react";
-import { ArrowClockwise, ArrowLineDown, Sparkle, Spinner } from "@phosphor-icons/react";
+import { Spin } from "./Spin";
+import { ArrowClockwise, ArrowLineDown, Sparkle } from "@phosphor-icons/react";
 import { useUpdaterState } from "@/lib/updater";
 import { cn } from "@/lib/cn";
 
@@ -99,7 +100,7 @@ export function SidebarUpdateCard() {
             disabled
             className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-raised py-1.5 text-[13px] font-medium text-ink-secondary"
           >
-            <Spinner size={13} weight="fill" className="animate-spin" /> Restarting…
+            <Spin size={13} weight="fill" /> Restarting…
           </button>
         </div>
       )}
@@ -117,7 +118,7 @@ export function SidebarUpdateCard() {
             >
               {pending === "download" ? (
                 <>
-                  <Spinner size={13} weight="fill" className="animate-spin" /> Starting…
+                  <Spin size={13} weight="fill" /> Starting…
                 </>
               ) : (
                 <>
@@ -137,7 +138,7 @@ export function SidebarUpdateCard() {
             >
               {pending === "install" ? (
                 <>
-                  <Spinner size={13} weight="fill" className="animate-spin" /> Restarting…
+                  <Spin size={13} weight="fill" /> Restarting…
                 </>
               ) : (
                 <>
@@ -157,7 +158,7 @@ export function SidebarUpdateCard() {
             >
               {pending === "check" ? (
                 <>
-                  <Spinner size={13} weight="fill" className="animate-spin" /> Checking…
+                  <Spin size={13} weight="fill" /> Checking…
                 </>
               ) : (
                 "Try again"

@@ -1,6 +1,7 @@
 // One-place setup and lifecycle for the shared, isolated Local VM.
 import { useCallback, useEffect, useState } from "react";
-import { ArrowClockwise, ArrowCounterClockwise, ArrowSquareOut, Check, Circle, Spinner, Square, Trash, Warning } from "@phosphor-icons/react";
+import { Spin } from "./Spin";
+import { ArrowClockwise, ArrowCounterClockwise, ArrowSquareOut, Check, Circle, Square, Trash, Warning } from "@phosphor-icons/react";
 import { Card, CommandLine } from "./SettingsPrimitives";
 import { cn } from "@/lib/cn";
 
@@ -82,7 +83,7 @@ function ActionButton({
         danger ? "bg-danger/15 text-danger hover:bg-danger/20" : "bg-accent text-app hover:brightness-110",
       )}
     >
-      {pending === action && <Spinner size={13} weight="fill" className="animate-spin" />}
+      {pending === action && <Spin size={13} weight="fill" />}
       {children}
     </button>
   );
@@ -197,7 +198,7 @@ export function LocalComputerSection() {
               ready ? "bg-success/15 text-success" : "bg-raised text-ink-secondary",
             )}
           >
-            {loading ? <Spinner size={12} weight="fill" className="animate-spin" /> : ready ? <Check size={12} weight="fill" /> : <Circle size={9} weight="fill" />}
+            {loading ? <Spin size={12} weight="fill" /> : ready ? <Check size={12} weight="fill" /> : <Circle size={9} weight="fill" />}
             {loading ? "Checking…" : unavailable ? "Status unavailable" : ready ? "Ready" : (status?.problem ?? "Not ready")}
           </span>
           <button
@@ -276,7 +277,7 @@ export function LocalComputerSection() {
             ) : status?.container === "stopped" ? (
               <ActionButton action="start" pending={pending} onClick={() => void act("start")}>Start Local VM</ActionButton>
             ) : status?.container === "running" ? (
-              <div className="flex items-center gap-2 text-[13px] text-ink-secondary"><Spinner size={13} weight="fill" className="animate-spin" /> Waiting for the desktop…</div>
+              <div className="flex items-center gap-2 text-[13px] text-ink-secondary"><Spin size={13} weight="fill" /> Waiting for the desktop…</div>
             ) : status?.image ? (
               <ActionButton action="run" pending={pending} onClick={() => void act("run")}>Create Local VM</ActionButton>
             ) : null}

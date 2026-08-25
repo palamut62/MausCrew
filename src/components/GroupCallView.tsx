@@ -4,7 +4,8 @@
 // native recognizer has no acoustic echo cancellation. Bot replies are
 // explicitly queued so a fast second member never cuts off the first.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { PhoneSlash, Spinner, X } from "@phosphor-icons/react";
+import { Spin } from "./Spin";
+import { PhoneSlash, X } from "@phosphor-icons/react";
 
 import { currentCall, deferCallCleanup, endCall, useOnCall } from "@/lib/call";
 import { routeSpokenGroupMessage } from "@/lib/group-call";
@@ -430,7 +431,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
       <div className="flex flex-col items-center gap-1.5 text-center">
         <div className="text-[20px] font-medium text-ink">{group.name}</div>
         <div className="flex items-center gap-2 text-[13.5px] text-ink-secondary">
-          {(phase === "working" || phase === "sending") && <Spinner size={13} weight="fill" className="animate-spin" />}
+          {(phase === "working" || phase === "sending") && <Spin size={13} weight="fill" />}
           {status}
         </div>
       </div>

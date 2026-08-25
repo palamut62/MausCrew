@@ -2,7 +2,8 @@
 // ~/.mauscrew/config.json and hot-reloads the provider fleet; secrets
 // are write-only — GET /api/config returns configured flags, never values.
 import { useEffect, useId, useRef, useState } from "react";
-import { ArrowSquareOut, Check, Question, Spinner, Warning } from "@phosphor-icons/react";
+import { Spin } from "./Spin";
+import { ArrowSquareOut, Check, Question, Warning } from "@phosphor-icons/react";
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { cn } from "@/lib/cn";
@@ -221,7 +222,7 @@ export function ApiKeyRow({
           )}
           title={clearing ? "Remove the saved key" : "Save"}
         >
-          {saving ? <Spinner size={13} weight="fill" className="animate-spin" /> : clearing ? "Clear" : <><Check size={13} weight="fill" />Save</>}
+          {saving ? <Spin size={13} weight="fill" /> : clearing ? "Clear" : <><Check size={13} weight="fill" />Save</>}
         </button>
       </div>
       {error && <div className="mt-1 text-[12px] text-danger">{error}</div>}
@@ -304,7 +305,7 @@ export function DeepSeekOptions() {
             disabled={saving || (baseUrl === null)}
             className="flex w-[72px] shrink-0 items-center justify-center gap-1.5 rounded-lg bg-raised py-2 text-[13px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {saving ? <Spinner size={13} weight="fill" className="animate-spin" /> : <><Check size={13} weight="fill" />Save</>}
+            {saving ? <Spin size={13} weight="fill" /> : <><Check size={13} weight="fill" />Save</>}
           </button>
         </div>
         {custom && (

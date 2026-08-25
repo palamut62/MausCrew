@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowSquareOut, CalendarDot, CalendarDots, CaretLeft, CaretRight, CheckCircle, Cloud, Laptop, Pause, Play, Plus, Spinner, Trash, WarningCircle, WebhooksLogo, X } from "@phosphor-icons/react";
+import { Spin } from "./Spin";
+import { ArrowSquareOut, CalendarDot, CalendarDots, CaretLeft, CaretRight, CheckCircle, Cloud, Laptop, Pause, Play, Plus, Trash, WarningCircle, WebhooksLogo, X } from "@phosphor-icons/react";
 
 import { MausAvatar } from "@/components/Avatar";
 import { WebhooksPanel } from "@/components/WebhooksPanel";
@@ -210,7 +211,7 @@ function RoutineCard({ item, bot, compact, onOpen }: { item: CalendarItem; bot: 
         <div className="min-w-0 flex-1">
           <div className="truncate text-[12px] font-semibold text-white">{title}</div>
           <div className="mt-0.5 flex items-center gap-1.5 truncate text-[10.5px] text-white/70">
-            {animated && <Spinner size={10} weight="fill" className="animate-spin" />}
+            {animated && <Spin size={10} weight="fill" />}
             <span className="font-mono tracking-tight">{niceTime(item.at)}</span>
             <span>·</span>
             {item.run?.triggerSource === "webhook" && <><WebhooksLogo size={10} weight="bold" /><span>Webhook</span><span>·</span></>}
@@ -495,7 +496,7 @@ export function RoutineEditor({
         <div className="sticky bottom-0 flex justify-end gap-2 border-t border-hairline bg-panel/95 px-5 py-4 backdrop-blur">
           <button onClick={onClose} className="rounded-xl px-4 py-2 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink">Cancel</button>
           <button onClick={save} disabled={saving || !name.trim() || !prompt.trim() || !botId} className="flex items-center gap-2 rounded-xl bg-accent px-4 py-2 text-[13px] font-medium text-app hover:brightness-110 disabled:opacity-40">
-            {saving && <Spinner size={14} weight="fill" className="animate-spin" />}{routine ? "Save changes" : "Create schedule"}
+            {saving && <Spin size={14} weight="fill" />}{routine ? "Save changes" : "Create schedule"}
           </button>
         </div>
       </div>
@@ -538,7 +539,7 @@ function RoutineDetails({ item, bot, onClose, onEdit }: { item: CalendarItem; bo
               <div className="truncate text-[20px] font-semibold text-white">{title}</div>
               <div className="mt-1 flex items-center gap-2 text-[13px] text-white/65"><span>{bot.name}</span><span>·</span><span className="font-mono tracking-tight">{niceDate(item.at)}, {niceTime(item.at)}</span></div>
               <div className={cn("mt-2 inline-flex items-center gap-1.5 rounded-md bg-black/25 px-2.5 py-1 font-mono text-[11px] font-medium capitalize tracking-tight", run ? statusTone(run.status) : "text-white/70")}>
-                {run?.status === "running" && <Spinner size={11} weight="fill" className="animate-spin" />}
+                {run?.status === "running" && <Spin size={11} weight="fill" />}
                 {run?.status === "completed" && <CheckCircle size={11} weight="fill" />}
                 {run ? run.status.replace("waiting", "needs you") : "scheduled"}
               </div>
@@ -672,7 +673,7 @@ export function RoutinesPage() {
             <p className="mt-1 text-[12.5px] text-ink-secondary">{section === "calendar" ? "Run MAUS tasks on a schedule." : "Run MAUS tasks when an event arrives."}</p>
           </div>
           <div className="flex items-center gap-2" style={noDrag}>
-            {running > 0 && <span className="flex items-center gap-1.5 rounded-md border border-accent/25 bg-accent/10 px-2.5 py-1.5 font-mono text-[11px] tracking-tight text-accent"><Spinner size={12} weight="fill" className="animate-spin" />{running} active</span>}
+            {running > 0 && <span className="flex items-center gap-1.5 rounded-md border border-accent/25 bg-accent/10 px-2.5 py-1.5 font-mono text-[11px] tracking-tight text-accent"><Spin size={12} weight="fill" />{running} active</span>}
             {unseenFailures > 0 && <span className="flex items-center gap-1.5 rounded-md border border-danger/25 bg-danger/10 px-2.5 py-1.5 font-mono text-[11px] tracking-tight text-danger"><WarningCircle size={12} weight="bold" />{unseenFailures} need attention</span>}
             {paused.length > 0 && <button onClick={() => setPausedOpen(true)} className="flex items-center gap-1.5 rounded-md border border-hairline bg-panel px-2.5 py-1.5 font-mono text-[11px] tracking-tight text-ink-secondary hover:bg-raised hover:text-ink"><Pause size={12} weight="bold" />{paused.length} paused</button>}
             {section === "calendar" && <button onClick={() => setEditor("new")} disabled={visibleBots.length === 0} className="flex items-center gap-2 rounded-xl bg-accent px-3.5 py-2 text-[13px] font-medium text-app hover:brightness-110 disabled:opacity-40"><Plus size={15} weight="bold" />New schedule</button>}
