@@ -26,6 +26,12 @@ declare global {
       support: "supported" | "limited" | "unsupported";
       reasonCode?: string;
     };
+    /** `readable: false` means a credentials file existed but could not be
+     * decrypted, so keys the user really did save are gone. */
+    credentialStore?: {
+      readable: boolean;
+      reasonCode?: string;
+    };
   };
 
   interface Window {

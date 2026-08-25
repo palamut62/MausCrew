@@ -292,3 +292,44 @@ export async function listToolkits(cfg: AppConfig): Promise<{ cards: ToolkitCard
 }
 
 export const CURATED_SLUGS = CURATED.map((c) => c.slug);
+
+const MAX_LOGO_BYTES = 512 * 1024;
+const LOGO_MIME = /^image\/(png|jpeg|gif|webp|svg\+xml|x-icon|vnd\.microsoft\.icon)$/i;
+
+/** One toolkit logo, fetched by the harness rather than by the renderer.
+ *
+ * The marketplace used to point <img> straight at Composio's CDN and, when a
+ * card had no logo, at Google's favicon service — so browsing the plugin list
+ * told Google which apps you were looking at, one request per card. Going
+ * through here ends that, and it is also what lets the app keep a
+ * `img-src 'self'` policy: the renderer never asks the open internet for a
+ * picture, so a bot reply cannot smuggle one out either.
+ *
+ * The caller passes a slug, never a URL, so this cannot be pointed at an
+ * arbitrary host. */
+export async function toolkitLogo(cfg: AppConfig, slug: string): Promise<{ mime: string; bytes: Buffer } | null> {
+  const wanted = slug.toLowerCase();
+  const { cards } = await listToolkits(cfg);
+  const card = cards.find((entry) => entry.slug.toLowerCase() === wanted)
+    ?? CURATED.find((entry) => entry.slug.toLowerCase() === wanted);
+  if (!card) return null;
+
+  const source = card.logo
+    ?? (card.domain ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(card.domain)}&sz=64` : null);
+  if (!source) return null;
+  let url: URL;
+  try {
+    url = new URL(source);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "https:") return null;
+
+  const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+  if (!res.ok) return null;
+  const mime = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+  if (!LOGO_MIME.test(mime)) return null;
+  const bytes = Buffer.from(await res.arrayBuffer());
+  if (bytes.byteLength > MAX_LOGO_BYTES) return null;
+  return { mime, bytes };
+}
