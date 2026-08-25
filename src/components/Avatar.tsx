@@ -1,7 +1,7 @@
 // Bot avatar — a compact coloured teammate face. Two asymmetric eye marks keep
 // even 20px avatars recognizable without importing another product's logo.
 import { memo } from "react";
-import { MAUS_COLORS, type MausColor } from "@/lib/mascot";
+import { MAUS_COLORS, type MausColor } from "@/lib/colors";
 
 /** Tile metrics, proportional to the box so 16px and 220px both read right. */
 const GLYPH_RATIO = 0.38;

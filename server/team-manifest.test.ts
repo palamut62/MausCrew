@@ -18,7 +18,6 @@ describe("team manifests", () => {
           title: "Lead",
           description: "Coordinates the work",
           color: "purple",
-          mascotExpression: "focused",
         },
         {
           id: "bot-b",
@@ -43,6 +42,30 @@ describe("team manifests", () => {
       },
     });
     expect(JSON.stringify(manifest)).not.toMatch(/bot-a|bot-b|thread|model|permission|message/i);
+  });
+
+  it("still imports a manifest written before the mascot engine was retired", () => {
+    // Those files carry appearance.mascotExpression. Refusing them, or carrying
+    // the value into a bot that has nowhere to show it, are both worse than
+    // reading it and dropping it on the floor.
+    const parsed = parseTeamManifest({
+      format: "mauscrew.team",
+      version: 1,
+      team: {
+        name: "Legacy Crew",
+        members: [
+          {
+            key: "ada",
+            name: "Ada",
+            title: "",
+            description: "",
+            appearance: { color: "green", mascotExpression: "focused" },
+          },
+        ],
+        room: { name: "Legacy Room", bulletin: "", defaultResponder: { kind: "everyone" } },
+      },
+    });
+    expect(parsed.team.members[0].appearance).toEqual({ color: "green" });
   });
 
   it("parses the supported portable fields and drops unrelated settings", () => {

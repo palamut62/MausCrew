@@ -399,7 +399,6 @@ export class Store {
             description: profile.description ?? "",
             notifications: true,
             color: profile.color ?? COLORS[this.bots.length % COLORS.length],
-            ...(profile.mascotExpression ? { mascotExpression: profile.mascotExpression } : {}),
             unread: false,
             modelSelection: profile.modelSelection ?? this.defaultSelection(),
             resumeCursors: {},

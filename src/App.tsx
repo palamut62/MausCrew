@@ -136,14 +136,24 @@ function Shell() {
   );
 }
 
+/** Analytics starts only after the harness says it may, so it lives inside the
+ * store rather than in App's mount effect — someone who turned it off must not
+ * have PostHog loaded for the one render before the config lands. */
+function AnalyticsGate() {
+  const { state } = useStore();
+  const enabled = state.config?.analytics?.enabled;
+  useEffect(() => {
+    if (enabled) initAnalytics(true);
+  }, [enabled]);
+  return null;
+}
+
 export default function App() {
   const [gated, setGated] = useState(() => !emailGateDone());
-  useEffect(() => {
-    initAnalytics();
-  }, []);
   return (
     <DesktopCapabilitiesProvider>
       <StoreProvider>
+        <AnalyticsGate />
         <Shell />
         {gated && <Onboarding onDone={() => setGated(false)} />}
       </StoreProvider>

@@ -179,10 +179,20 @@ export function PluginsPanel() {
   );
 
   return (
+    // Click-outside-to-close is a pointer shortcut for this dialog's real
+    // dismissal, which is Escape (keydown listener above). The backdrop is not
+    // a control, so it stays unfocusable — and it must NOT get aria-hidden
+    // either: the dialog is its child, so that would hide the whole modal from
+    // assistive tech, which is far worse than the warning being silenced here.
+    // eslint-disable-next-line jsx-a11y/click-events-have-key-events
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-6 backdrop-blur-[2px]"
       onClick={() => dispatch({ type: "togglePlugins", open: false })}
     >
+      {/* stopPropagation keeps a click inside the dialog from reaching the
+          backdrop's close handler. Event plumbing, not a control — the dialog
+          itself is reached by focus, not by clicking this element. */}
+      {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions */}
       <div
         ref={dialogRef}
         role="dialog"
@@ -316,6 +326,7 @@ export function PluginsPanel() {
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
+          aria-label="Search apps"
           placeholder="Search apps"
           className="mt-5 w-full rounded-xl border border-hairline bg-inset px-3.5 py-2.5 text-[13px] text-ink placeholder:text-ink-secondary focus:border-ink-secondary/60 focus:outline-none"
         />

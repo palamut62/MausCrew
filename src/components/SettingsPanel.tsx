@@ -2,10 +2,7 @@ import { BookOpen, CaretLeft, Crown, FolderOpen, PuzzlePiece, X } from "@phospho
 import { useEffect, useState, type CSSProperties } from "react";
 import { api, useStore, type Bot } from "@/state/store";
 import { MausAvatar } from "./Avatar";
-import {
-  MAUS_COLORS,
-  MAUS_COLOR_NAMES,
-} from "@/lib/mascot";
+import { MAUS_COLORS, MAUS_COLOR_NAMES } from "@/lib/colors";
 import { ModelPicker } from "./ModelPicker";
 import { cn } from "@/lib/cn";
 import { requestNotificationPermission } from "@/lib/notify";
@@ -50,7 +47,6 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
         | "notifications"
         | "computer"
         | "color"
-        | "mascotExpression"
         | "autoApprove"
         | "speakReplies"
         | "voice"
@@ -145,7 +141,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                 Bot
               </span>
               <button
-                onClick={() => patch({ color: "green", mascotExpression: null })}
+                onClick={() => patch({ color: "green" })}
                 className="rounded-md px-2 py-1.5 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
               >
                 Reset
@@ -153,10 +149,6 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
             </div>
 
             <div className="p-3">
-              {/* The old Expression picker is gone with the mascot engine:
-                  every choice rendered the same monogram tile, so fifteen
-                  buttons showed one picture. The stored value still matters
-                  to future engines, which is why Reset keeps clearing it. */}
               <div className="mb-2 font-mono text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
                 Color
               </div>
@@ -171,7 +163,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                     )}
                     style={{ backgroundColor: MAUS_COLORS[color] }}
                     title={color}
-                    aria-label={`Use ${color} mascot color`}
+                    aria-label={`Use ${color} accent`}
                   />
                 ))}
               </div>

@@ -13,8 +13,15 @@ release
 .mauscrew-scratch
 output/
 .playwright-cli/
-# Guard against malformed Windows temp paths accidentally materialized as a
-# single repository-relative directory by cross-platform runtime tests.
+# A tripwire, not a workaround. The DeepSeek runtime lives inside WSL, so every
+# host path handed to it goes through runtimePath() (deepseek/process-manager.ts)
+# first. A Windows path that skips that seam is read as a RELATIVE Linux name and
+# the runtime creates one directory literally called
+#   C:\Users\...\Temp\...
+# One such fossil (from a pre-rename live sandbox run) sat here and was removed
+# on 2026-08-24. Turn cwd and tool paths are both mapped today, so this pattern
+# should never match again — it stays because the live sandbox test needs a real
+# key plus WSL and therefore never runs in CI.
 C*Users*AppData*Local*Temp*/
 
 # Local AI-agent instructions are never published with application source.

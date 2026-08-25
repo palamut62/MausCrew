@@ -4,7 +4,7 @@ import type { SkillInput } from "../skills.ts";
 function safeText(value: string, max = 800) {
   return value
     .replace(/\b(?:xai-|sk-|ghp_|github_pat_|box_|ak_)[A-Za-z0-9_.-]{8,}\b/g, "[REDACTED_TOKEN]")
-    .replace(/\b(Bearer\s+)[A-Za-z0-9._~+\/-]{8,}/gi, "$1[REDACTED]")
+    .replace(/\b(Bearer\s+)[A-Za-z0-9._~+/-]{8,}/gi, "$1[REDACTED]")
     .replace(/\b([A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD))\s*=\s*([^\s]+)/g, "$1=[REDACTED]")
     .trim()
     .slice(0, max);

@@ -86,6 +86,14 @@ function CodeBlock({ code, lang, streaming }: { code: string; lang: string; stre
   );
 }
 
+/** Real h1-h6 at chat-bubble size. The level carries the outline; the class
+ * carries the look. */
+function heading(Tag: "h1" | "h2" | "h3" | "h4" | "h5" | "h6", className: string) {
+  return function Heading({ children }: { children?: ReactNode }) {
+    return <Tag className={`${className} font-semibold`}>{children}</Tag>;
+  };
+}
+
 function ChatMarkdownComponent({ text, streaming = false }: { text: string; streaming?: boolean }) {
   return (
     <div className="chat-md min-w-0 [&>*+*]:mt-2">
@@ -124,7 +132,7 @@ function ChatMarkdownComponent({ text, streaming = false }: { text: string; stre
               <a
                 href={href}
                 target="_blank"
-                rel="noreferrer"
+                rel="noopener noreferrer"
                 className="break-words text-accent underline decoration-accent/40 hover:decoration-accent"
               >
                 {children}
@@ -152,24 +160,16 @@ function ChatMarkdownComponent({ text, streaming = false }: { text: string; stre
           ol({ children }: { children?: ReactNode }) {
             return <ol className="list-decimal space-y-1 pl-5">{children}</ol>;
           },
-          h1({ children }: { children?: ReactNode }) {
-            return <div className="mt-2 text-[16px] font-semibold">{children}</div>;
-          },
-          h2({ children }: { children?: ReactNode }) {
-            return <div className="mt-2 text-[15.5px] font-semibold">{children}</div>;
-          },
-          h3({ children }: { children?: ReactNode }) {
-            return <div className="mt-1.5 font-semibold">{children}</div>;
-          },
-          h4({ children }: { children?: ReactNode }) {
-            return <div className="mt-1.5 font-semibold">{children}</div>;
-          },
-          h5({ children }: { children?: ReactNode }) {
-            return <div className="mt-1.5 text-[14px] font-semibold">{children}</div>;
-          },
-          h6({ children }: { children?: ReactNode }) {
-            return <div className="mt-1.5 text-[13.5px] font-semibold text-ink-secondary">{children}</div>;
-          },
+          // A bot reply is not a document, so a browser-sized <h1> in a chat
+          // bubble is wrong — but rendering these as <div> threw away the
+          // outline with it, and a screen reader lost every heading in every
+          // answer. Keep the tag, shrink it in CSS.
+          h1: heading("h1", "mt-2 text-[16px]"),
+          h2: heading("h2", "mt-2 text-[15.5px]"),
+          h3: heading("h3", "mt-1.5"),
+          h4: heading("h4", "mt-1.5"),
+          h5: heading("h5", "mt-1.5 text-[14px]"),
+          h6: heading("h6", "mt-1.5 text-[13.5px] text-ink-secondary"),
           blockquote({ children }: { children?: ReactNode }) {
             return (
               <blockquote className="border-l-2 border-hairline pl-3 text-ink-secondary">{children}</blockquote>

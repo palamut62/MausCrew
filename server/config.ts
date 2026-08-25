@@ -105,7 +105,29 @@ export interface AppConfig {
   /** The person using the app (collected in onboarding, shown in the
    * sidebar). Not a secret — echoed back by GET /api/config. */
   profile?: { name?: string; email?: string };
+  /** Product usage analytics (PostHog). A setting, not a secret. It lives on
+   * the harness rather than in renderer localStorage so that turning it off
+   * survives a cache clear, and so a headless host can refuse it before any
+   * renderer exists. */
+  analytics?: { enabled?: boolean };
   instances?: InstanceConfigMap;
+}
+
+/** Whether the renderer may load PostHog at all.
+ *
+ * Two ways to say no, and they are not equal. MAUSCREW_DISABLE_ANALYTICS is a
+ * hard refusal that config.json cannot re-enable — it is how a packaged build,
+ * a CI rig or an always-on host opts out for everyone. The stored flag is the
+ * user's own switch. Absent means enabled: this is an opt-OUT, and changing
+ * that default is a product decision, not a code one. */
+export function analyticsEnabled(cfg: AppConfig): boolean {
+  return !analyticsLocked() && cfg.analytics?.enabled !== false;
+}
+
+/** The env refusal is in force, so the UI toggle has nothing to offer. */
+export function analyticsLocked(): boolean {
+  const off = process.env.MAUSCREW_DISABLE_ANALYTICS;
+  return off === "1" || off?.toLowerCase() === "true";
 }
 
 // MAUSCREW_DATA_DIR isolates test/soak rigs from the user's real fleet.
@@ -172,6 +194,7 @@ export function saveConfig(patch: Partial<AppConfig>): void {
     "tts",
     "profile",
     "remoteAccess",
+    "analytics",
   ] as const) {
     if (patch[key] && typeof patch[key] === "object") {
       disk[key] = { ...(disk[key] as object), ...patch[key] };
