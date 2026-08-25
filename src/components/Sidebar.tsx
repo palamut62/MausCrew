@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { ArrowClockwise, ArrowLineDown, BellRinging, CalendarDots, Check, ClipboardText, Copy, Crown, EyeSlash, FileArrowUp, FolderPlus, Gear, MagnifyingGlass, Pencil, Plus, PushPin, PushPinSlash, PuzzlePiece, Robot as BotIcon, Spinner, Trash, Users } from "@phosphor-icons/react";
 import { api, useStore, formatTime, visibleMessages, type Bot, type Group, type Message } from "@/state/store";
 import { MausAvatar, InitialsAvatar } from "./Avatar";
+import { stateForBot } from "@/lib/mascot-motion";
 import { useUpdaterState } from "@/lib/updater";
 import { cn } from "@/lib/cn";
 import { downloadSelectedTeam } from "@/lib/team-files";
@@ -858,7 +859,7 @@ function BotListItem({ bot, onMenu }: { bot: Bot; onMenu: (menu: MenuState) => v
             : "hover:bg-raised/60",
       )}
     >
-      <MausAvatar color={bot.color} name={bot.name} size={36} />
+      <MausAvatar color={bot.color} name={bot.name} seed={bot.id} state={stateForBot(bot)} size={36} />
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2">
           <span className="flex min-w-0 items-center gap-1.5 truncate text-[15px] font-semibold text-ink">

@@ -1,7 +1,12 @@
 // Bot avatar — a compact coloured teammate face. Two asymmetric eye marks keep
 // even 20px avatars recognizable without importing another product's logo.
+//
+// The drawing now lives in MausMascot, which also moves it; this file stays the
+// call site every view already imports.
 import { memo } from "react";
-import { MAUS_COLORS, type MausColor } from "@/lib/colors";
+import { type MausColor } from "@/lib/colors";
+import { MausMascot } from "./MausMascot";
+import type { MausState } from "@/lib/mascot-motion";
 
 /** Tile metrics, proportional to the box so 16px and 220px both read right. */
 const GLYPH_RATIO = 0.38;
@@ -27,46 +32,26 @@ export type MausAvatarProps = {
   /** Accessible title/label when the avatar stands for something other
    * than `name` (a run status, a webhook target). */
   label?: string;
+  /** Mood. Omit for a resting bot; `stateForBot` derives it from live state. */
+  state?: MausState;
+  /** Stable id so two bots never breathe in unison. Defaults to the name. */
+  seed?: string;
+  /** Hold the pose — for decorative or off-screen avatars. */
+  paused?: boolean;
 };
 
-function MausAvatarComponent({ color, name, size = 44, label }: MausAvatarProps) {
-  const accent = MAUS_COLORS[color] ?? MAUS_COLORS.green;
+function MausAvatarComponent({ color, name, size = 44, label, state, seed, paused }: MausAvatarProps) {
   const title = label ?? name ?? undefined;
-
   return (
-    <span
-      className="relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-lg leading-none select-none shadow-[inset_0_0_0_1px_rgba(255,255,255,0.10)]"
-      style={{
-        width: size,
-        height: size,
-        backgroundColor: accent,
-      }}
+    <MausMascot
+      color={color}
+      state={state}
+      size={size}
+      seed={seed ?? name ?? color}
+      paused={paused}
       title={title}
-      aria-label={title}
-    >
-      <span
-        aria-hidden="true"
-        className="absolute rounded-full bg-black/85"
-        style={{
-          width: Math.max(2, Math.round(size * 0.09)),
-          height: Math.max(5, Math.round(size * 0.28)),
-          left: Math.round(size * 0.35),
-          top: Math.round(size * 0.27),
-          transform: "rotate(-7deg)",
-        }}
-      />
-      <span
-        aria-hidden="true"
-        className="absolute rounded-full bg-black/85"
-        style={{
-          width: Math.max(2, Math.round(size * 0.09)),
-          height: Math.max(4, Math.round(size * 0.22)),
-          right: Math.round(size * 0.27),
-          top: Math.round(size * 0.32),
-          transform: "rotate(-7deg)",
-        }}
-      />
-    </span>
+      className="rounded-lg"
+    />
   );
 }
 
