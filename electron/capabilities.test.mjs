@@ -61,6 +61,18 @@ describe("desktop capabilities", () => {
     });
   });
 
+  // Regression: a credentials.bin copied across the OpenMausBot→MausCrew rename
+  // decrypts nowhere on Windows (safeStorage binds to the app's own Local State
+  // key). The app reported Composio as simply unconfigured, so the user saw a
+  // key they had definitely entered silently do nothing.
+  it("reports an unreadable credential store instead of looking unconfigured", () => {
+    expect(desktopCapabilities({ platform: "win32" }).credentialStore).toEqual({ readable: true });
+    expect(desktopCapabilities({ platform: "win32", credentialStoreUnreadable: true }).credentialStore).toEqual({
+      readable: false,
+      reasonCode: "saved-credentials-unreadable",
+    });
+  });
+
   it("detects Wayland before XWayland and distinguishes X11 and headless Linux", () => {
     expect(linuxSession("linux", { WAYLAND_DISPLAY: "wayland-0", DISPLAY: ":0" })).toBe("wayland");
     expect(linuxSession("linux", { XDG_SESSION_TYPE: "x11", DISPLAY: ":0" })).toBe("x11");

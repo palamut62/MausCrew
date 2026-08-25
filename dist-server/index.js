@@ -3482,6 +3482,28 @@ const server = createServer(async (req, res) => {
             const status = await composio.connectionStatus(cfg, services.length ? services : composio.CURATED_SLUGS);
             return json(res, 200, { configured: true, services: status });
         }
+        // Same-origin logos so the marketplace works under `img-src 'self'` and
+        // browsing it stops reporting to Composio's CDN and Google's favicon
+        // service from the user's machine.
+        m = path.match(/^\/api\/connectors\/([\w-]+)\/logo$/);
+        if (m && method === "GET") {
+            let logo = null;
+            try {
+                logo = await composio.toolkitLogo(cfg, m[1]);
+            }
+            catch {
+                logo = null; // an upstream hiccup is a missing picture, not an error page
+            }
+            if (!logo)
+                return json(res, 404, { error: "no logo for this toolkit" });
+            res.writeHead(200, {
+                "content-type": logo.mime,
+                "content-length": String(logo.bytes.byteLength),
+                "cache-control": "public, max-age=86400",
+                "x-content-type-options": "nosniff",
+            });
+            return res.end(logo.bytes);
+        }
         m = path.match(/^\/api\/connectors\/([\w-]+)\/authorize$/);
         if (m && method === "POST")
             return json(res, 200, await composio.authorizeService(cfg, m[1]));

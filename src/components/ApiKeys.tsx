@@ -4,6 +4,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { ArrowSquareOut, Check, Question, Spinner, Warning } from "@phosphor-icons/react";
 import { api, useStore, type ConfigStatus } from "@/state/store";
+import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { cn } from "@/lib/cn";
 
 export type ConfigSection = "composio" | "box" | "opencodeGo" | "deepseekHarness";
@@ -158,6 +159,11 @@ export function ApiKeyRow({
   const configured = state.config ? SECTIONS[section].flag(state.config) : false;
   const clearing = !value.trim() && configured;
   const credential = CREDENTIALS[section];
+  // A key kept in the OS credential store that can no longer be decrypted
+  // reads as "never entered" everywhere else in the UI. Say what actually
+  // happened instead, next to the field that fixes it.
+  const { capabilities } = useDesktopCapabilities();
+  const storeLost = capabilities?.credentialStore?.readable === false && !configured;
 
   const save = () => {
     if (saving || (!value.trim() && !configured)) return;
@@ -219,6 +225,15 @@ export function ApiKeyRow({
         </button>
       </div>
       {error && <div className="mt-1 text-[12px] text-danger">{error}</div>}
+      {storeLost && !error && (
+        <div role="status" className="mt-1.5 flex items-start gap-1.5 text-[12px] text-warning">
+          <Warning size={13} weight="fill" className="mt-0.5 shrink-0" />
+          <span>
+            A key was saved here before but the operating system can no longer decrypt it — this
+            happens when the app is reinstalled or renamed. Paste it once more to restore it.
+          </span>
+        </div>
+      )}
     </div>
   );
 }

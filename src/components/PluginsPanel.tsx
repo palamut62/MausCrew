@@ -25,18 +25,19 @@ interface ToolkitCard {
 }
 
 function ServiceIcon({ card }: { card: ToolkitCard }) {
-  // 0 = official logo, 1 = favicon by domain, 2 = monogram
-  const [stage, setStage] = useState(card.logo ? 0 : card.domain ? 1 : 2);
-  if (stage === 0 && card.logo) {
-    return <img src={card.logo} alt="" className="size-8 rounded-md" onError={() => setStage(1)} />;
-  }
-  if (stage === 1 && card.domain) {
+  // The logo comes from the harness, not from Composio's CDN or Google's
+  // favicon service. Two reasons: the app keeps an `img-src 'self'` CSP, and
+  // browsing this list used to tell Google which apps you were looking at.
+  // Server-side it is still logo → favicon → nothing; here it is just
+  // picture-or-monogram.
+  const [broken, setBroken] = useState(false);
+  if (!broken && (card.logo || card.domain)) {
     return (
       <img
-        src={`https://www.google.com/s2/favicons?domain=${card.domain}&sz=64`}
+        src={`/api/connectors/${encodeURIComponent(card.slug)}/logo`}
         alt=""
         className="size-8 rounded-md"
-        onError={() => setStage(2)}
+        onError={() => setBroken(true)}
       />
     );
   }

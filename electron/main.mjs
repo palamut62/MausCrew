@@ -43,6 +43,11 @@ if (!hasSingleInstanceLock) app.quit();
 
 const CREDENTIALS_FILE = path.join(app.getPath("userData"), "credentials.bin");
 
+/** True when a credentials file existed but could not be read back. The
+ * renderer needs this: the alternative is an app that says "not configured"
+ * about a key the user definitely entered. */
+let credentialStoreUnreadable = false;
+
 function migrateLegacySecureCredentials() {
   if (fs.existsSync(CREDENTIALS_FILE)) return;
   const appData = app.getPath("appData");
@@ -60,13 +65,41 @@ function migrateLegacySecureCredentials() {
   }
 }
 
-async function loadSecureCredentials() {
+/** Move an unreadable credentials file aside so the next save starts clean.
+ *
+ * This is not hypothetical. safeStorage on Windows encrypts under DPAPI *and*
+ * an app-scoped key kept in that app's own Local State, and the rename from
+ * OpenMausBot to MausCrew copied the ciphertext without the key that opens it.
+ * The result decrypts nowhere, forever: every launch logged the same failure,
+ * the harness started with no COMPOSIO_API_KEY, and the UI reported Composio
+ * as unconfigured while ~/.mauscrew/config.json still held the Session the
+ * user's key had created. Keeping the dead file only repeats that daily.
+ */
+function quarantineCredentials(reason) {
+  credentialStoreUnreadable = true;
   try {
-    if (!fs.existsSync(CREDENTIALS_FILE) || !(await safeStorage.isAsyncEncryptionAvailable())) return {};
+    const dead = `${CREDENTIALS_FILE}.unreadable`;
+    fs.rmSync(dead, { force: true });
+    fs.renameSync(CREDENTIALS_FILE, dead);
+    slog(`credential store unreadable (${reason}); moved aside to ${path.basename(dead)} — re-enter the key to restore it`);
+  } catch (error) {
+    slog(`credential store unreadable (${reason}) and could not be moved aside: ${error?.message ?? error}`);
+  }
+}
+
+async function loadSecureCredentials() {
+  if (!fs.existsSync(CREDENTIALS_FILE)) return {};
+  if (!(await safeStorage.isAsyncEncryptionAvailable())) {
+    // The store may come back on a later launch, so do not throw the file away.
+    credentialStoreUnreadable = true;
+    slog("credential load skipped: the OS credential store is unavailable");
+    return {};
+  }
+  try {
     const decrypted = await safeStorage.decryptStringAsync(fs.readFileSync(CREDENTIALS_FILE));
     return JSON.parse(decrypted.result);
   } catch (error) {
-    slog(`credential load failed: ${error?.message ?? error}`);
+    quarantineCredentials(error?.message ?? String(error));
     return {};
   }
 }
@@ -510,6 +543,7 @@ ipcMain.handle("desktop:capabilities", async () =>
     env: process.env,
     packaged: app.isPackaged,
     localConnection: await cuaReady,
+    credentialStoreUnreadable,
   }),
 );
 

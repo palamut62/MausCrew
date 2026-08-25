@@ -32,6 +32,7 @@ function desktopCapabilities({
   env = process.env,
   packaged = false,
   localConnection = null,
+  credentialStoreUnreadable = false,
 } = {}) {
   const hostPlatform = normalizedPlatform(platform);
   const isMac = hostPlatform === "darwin";
@@ -65,6 +66,12 @@ function desktopCapabilities({
       engine: isMac ? "apple-speech" : isWin ? "whisper-local" : "none",
       onDevice: isMac || isWin,
       ...(!isMac && !isWin ? { reasonCode: "unsupported-platform" } : {}),
+    },
+    // A saved key that cannot be decrypted must not read as "never entered".
+    // The renderer uses this to say so instead of showing an empty key field.
+    credentialStore: {
+      readable: !credentialStoreUnreadable,
+      ...(credentialStoreUnreadable ? { reasonCode: "saved-credentials-unreadable" } : {}),
     },
     localComputer: {
       available: localAvailable,
