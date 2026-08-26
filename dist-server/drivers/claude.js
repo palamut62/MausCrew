@@ -199,8 +199,20 @@ function askSummary(ask) {
     const text = JSON.stringify(input);
     return text === "{}" ? (ask.tool ?? "tool") : text.slice(0, 200);
 }
-export function permissionSocketPath(threadId) {
-    const tag = threadId.replace(/[^\w-]/g, "").slice(0, 8);
+/**
+ * One address per TURN, not per thread.
+ *
+ * Naming it after the thread meant every turn in a conversation reused the
+ * same address. Closing a server stops it accepting new connections but does
+ * not drop the ones already open, so while the previous turn's CLI was still
+ * exiting it kept the address held — and the next turn's listen failed. That
+ * turn then ran with no broker at all: its proxy could not connect, and every
+ * approval came back "permission broker unavailable". Commands the policy
+ * already allowed still worked, which is what made it look like certain
+ * commands were blocked rather than approvals being broken.
+ */
+export function permissionSocketPath(threadId, turnId) {
+    const tag = `${threadId.replace(/[^\w-]/g, "").slice(0, 8)}-${turnId.replace(/[^\w-]/g, "").slice(0, 8)}`;
     return brokerSocketPath(DATA_DIR, tag);
 }
 function createPermissionBroker(opts) {
@@ -468,7 +480,7 @@ export const ClaudeDriver = {
             // bypassPermissions (fullAuto) — nothing would ever ask.
             let broker;
             if (config.permissionMode !== "bypassPermissions") {
-                const socketPath = permissionSocketPath(threadId);
+                const socketPath = permissionSocketPath(threadId, turnId);
                 broker = createPermissionBroker({
                     socketPath,
                     onAsk: (ask) => emit({
