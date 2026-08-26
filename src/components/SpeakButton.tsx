@@ -49,7 +49,7 @@ export function SpeakButton({
         "rounded-md p-1.5 text-ink-secondary transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-focus-within:opacity-100 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-ink-secondary",
         // stays visible while speaking — a stop button you have to hunt for
         // is not a stop button
-        mine ? "text-accent opacity-100" : "opacity-0 group-hover:opacity-100",
+        mine ? "text-accent opacity-100" : "opacity-0 pointer-coarse:opacity-100 group-hover:opacity-100",
         className,
       )}
     >

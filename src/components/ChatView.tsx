@@ -63,7 +63,7 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
       aria-label="Copy message"
       title="Copy message"
       className={cn(
-        "rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100",
+        "rounded-md p-1.5 text-ink-secondary opacity-0 pointer-coarse:opacity-100 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100",
         className,
       )}
     >
@@ -283,7 +283,7 @@ function Bubble({
           <button
             onClick={onStartEdit}
             aria-label="Edit message"
-            className="rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
+            className="rounded-md p-1.5 text-ink-secondary opacity-0 pointer-coarse:opacity-100 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
             title="Edit message"
           >
             <Pencil size={14} weight="bold" />
@@ -351,7 +351,7 @@ function Bubble({
                 onClick={onRegenerate}
                 aria-label="Regenerate response"
                 title="Regenerate response"
-                className="rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
+                className="rounded-md p-1.5 text-ink-secondary opacity-0 pointer-coarse:opacity-100 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
               >
                 <ArrowClockwise size={14} weight="bold" />
               </button>
@@ -361,7 +361,7 @@ function Bubble({
         {!user && message.kind === "text" && <ReactionBar threadId={bot.threadId} message={message} />}
         {/* bot rows carry their time in the role stamp already */}
         {user && (
-          <span className="order-first mr-1 self-end pb-1 font-mono text-[11px] tabular-nums tracking-tight text-ink-secondary/70 opacity-0 transition-opacity group-hover:opacity-100">
+          <span className="order-first mr-1 self-end pb-1 font-mono text-[11px] tabular-nums tracking-tight text-ink-secondary/70 opacity-0 pointer-coarse:opacity-100 transition-opacity group-hover:opacity-100">
             {formatTime(message.at)}
           </span>
         )}

@@ -1836,6 +1836,25 @@ function isAllowedOrigin(origin: string | undefined | null): boolean {
   }
 }
 
+/**
+ * Point Tailscale Serve at the port this process actually holds.
+ *
+ * Cached briefly because the status route is polled and each check shells out
+ * to the Tailscale CLI; the mapping only changes when we change it.
+ */
+let ingressCheck: { at: number; result: Awaited<ReturnType<typeof ensureTailscaleServe>> } | null = null;
+const INGRESS_CACHE_MS = 30_000;
+
+async function refreshRemoteIngress() {
+  const publicUrl = configuredRemoteUrl();
+  if (!publicUrl || cfg.remoteAccess?.enabled !== true) return null;
+  if (ingressCheck && Date.now() - ingressCheck.at < INGRESS_CACHE_MS) return ingressCheck.result;
+  const result = await ensureTailscaleServe(publicUrl, PORT);
+  ingressCheck = { at: Date.now(), result };
+  if (!result.ok) console.error(`remote access: ${result.error}`);
+  return result;
+}
+
 function configuredRemoteUrl(): URL | null {
   if (!cfg.remoteAccess?.enabled || !cfg.remoteAccess.publicUrl) return null;
   try {
@@ -1911,11 +1930,16 @@ const server = createServer(async (req, res) => {
     }
     if (path === "/api/remote/status" && method === "GET") {
       if (!localRequest) return json(res, 403, { error: "desktop only" });
+      // `enabled` only ever meant "configured". Whether the address actually
+      // reaches this process is a separate fact, and the one that decides
+      // whether a phone can connect.
+      const ingress = await refreshRemoteIngress();
       return json(res, 200, {
         enabled: cfg.remoteAccess?.enabled === true,
         publicUrl: cfg.remoteAccess?.publicUrl ?? "",
         localPort: PORT,
         devices: listRemoteDevices(),
+        ...(ingress ? { reachable: ingress.ok, ...(ingress.ok ? {} : { ingressError: ingress.error }) } : {}),
       });
     }
     if (path === "/api/remote/pairings" && method === "POST") {
@@ -3691,6 +3715,12 @@ const server = createServer(async (req, res) => {
 
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`mauscrew server on http://127.0.0.1:${PORT}`);
+  // The harness takes whichever port is free, so it rarely lands on the same
+  // one twice. Tailscale Serve keeps forwarding to the port it was told about
+  // once, which means every already-paired phone gets a 502 while the desktop
+  // still shows a healthy-looking address. Reconcile on boot instead of only
+  // when someone asks for a new pairing link.
+  void refreshRemoteIngress();
 });
 
 // Backstop for every other way this process ends — an uncaught throw, a parent

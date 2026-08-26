@@ -87,7 +87,7 @@ function Shell() {
         aria-label="Open bot list"
         aria-expanded={drawerOpen}
         onClick={() => setDrawerOpen(true)}
-        className="absolute left-3 top-3 z-30 rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink md:hidden"
+        className="absolute left-3 top-3 z-30 flex size-11 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink md:hidden"
       >
         <List size={18} weight="bold" />
       </button>
