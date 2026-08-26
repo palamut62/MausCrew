@@ -99,6 +99,41 @@ export function SkillManager({ bot, onClose }: { bot: Bot; onClose: () => void }
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
+  // A recording knows where the workflow starts and ends, and keeps each
+  // action's detail; teaching from a finished task has to guess both.
+  const [rec, setRec] = useState<{ label: string; steps: number } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void api(`/api/bots/${bot.id}/teach-recording`)
+      .then((r) => !cancelled && setRec(r.recording))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [bot.id]);
+
+  const recordingAction = async (action: "start" | "stop" | "discard") => {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await api(`/api/bots/${bot.id}/teach-recording`, {
+        method: "POST",
+        body: JSON.stringify({ action }),
+      });
+      if (action === "start") setRec(result.recording);
+      else setRec(null);
+      if (action === "stop") {
+        setDraft(result.draft);
+        setEditingId(null);
+        setCreating(true);
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const teachFromTask = async () => {
     setBusy(true);
     setError(null);
@@ -361,15 +396,57 @@ export function SkillManager({ bot, onClose }: { bot: Bot; onClose: () => void }
                 <Plus size={15} weight="bold" /> New
               </button>
             </div>
-            <button
-              type="button"
-              onClick={() => void teachFromTask()}
-              disabled={busy}
-              className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-accent/25 bg-accent/10 px-3 py-2 text-[12px] font-medium text-accent hover:bg-accent/15 disabled:opacity-50"
-            >
-              {busy ? <Spin size={14} weight="fill" /> : <GraduationCap size={15} weight="bold" />}
-              Teach from current task
-            </button>
+            {rec ? (
+              <div className="mt-2 rounded-lg border border-accent/40 bg-accent/10 px-3 py-2.5">
+                <div className="flex items-center gap-2 text-[12px] font-medium text-accent">
+                  <span className="size-2 shrink-0 animate-pulse rounded-full bg-accent" />
+                  Recording “{rec.label}” — {rec.steps} step{rec.steps === 1 ? "" : "s"} so far
+                </div>
+                <p className="mt-1 text-[11.5px] text-ink-secondary">
+                  Carry on working with this bot. Every action it takes is captured until you stop.
+                </p>
+                <div className="mt-2 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void recordingAction("stop")}
+                    disabled={busy}
+                    className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-[12px] font-medium text-white disabled:opacity-50"
+                  >
+                    {busy ? <Spin size={14} weight="fill" /> : <GraduationCap size={15} weight="bold" />}
+                    Stop and draft the skill
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void recordingAction("discard")}
+                    disabled={busy}
+                    className="rounded-lg border border-hairline px-3 py-2 text-[12px] text-ink-secondary hover:text-ink disabled:opacity-50"
+                  >
+                    Discard
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => void recordingAction("start")}
+                  disabled={busy}
+                  className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-[12px] font-medium text-white hover:brightness-110 disabled:opacity-50"
+                >
+                  {busy ? <Spin size={14} weight="fill" /> : <GraduationCap size={15} weight="bold" />}
+                  Record a workflow
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void teachFromTask()}
+                  disabled={busy}
+                  className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-accent/25 bg-accent/10 px-3 py-2 text-[12px] font-medium text-accent hover:bg-accent/15 disabled:opacity-50"
+                >
+                  {busy ? <Spin size={14} weight="fill" /> : <GraduationCap size={15} weight="bold" />}
+                  Teach from current task
+                </button>
+              </>
+            )}
             <div className="mt-1.5 text-[10.5px] leading-relaxed text-ink-secondary">
               Creates an editable draft from this task. Nothing is written until you review and save it.
             </div>

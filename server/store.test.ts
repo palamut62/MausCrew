@@ -17,6 +17,48 @@ describe("Store", () => {
     rmSync(DATA_DIR, { recursive: true, force: true });
   });
 
+
+  // The thread file is rewritten whole on every append, so its size is the
+  // cost of sending one message. Screen frames are the only payload big
+  // enough to matter — a few hundred KB of base64 each — and without a bound
+  // a long computer session makes each later message slower than the last.
+  it("keeps a computer session's transcript bounded however long it runs", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({ modelSelection: selection() });
+    const frame = "A".repeat(120_000); // a plausible base64 JPEG
+
+    for (let i = 0; i < 40; i++) {
+      store.appendMessage(bot.threadId, { role: "bot", kind: "screen", png: frame, mime: "image/jpeg" });
+    }
+
+    const path = join(DATA_DIR, `messages-${bot.threadId}.json`);
+    const onDisk = readFileSync(path, "utf8");
+    // Forty frames would be ~4.8MB; only the newest few keep their pixels.
+    expect(onDisk.length).toBeLessThan(frame.length * 6);
+
+    const kept = store.activePath(bot.threadId).filter((m) => m.kind === "screen" && m.png);
+    expect(kept.length).toBeLessThanOrEqual(4);
+    // the older frames stay in the transcript, just without their pixels
+    expect(store.activePath(bot.threadId).filter((m) => m.kind === "screen")).toHaveLength(40);
+  });
+
+  it("keeps the newest frames, not the oldest", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({ modelSelection: selection() });
+    for (const tag of ["oldest", "middle", "newest"]) {
+      store.appendMessage(bot.threadId, { role: "bot", kind: "screen", png: `frame-${tag}` });
+    }
+    for (let i = 0; i < 6; i++) {
+      store.appendMessage(bot.threadId, { role: "bot", kind: "screen", png: `filler-${i}` });
+    }
+    const withPixels = store
+      .activePath(bot.threadId)
+      .filter((m) => m.kind === "screen" && m.png)
+      .map((m) => m.png);
+    expect(withPixels.some((p) => p!.startsWith("filler-"))).toBe(true);
+    expect(withPixels).not.toContain("frame-oldest");
+  });
+
   it("createBot seeds a greeting and an onboarding card", () => {
     const store = new Store(selection);
     const bot = store.createBot();
