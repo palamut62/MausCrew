@@ -9,13 +9,13 @@ export const REACTION_SET = ["👍", "❤️", "😂", "🎉", "👀"] as const;
 export function ReactionBar({ threadId, message }: { threadId: string; message: Message }) {
   const { dispatch } = useStore();
   return (
-    <div className="flex items-center gap-0.5 rounded-md border border-hairline bg-panel px-1 py-0.5 opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+    <div className="flex items-center gap-0.5 rounded-md border border-hairline bg-panel px-1 py-0.5 opacity-0 pointer-coarse:opacity-100 shadow-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
       {REACTION_SET.map((emoji) => (
         <button
           key={emoji}
           onClick={() => dispatch({ type: "toggleReaction", threadId, messageId: message.id, emoji })}
           aria-label={`React ${emoji}`}
-          className="rounded-md px-1 py-0.5 text-[13px] leading-none hover:bg-raised"
+          className="rounded-md px-1 py-0.5 text-[13px] leading-none hover:bg-raised pointer-coarse:flex pointer-coarse:size-11 pointer-coarse:items-center pointer-coarse:justify-center pointer-coarse:text-[17px]"
         >
           {emoji}
         </button>

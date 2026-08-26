@@ -104,7 +104,7 @@ const Transcript = memo(function Transcript({
                 {!user && <ReactionBar threadId={group.threadId} message={m} />}
                 {/* bot rows carry their time in the cluster stamp already */}
                 {user && (
-                  <span className="self-end pb-1 font-mono text-[11px] tabular-nums tracking-tight text-ink-secondary/70 opacity-0 transition-opacity group-hover:opacity-100">
+                  <span className="self-end pb-1 font-mono text-[11px] tabular-nums tracking-tight text-ink-secondary/70 opacity-0 pointer-coarse:opacity-100 transition-opacity group-hover:opacity-100">
                     {formatTime(m.at)}
                   </span>
                 )}

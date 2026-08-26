@@ -179,7 +179,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                 track("email_skipped");
                 setStep(1);
               }}
-              className="mt-3 text-[12px] text-ink-secondary hover:text-ink"
+              className="mt-3 min-h-11 px-3 text-[12px] text-ink-secondary hover:text-ink"
             >
               Maybe later
             </button>
@@ -274,7 +274,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             <button onClick={finish} className="mt-5 w-full rounded-lg bg-accent py-2.5 text-[15px] font-medium text-app">
               Start using MausCrew
             </button>
-            <button onClick={finish} className="mt-3 text-[12px] text-ink-secondary hover:text-ink">
+            <button onClick={finish} className="mt-3 min-h-11 px-3 text-[12px] text-ink-secondary hover:text-ink">
               Skip for now
             </button>
           </div>

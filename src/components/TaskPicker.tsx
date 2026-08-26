@@ -111,7 +111,7 @@ export function TaskPicker({ bot }: { bot: Bot }) {
                     disabled={bot.busy && active}
                     aria-label="Delete task"
                     title="Delete this task and its conversation"
-                    className="rounded p-1 text-ink-secondary opacity-0 hover:bg-raised hover:text-danger group-hover:opacity-100 disabled:opacity-20"
+                    className="rounded p-1 text-ink-secondary opacity-0 pointer-coarse:opacity-100 hover:bg-raised hover:text-danger group-hover:opacity-100 disabled:opacity-20"
                   >
                     <Trash size={13} weight="bold" />
                   </button>
