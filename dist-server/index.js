@@ -17,7 +17,7 @@ import { BoxComputerProvider } from "./computers/providers/box.js";
 import { LocalVmComputerProvider } from "./computers/providers/local.js";
 import { ComputerSupervisor } from "./computers/supervisor.js";
 import { containerComputerAction, containerComputerMcp, containerComputerScreenshot, containerComputerStatus, setupCommands, } from "./container-computer.js";
-import { analyticsEnabled, analyticsLocked, claudeGateways, ensureDirs, gatewayInstanceId, instanceConfigs, aguiAuthEnv, loadConfig, saveConfig, EVENTS_DIR, NATIVE_DIR, } from "./config.js";
+import { analyticsEnabled, analyticsLocked, claudeGateways, ensureDirs, gatewayInstanceId, instanceConfigs, aguiAuthEnv, loadConfig, saveConfig, DATA_DIR, EVENTS_DIR, NATIVE_DIR, } from "./config.js";
 import { checkAguiEndpoint } from "./drivers/agui/endpoint.js";
 import { testAguiConnection } from "./drivers/agui/connection-test.js";
 import { resetPathCache } from "./env-path.js";
@@ -53,6 +53,9 @@ import { RoutineManager } from "./routines.js";
 import { authenticateRemoteToken, claimPairing, cookieToken, createPairing, listRemoteDevices, revokeRemoteDevice, } from "./remote-access.js";
 import { createWorkspaceSkill, deleteWorkspaceSkill, listWorkspaceSkills, skillIndexPrompt, SkillStoreError, updateWorkspaceSkill, } from "./skills.js";
 import { createTeamManifest, parseTeamManifest } from "./team-manifest.js";
+import { CONDUCT_RULES, DRIFT_REMINDER, coordinatorRules, shouldRemind } from "./conduct.js";
+import { probeGateway } from "./drivers/claude-gateway-test.js";
+import { classifyFailure, exhaustedNotice, handoverNotice, nextEngine, } from "./failover.js";
 import { teachDraftFromRecording, teachDraftFromTask } from "./teach/draft.js";
 import * as recording from "./teach/recording.js";
 import { ensureTailscaleServe } from "./tailscale-serve.js";
@@ -109,6 +112,31 @@ const agentsProxyPath = (() => {
     const ts = join(dirname(fileURLToPath(import.meta.url)), "drivers", "agents-proxy.ts");
     return existsSync(ts) ? ts : ts.replace(/\.ts$/, ".js");
 })();
+const pcBrowserProxyPath = (() => {
+    const ts = join(dirname(fileURLToPath(import.meta.url)), "drivers", "playwright-proxy.ts");
+    return existsSync(ts) ? ts : ts.replace(/\.ts$/, ".js");
+})();
+/**
+ * Browser control on this machine, in a profile of the app's own.
+ *
+ * Deliberately not the user's everyday Chrome: attaching to that would hand a
+ * bot every session they have open — mail, bank, everything — as a side effect
+ * of being asked to check a price. The bot signs into what it needs, in a
+ * profile the user can see and delete.
+ */
+function pcBrowserIntegration() {
+    return {
+        command: process.execPath,
+        args: [pcBrowserProxyPath],
+        env: {
+            ...AGENTS_NODE_FLAG,
+            MAUSCREW_PLAYWRIGHT_PROFILE: join(DATA_DIR, "pc-browser-profile"),
+            // Visible by default: a browser acting on the user's own machine should
+            // be something they can watch and take over, not a hidden process.
+            MAUSCREW_PLAYWRIGHT_HEADLESS: cfg.pcBrowser?.headless ? "1" : "0",
+        },
+    };
+}
 // in the packaged app process.execPath is Electron — run the proxy as node
 const AGENTS_NODE_FLAG = { ELECTRON_RUN_AS_NODE: "1" };
 function agentsIntegration(botId, threadId, depth) {
@@ -501,6 +529,10 @@ bus.subscribe((event) => {
         localVmLease.release(event.threadId);
         if (localVmActiveThread === event.threadId)
             localVmActiveThread = null;
+        if (!event.ok && handOverTurn(event.threadId))
+            return;
+        if (event.ok)
+            triedEngines.delete(event.threadId);
         // Record what this session was for, so the bot still knows tomorrow.
         // Deterministic on purpose: this codebase holds that a turn the user pays
         // for must be visible, and a silent summarisation turn after every
@@ -749,13 +781,23 @@ bus.subscribe((event) => {
             }
             break;
         }
-        case "runtime.error":
+        case "runtime.error": {
+            // Held rather than shown, until turn.completed says whether the turn
+            // survived it. An engine that ran out of allowance can hand the work to
+            // the next one, and a red error for something the user never had to see
+            // is worse than no error at all.
+            const verdict = classifyFailure(event.message);
+            if (bot && verdict.move && failoverCandidate(bot.id, event.threadId)) {
+                lastLimitFailure.set(event.threadId, { message: event.message, verdict });
+                break;
+            }
             pushMessage({
                 role: "bot",
                 kind: "activity",
                 tool: { name: `error: ${event.message.slice(0, 160)}`, ok: false, setup: event.setup },
             });
             break;
+        }
         case "thread.token-usage.updated": {
             // group turns run on the room's thread, so the token bill belongs to
             // whichever member is busy there — same owner rule as turn.completed
@@ -997,9 +1039,10 @@ async function startTurn(botId, text, opts) {
     // a task takes its name from the first thing you asked it to do
     if (text.trim())
         store.titleTaskFromFirstMessage(bot.id, text, threadId);
+    const wantedInstanceId = opts?.overrideInstanceId ?? bot.modelSelection.instanceId;
     const instance = opts?.runOn === "cloud"
         ? registry.instances().find((candidate) => candidate.driverKind === "boxAgent") ?? null
-        : registry.get(bot.modelSelection.instanceId);
+        : registry.get(wantedInstanceId);
     if (!instance) {
         throw Object.assign(new Error(opts?.runOn === "cloud"
             ? "the Cloud VM runner is unavailable — configure Box in App Settings"
@@ -1056,9 +1099,19 @@ async function startTurn(botId, text, opts) {
     // cleared only once the turn is actually dispatched — clearing it here
     // would cost the next attempt its history if this dispatch fails.
     const rewound = threadId === bot.threadId && Boolean(bot.rewound);
-    const turnText = rewound && instance.driverKind !== "grok" && transcript.length
+    // A handover is the same problem as a rewind: the engine about to run has
+    // never seen this conversation, and its predecessor's session id means
+    // nothing to it. The bot's own transcript is the only history that survives
+    // an engine change, so it is replayed inline exactly as a rewind replays it.
+    // This is what makes "carry on where you left off" true across providers
+    // rather than only within one CLI's memory.
+    const handedOver = Boolean(opts?.overrideInstanceId);
+    const needsHistoryInline = (rewound || handedOver) && instance.driverKind !== "grok" && transcript.length > 0;
+    const turnText = needsHistoryInline
         ? [
-            "[The user rewound this conversation (edited a message or switched to another version). Everything before this point was replaced by the following history:]",
+            handedOver
+                ? "[This conversation continues from another engine that became unavailable. It has no memory of what follows, so here is the history so far:]"
+                : "[The user rewound this conversation (edited a message or switched to another version). Everything before this point was replaced by the following history:]",
             "",
             ...transcript.map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.text}`),
             "",
@@ -1257,6 +1310,25 @@ async function startTurn(botId, text, opts) {
                 : integrations.agents
                     ? "You can work with the user's other bots through the agents tools — list_bots shows who's available, ask_bot sends one of them a message and returns their reply, and ask_bots puts independent questions to several of them at once instead of waiting out one peer before starting the next."
                     : "";
+            // The prompt above this line is an inventory: what the bot has. These
+            // are conduct: how to use it. The second is what separates a capable
+            // model from a good teammate, and it was missing entirely.
+            const conductPrompt = " " +
+                CONDUCT_RULES +
+                " " +
+                coordinatorRules({
+                    hasPeers: Boolean(integrations.agents),
+                    // Engines that run their own CLI can spawn their own workers; a
+                    // gateway answering raw messages cannot.
+                    hasOwnSubagents: instance.driverKind === "claude" || instance.driverKind === "codex",
+                });
+            // Rules stated once lose against everything said since. Re-stated on a
+            // cadence rather than every turn, so the reminder stays a reminder.
+            const driftPrompt = shouldRemind(store.activePath(threadId).filter((m) => m.role === "user").length)
+                ? ` ${DRIFT_REMINDER}`
+                : "";
+            if (cfg.pcBrowser?.enabled)
+                integrations.pcBrowser = pcBrowserIntegration();
             // The interrupt endpoint can run while the awaits above are still
             // preparing integrations. Consume that request before spawning the
             // provider. Deleting the entry and calling sendTurn are synchronous up
@@ -1272,8 +1344,9 @@ async function startTurn(botId, text, opts) {
                 effort,
                 // a rewound thread never resumes the abandoned branch's session
                 // the active task's own session — another task's cursor would
-                // resume the wrong conversation and defeat the context bubble
-                resumeCursor: rewound ? undefined : task.resumeCursors[instanceId],
+                // resume the wrong conversation and defeat the context bubble.
+                // A handover has no session on this engine at all.
+                resumeCursor: rewound || handedOver ? undefined : task.resumeCursors[instanceId],
                 transcript,
                 cwd: bot.workspacePath || undefined,
                 runtimeFeatures: { dynamicCordis: bot.dynamicCordis === true },
@@ -1284,6 +1357,8 @@ async function startTurn(botId, text, opts) {
                     // and what survived earlier sessions entirely — capped, because this
                     // rides on every turn forever
                     memoryBlock(bot.id).text +
+                    conductPrompt +
+                    driftPrompt +
                     (computerKind === "vm"
                         ? " You have a shared, isolated Cua sandbox: a Linux desktop in a container on this machine. Only /home/cua/workspace is durable; save downloads, repositories, working files, and browser profiles there because everything else inside the VM is disposable. No other host folder is mounted. Use the computer tools for desktop, accessibility, window, and shell work. Inspect the desktop state before acting, prefer accessibility targets over raw coordinates, and work carefully."
                         : computerKind === "box" && instance.driverKind !== "boxAgent"
@@ -1293,6 +1368,9 @@ async function startTurn(botId, text, opts) {
                                 : "") +
                     (computerKind
                         ? " At a sign-in, password, MFA, CAPTCHA, or other protected-input step, stop and ask the user to complete it on the visible computer. Never type their password or ask them to paste a password or one-time code into chat."
+                        : "") +
+                    (integrations.pcBrowser
+                        ? " You can drive a browser on the user's own computer with the pc_browser tools: pc_browser_open to go somewhere, pc_browser_snapshot for the elements on the page, then click/fill/select/press by ref, and pc_browser_read for the text. It runs in MausCrew's own browser profile, not the user's everyday one, so you are only signed into what you signed into. Prefer these over screenshots and coordinate clicks — they know when a page has finished loading and what an element actually is. At any sign-in, password, MFA or CAPTCHA step, stop and ask the user to do it themselves in that window."
                         : "") +
                     // gated on the integration, not the key: the hint only goes to a
                     // bot whose driver actually mounted the tools
@@ -1595,6 +1673,8 @@ function configStatus() {
         // label and model list echoed so the form can show what each is pointed
         // at. instanceId is echoed too — it is what the picker routes by, and
         // deriving it a second time in the renderer is how the two drift apart.
+        fallbackChain: cfg.fallbackChain ?? [],
+        pcBrowser: { enabled: cfg.pcBrowser?.enabled === true, headless: cfg.pcBrowser?.headless === true },
         claudeGateways: claudeGateways(cfg).map((gw) => ({
             id: gw.id,
             instanceId: gatewayInstanceId(gw.id),
@@ -1770,6 +1850,92 @@ async function refreshRemoteIngress() {
     if (!result.ok)
         console.error(`remote access: ${result.error}`);
     return result;
+}
+// ── engine failover ────────────────────────────────────────────────────
+// A limit failure is held here between runtime.error and turn.completed: only
+// the latter says whether the turn actually died, and only then is it worth
+// spending a second engine on it.
+const lastLimitFailure = new Map();
+/** Engines already burned on the turn currently running, per thread. */
+const triedEngines = new Map();
+function fallbackChainFor(bot) {
+    const configured = cfg.fallbackChain?.filter((id) => typeof id === "string" && id.trim()) ?? [];
+    // The bot's own engine is always first, whether or not the user listed it:
+    // a chain is where to go NEXT, not a replacement for the choice they made.
+    return [bot.modelSelection.instanceId, ...configured.filter((id) => id !== bot.modelSelection.instanceId)];
+}
+/** Is there anywhere for this thread to go, if the running turn dies? */
+function failoverCandidate(botId, threadId) {
+    const bot = store.bot(botId);
+    if (!bot)
+        return null;
+    const available = new Set(registry.instances().map((i) => i.instanceId));
+    return nextEngine({
+        chain: fallbackChainFor(bot),
+        available,
+        tried: triedEngines.get(threadId) ?? [bot.modelSelection.instanceId],
+    });
+}
+function engineLabel(instanceId) {
+    return registry.get(instanceId)?.displayName ?? instanceId;
+}
+/**
+ * Move a dead turn to the next engine, or give up and report honestly.
+ *
+ * Returns true when the turn has been taken over, so the caller stops treating
+ * it as finished. The transcript always says what happened: a handover the
+ * user cannot see is a bot that mysteriously changed its mind about which
+ * model it is.
+ */
+function handOverTurn(threadId) {
+    const held = lastLimitFailure.get(threadId);
+    if (!held)
+        return false;
+    lastLimitFailure.delete(threadId);
+    const bot = store.botByThread(threadId);
+    if (!bot)
+        return false;
+    const tried = triedEngines.get(threadId) ?? [bot.modelSelection.instanceId];
+    const target = failoverCandidate(bot.id, threadId);
+    const say = (text, ok) => {
+        const message = store.appendMessage(threadId, {
+            role: "bot",
+            kind: "activity",
+            tool: { name: text.slice(0, 200), ok },
+        });
+        broadcast({ kind: "message", threadId, message });
+    };
+    if (!target) {
+        say(`error: ${held.message.slice(0, 120)}`, false);
+        const notice = exhaustedNotice(tried.map(engineLabel));
+        if (notice)
+            say(notice, false);
+        triedEngines.delete(threadId);
+        return false;
+    }
+    say(handoverNotice(engineLabel(tried.at(-1) ?? bot.modelSelection.instanceId), engineLabel(target), held.verdict.reason), true);
+    triedEngines.set(threadId, [...tried, target]);
+    const lastAsk = store
+        .activePath(threadId)
+        .filter((m) => m.role === "user" && m.kind === "text" && m.text?.trim())
+        .at(-1);
+    if (!lastAsk?.text) {
+        triedEngines.delete(threadId);
+        return false;
+    }
+    // The bot is still marked busy from the turn that just died; clearing it
+    // here would let a second turn in before this one restarts.
+    store.patchBot(bot.id, { busy: false });
+    void startTurn(bot.id, lastAsk.text, {
+        threadId,
+        overrideInstanceId: target,
+        triedInstanceIds: [...tried, target],
+        unattended: true,
+    }).catch((error) => {
+        say(`error: could not hand over to ${engineLabel(target)} — ${String(error).slice(0, 120)}`, false);
+        triedEngines.delete(threadId);
+    });
+    return true;
 }
 /** One journal entry per bot per day, written after the day's last turn. */
 const journalled = new Map();
@@ -2613,6 +2779,20 @@ const server = createServer(async (req, res) => {
                     return json(res, error.status, { error: error.message });
                 throw error;
             }
+        }
+        if (path === "/api/claude-gateways/test" && method === "POST") {
+            if (!localRequest)
+                return json(res, 403, { error: "desktop only" });
+            const body = await readBody(req);
+            // An untouched key is not sent by the UI, which never holds it; fall
+            // back to the saved one so a gateway can be tested as configured.
+            const savedToken = cfg.claudeGateways?.find((g) => g.id === String(body.id ?? ""))?.authToken;
+            const result = await probeGateway({
+                baseUrl: String(body.baseUrl ?? ""),
+                authToken: typeof body.authToken === "string" ? body.authToken : savedToken,
+                model: typeof body.model === "string" ? body.model : undefined,
+            });
+            return json(res, 200, result);
         }
         m = path.match(/^\/api\/bots\/([\w-]+)\/teach-recording$/);
         if (m) {
@@ -3539,7 +3719,16 @@ const server = createServer(async (req, res) => {
             const patch = {};
             if (gatewaysPatch)
                 patch.claudeGateways = gatewaysPatch;
-            for (const key of ["xai", "composio", "box", "opencodeGo", "deepseekHarness", "tts", "profile", "remoteAccess", "analytics"]) {
+            // An unknown id here is a chain entry for an engine that was removed;
+            // dropping it silently is right, because the alternative is a handover
+            // that picks something that no longer exists.
+            if (Array.isArray(body.fallbackChain)) {
+                const known = new Set(registry.instances().map((i) => i.instanceId));
+                patch.fallbackChain = body.fallbackChain
+                    .filter((id) => typeof id === "string" && known.has(id))
+                    .slice(0, 8);
+            }
+            for (const key of ["xai", "composio", "box", "opencodeGo", "deepseekHarness", "tts", "profile", "remoteAccess", "analytics", "pcBrowser"]) {
                 if (body[key] && typeof body[key] === "object")
                     patch[key] = body[key];
             }

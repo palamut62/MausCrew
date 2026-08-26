@@ -435,6 +435,10 @@ export const ClaudeDriver = {
                 mcpServers.computer = { ...turn.integrations.localComputer };
                 allowed.push("mcp__computer");
             }
+            if (turn.integrations?.pcBrowser) {
+                mcpServers.pcbrowser = { ...turn.integrations.pcBrowser };
+                allowed.push("mcp__pcbrowser");
+            }
             // peer-agent comms (list_bots/ask_bot) — the harness builds the whole
             // spawn contract (command/args/env incl. the boot token) in
             // agentsIntegration(); pre-allowing matters doubly here, or the CLI's

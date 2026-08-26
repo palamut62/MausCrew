@@ -313,6 +313,65 @@ export function readWorkspaceSkills(workspacePath) {
  * disk and is invisible to the bot that owns it — which looks exactly like
  * the skill being broken, with nothing in the UI to explain why. Returns ""
  * when there is nothing usable, so the caller can concatenate it blind. */
+/**
+ * Ceiling for the whole catalog, in characters.
+ *
+ * The index is prepended to every single turn, so its size is a tax on every
+ * request for as long as the skill exists. Unbounded, twenty skills is four
+ * kilobytes a turn and fifty is ten — paid forever, invisibly, to advertise
+ * skills most turns will never use. A cap turns that into a fixed cost.
+ */
+export const SKILL_INDEX_BUDGET_CHARS = 3_000;
+/** A description shorter than this says nothing; drop the skill instead. */
+const MIN_USEFUL_DESCRIPTION = 32;
+const renderEntry = (entry, description, whenUse) => ` • ${entry.name} — ${description}${whenUse} [${entry.path}]`;
+/**
+ * Fit the catalog into its budget, losing detail before losing skills.
+ *
+ * Order matters. A skill the agent cannot see it has is worse than one it can
+ * see but must open to understand, so `whenToUse` goes first, then long
+ * descriptions are trimmed, and only then are the last entries dropped.
+ *
+ * The name and the path are never trimmed. An entry without its path is worse
+ * than no entry at all: the agent knows a skill exists, cannot open it, and
+ * has no way to find out what it says.
+ */
+function fitToBudget(entries) {
+    const total = (list) => list.reduce((n, line) => n + line.length, 0);
+    const full = entries.map((entry) => renderEntry(entry, entry.description, entry.whenUse));
+    if (total(full) <= SKILL_INDEX_BUDGET_CHARS)
+        return full.join("");
+    // 1. drop the "use when" clauses; the description still identifies the skill
+    const withoutWhen = entries.map((entry) => renderEntry(entry, entry.description, ""));
+    if (total(withoutWhen) <= SKILL_INDEX_BUDGET_CHARS)
+        return withoutWhen.join("");
+    // 2. trim descriptions towards an equal share of what is left after the
+    //    fixed cost of every name and path, which cannot be given up
+    const fixed = total(entries.map((entry) => renderEntry(entry, "", "")));
+    const room = SKILL_INDEX_BUDGET_CHARS - fixed;
+    const share = Math.floor(room / Math.max(1, entries.length));
+    if (share >= MIN_USEFUL_DESCRIPTION) {
+        const trimmed = entries.map((entry) => renderEntry(entry, entry.description.length > share ? `${entry.description.slice(0, share - 1)}…` : entry.description, ""));
+        if (total(trimmed) <= SKILL_INDEX_BUDGET_CHARS)
+            return trimmed.join("");
+    }
+    // 3. only now lose skills, and say how many
+    const kept = [];
+    let used = 0;
+    for (const entry of entries) {
+        const line = renderEntry(entry, entry.description.length > MIN_USEFUL_DESCRIPTION
+            ? `${entry.description.slice(0, MIN_USEFUL_DESCRIPTION - 1)}…`
+            : entry.description, "");
+        if (used + line.length > SKILL_INDEX_BUDGET_CHARS)
+            break;
+        kept.push(line);
+        used += line.length;
+    }
+    const dropped = entries.length - kept.length;
+    if (!dropped)
+        return kept.join("");
+    return `${kept.join("")} (…and ${dropped} more skill${dropped === 1 ? "" : "s"} not listed here — read the skills directory if none of the above fits.)`;
+}
 export function skillIndexPrompt(workspacePath) {
     const { rootPath, skills } = readWorkspaceSkills(workspacePath);
     // A malformed bundle is a Skill Center problem; advertising it here would
@@ -320,15 +379,16 @@ export function skillIndexPrompt(workspacePath) {
     const usable = skills.filter((skill) => skill.valid && skill.modelInvocable);
     if (!usable.length)
         return "";
-    const index = usable
-        .map((skill) => {
-        const when = skill.whenToUse ? ` Use when: ${skill.whenToUse}` : "";
-        return ` • ${skill.name} — ${skill.description}${when} [${join(rootPath, skill.name, "SKILL.md")}]`;
-    })
-        .join("");
+    const entries = usable.map((skill) => ({
+        name: skill.name,
+        description: skill.description,
+        whenUse: skill.whenToUse ? ` Use when: ${skill.whenToUse}` : "",
+        path: join(rootPath, skill.name, "SKILL.md"),
+    }));
     return (" This workspace has saved skills: reusable procedures for work already done once and worth repeating the same way." +
-        " Before starting a task, check whether one applies; if it does, read that SKILL.md in full and follow it instead of improvising." +
-        index);
+        " Before starting a task, check whether one applies. If one does, read that SKILL.md in full and follow it as your first action — never just name a skill without opening it." +
+        " Your own instructions from the user outrank a skill; a skill you have opened outranks your own judgement where they do not conflict." +
+        fitToBudget(entries));
 }
 export function createWorkspaceSkill(workspacePath, raw) {
     const input = validateSkillInput(raw);
