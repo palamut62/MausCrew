@@ -7,6 +7,7 @@ import { DeviceMobile, Key, Monitor, ShieldCheck, SpeakerHigh, User, X } from "@
 import { useStore, type AppSettingsSection } from "@/state/store";
 import { ApiKeyRow, DeepSeekOptions } from "./ApiKeys";
 import { ClaudeGateways } from "./ClaudeGateways";
+import { FallbackChain } from "./FallbackChain";
 import { useUpdaterState } from "@/lib/updater";
 import { LocalComputerSection } from "./LocalComputerSection";
 import { Card } from "./SettingsPrimitives";
@@ -320,6 +321,7 @@ export function SettingsModal() {
                 subtitle="Run the Claude Code engine against another provider. Each gateway is its own engine in the model picker."
               >
                 <ClaudeGateways />
+                <FallbackChain />
               </Card>
             )}
 

@@ -107,6 +107,13 @@ import {
 } from "./skills.ts";
 import { createTeamManifest, parseTeamManifest } from "./team-manifest.ts";
 import { probeGateway } from "./drivers/claude-gateway-test.ts";
+import {
+  classifyFailure,
+  exhaustedNotice,
+  handoverNotice,
+  nextEngine,
+  type FailoverVerdict,
+} from "./failover.ts";
 import { teachDraftFromRecording, teachDraftFromTask } from "./teach/draft.ts";
 import * as recording from "./teach/recording.ts";
 import { ensureTailscaleServe } from "./tailscale-serve.ts";
@@ -577,6 +584,8 @@ bus.subscribe((event: RuntimeEvent) => {
   if (event.type === "turn.completed") {
     localVmLease.release(event.threadId);
     if (localVmActiveThread === event.threadId) localVmActiveThread = null;
+    if (!event.ok && handOverTurn(event.threadId)) return;
+    if (event.ok) triedEngines.delete(event.threadId);
     // Record what this session was for, so the bot still knows tomorrow.
     // Deterministic on purpose: this codebase holds that a turn the user pays
     // for must be visible, and a silent summarisation turn after every
@@ -825,13 +834,23 @@ bus.subscribe((event: RuntimeEvent) => {
       }
       break;
     }
-    case "runtime.error":
+    case "runtime.error": {
+      // Held rather than shown, until turn.completed says whether the turn
+      // survived it. An engine that ran out of allowance can hand the work to
+      // the next one, and a red error for something the user never had to see
+      // is worse than no error at all.
+      const verdict = classifyFailure(event.message);
+      if (bot && verdict.move && failoverCandidate(bot.id, event.threadId)) {
+        lastLimitFailure.set(event.threadId, { message: event.message, verdict });
+        break;
+      }
       pushMessage({
         role: "bot",
         kind: "activity",
         tool: { name: `error: ${event.message.slice(0, 160)}`, ok: false, setup: event.setup },
       });
       break;
+    }
     case "thread.token-usage.updated": {
       // group turns run on the room's thread, so the token bill belongs to
       // whichever member is busy there — same owner rule as turn.completed
@@ -1081,6 +1100,11 @@ async function startTurn(
     automationSource?: RoutineRunTrigger;
     /** the caller was already running unattended, so this turn is too */
     unattended?: boolean;
+    /** Engine to run on instead of the bot's own, used when a turn is handed
+     * over after the previous engine ran out. */
+    overrideInstanceId?: string;
+    /** Engines already tried this turn, so a handover never loops. */
+    triedInstanceIds?: readonly string[];
     onDispatchError?: (message: string) => void;
   },
 ) {
@@ -1098,9 +1122,10 @@ async function startTurn(
   // a task takes its name from the first thing you asked it to do
   if (text.trim()) store.titleTaskFromFirstMessage(bot.id, text, threadId);
 
+  const wantedInstanceId = opts?.overrideInstanceId ?? bot.modelSelection.instanceId;
   const instance = opts?.runOn === "cloud"
     ? registry.instances().find((candidate) => candidate.driverKind === "boxAgent") ?? null
-    : registry.get(bot.modelSelection.instanceId);
+    : registry.get(wantedInstanceId);
   if (!instance) {
     throw Object.assign(
       new Error(
@@ -1167,10 +1192,19 @@ async function startTurn(
   // cleared only once the turn is actually dispatched — clearing it here
   // would cost the next attempt its history if this dispatch fails.
   const rewound = threadId === bot.threadId && Boolean(bot.rewound);
-  const turnText =
-    rewound && instance.driverKind !== "grok" && transcript.length
+  // A handover is the same problem as a rewind: the engine about to run has
+  // never seen this conversation, and its predecessor's session id means
+  // nothing to it. The bot's own transcript is the only history that survives
+  // an engine change, so it is replayed inline exactly as a rewind replays it.
+  // This is what makes "carry on where you left off" true across providers
+  // rather than only within one CLI's memory.
+  const handedOver = Boolean(opts?.overrideInstanceId);
+  const needsHistoryInline = (rewound || handedOver) && instance.driverKind !== "grok" && transcript.length > 0;
+  const turnText = needsHistoryInline
       ? [
-          "[The user rewound this conversation (edited a message or switched to another version). Everything before this point was replaced by the following history:]",
+          handedOver
+            ? "[This conversation continues from another engine that became unavailable. It has no memory of what follows, so here is the history so far:]"
+            : "[The user rewound this conversation (edited a message or switched to another version). Everything before this point was replaced by the following history:]",
           "",
           ...transcript.map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.text}`),
           "",
@@ -1392,8 +1426,9 @@ async function startTurn(
         effort,
         // a rewound thread never resumes the abandoned branch's session
         // the active task's own session — another task's cursor would
-        // resume the wrong conversation and defeat the context bubble
-        resumeCursor: rewound ? undefined : task.resumeCursors[instanceId],
+        // resume the wrong conversation and defeat the context bubble.
+        // A handover has no session on this engine at all.
+        resumeCursor: rewound || handedOver ? undefined : task.resumeCursors[instanceId],
         transcript,
         cwd: bot.workspacePath || undefined,
         runtimeFeatures: { dynamicCordis: bot.dynamicCordis === true },
@@ -1723,6 +1758,7 @@ function configStatus() {
     // label and model list echoed so the form can show what each is pointed
     // at. instanceId is echoed too — it is what the picker routes by, and
     // deriving it a second time in the renderer is how the two drift apart.
+    fallbackChain: cfg.fallbackChain ?? [],
     claudeGateways: claudeGateways(cfg).map((gw) => ({
       id: gw.id,
       instanceId: gatewayInstanceId(gw.id),
@@ -1897,6 +1933,99 @@ async function refreshRemoteIngress() {
   ingressCheck = { at: Date.now(), result };
   if (!result.ok) console.error(`remote access: ${result.error}`);
   return result;
+}
+
+// ── engine failover ────────────────────────────────────────────────────
+// A limit failure is held here between runtime.error and turn.completed: only
+// the latter says whether the turn actually died, and only then is it worth
+// spending a second engine on it.
+const lastLimitFailure = new Map<string, { message: string; verdict: FailoverVerdict }>();
+/** Engines already burned on the turn currently running, per thread. */
+const triedEngines = new Map<string, string[]>();
+
+function fallbackChainFor(bot: { modelSelection: { instanceId: string } }): string[] {
+  const configured = cfg.fallbackChain?.filter((id) => typeof id === "string" && id.trim()) ?? [];
+  // The bot's own engine is always first, whether or not the user listed it:
+  // a chain is where to go NEXT, not a replacement for the choice they made.
+  return [bot.modelSelection.instanceId, ...configured.filter((id) => id !== bot.modelSelection.instanceId)];
+}
+
+/** Is there anywhere for this thread to go, if the running turn dies? */
+function failoverCandidate(botId: string, threadId: string): string | null {
+  const bot = store.bot(botId);
+  if (!bot) return null;
+  const available = new Set(registry.instances().map((i) => i.instanceId));
+  return nextEngine({
+    chain: fallbackChainFor(bot),
+    available,
+    tried: triedEngines.get(threadId) ?? [bot.modelSelection.instanceId],
+  });
+}
+
+function engineLabel(instanceId: string): string {
+  return registry.get(instanceId)?.displayName ?? instanceId;
+}
+
+/**
+ * Move a dead turn to the next engine, or give up and report honestly.
+ *
+ * Returns true when the turn has been taken over, so the caller stops treating
+ * it as finished. The transcript always says what happened: a handover the
+ * user cannot see is a bot that mysteriously changed its mind about which
+ * model it is.
+ */
+function handOverTurn(threadId: string): boolean {
+  const held = lastLimitFailure.get(threadId);
+  if (!held) return false;
+  lastLimitFailure.delete(threadId);
+
+  const bot = store.botByThread(threadId);
+  if (!bot) return false;
+  const tried = triedEngines.get(threadId) ?? [bot.modelSelection.instanceId];
+  const target = failoverCandidate(bot.id, threadId);
+
+  const say = (text: string, ok: boolean) => {
+    const message = store.appendMessage(threadId, {
+      role: "bot",
+      kind: "activity",
+      tool: { name: text.slice(0, 200), ok },
+    });
+    broadcast({ kind: "message", threadId, message });
+  };
+
+  if (!target) {
+    say(`error: ${held.message.slice(0, 120)}`, false);
+    const notice = exhaustedNotice(tried.map(engineLabel));
+    if (notice) say(notice, false);
+    triedEngines.delete(threadId);
+    return false;
+  }
+
+  say(handoverNotice(engineLabel(tried.at(-1) ?? bot.modelSelection.instanceId), engineLabel(target), held.verdict.reason), true);
+  triedEngines.set(threadId, [...tried, target]);
+
+  const lastAsk = store
+    .activePath(threadId)
+    .filter((m) => m.role === "user" && m.kind === "text" && m.text?.trim())
+    .at(-1);
+  if (!lastAsk?.text) {
+    triedEngines.delete(threadId);
+    return false;
+  }
+
+  // The bot is still marked busy from the turn that just died; clearing it
+  // here would let a second turn in before this one restarts.
+  store.patchBot(bot.id, { busy: false });
+  void startTurn(bot.id, lastAsk.text, {
+    threadId,
+    overrideInstanceId: target,
+    triedInstanceIds: [...tried, target],
+    unattended: true,
+  }).catch((error) => {
+    say(`error: could not hand over to ${engineLabel(target)} — ${String(error).slice(0, 120)}`, false);
+    triedEngines.delete(threadId);
+  });
+  return true;
 }
 
 /** One journal entry per bot per day, written after the day's last turn. */
@@ -3628,6 +3757,15 @@ const server = createServer(async (req, res) => {
       }
       const patch: Record<string, object> = {};
       if (gatewaysPatch) patch.claudeGateways = gatewaysPatch;
+      // An unknown id here is a chain entry for an engine that was removed;
+      // dropping it silently is right, because the alternative is a handover
+      // that picks something that no longer exists.
+      if (Array.isArray(body.fallbackChain)) {
+        const known = new Set(registry.instances().map((i) => i.instanceId));
+        patch.fallbackChain = body.fallbackChain
+          .filter((id: unknown): id is string => typeof id === "string" && known.has(id))
+          .slice(0, 8);
+      }
       for (const key of ["xai", "composio", "box", "opencodeGo", "deepseekHarness", "tts", "profile", "remoteAccess", "analytics"] as const) {
         if (body[key] && typeof body[key] === "object") patch[key] = body[key];
       }

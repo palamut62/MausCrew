@@ -182,6 +182,8 @@ export function messageVersions(bot: Bot, message: Message): Message[] {
 
 /** GET /api/config — configured flags only; secrets are never echoed. */
 export interface ConfigStatus {
+  /** Engines to try, in order, when one runs out mid-turn. */
+  fallbackChain?: string[];
   xai?: { configured: boolean };
   composio: { configured: boolean };
   box: { configured: boolean };

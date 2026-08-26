@@ -96,6 +96,16 @@ export interface AppConfig {
    * `authToken` is the credential and is never echoed back. `id` is a stable
    * routing key: bots store `instanceId`, so it must survive a rename. */
   claudeGateways?: ClaudeGateway[];
+  /**
+   * Engines to fall through when one runs out, in the user's own order.
+   *
+   * Every engine here is a subscription or a balance and they all run out. A
+   * turn that dies on "usage limit reached" can usually finish on the next one
+   * seconds later, so this is a preference list rather than a load balancer:
+   * first entry is tried first, and an engine is only skipped when it is
+   * genuinely unavailable.
+   */
+  fallbackChain?: string[];
   /** Superseded by `claudeGateways`; still read so a config written by an
    * older build keeps working, and migrated on first save. */
   claudeGateway?: { baseUrl?: string; authToken?: string; models?: string[] };
