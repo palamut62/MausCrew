@@ -58,6 +58,8 @@ import { buildNotification, type Notification } from "./notify.ts";
 import { isEffortLevel, type ModelSelection, type RuntimeEvent, type SubagentActivity } from "./contracts.ts";
 import { CONTENT_SECURITY_POLICY } from "./csp.ts";
 import { digestSystemBlock } from "./summarization/digest.ts";
+import { memoryBlock } from "./memory/store.ts";
+import { deterministicEntry, journalDate, recordJournal } from "./memory/harvest.ts";
 import { partitionThread } from "./summarization/partition.ts";
 
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
@@ -573,6 +575,11 @@ bus.subscribe((event: RuntimeEvent) => {
   if (event.type === "turn.completed") {
     localVmLease.release(event.threadId);
     if (localVmActiveThread === event.threadId) localVmActiveThread = null;
+    // Record what this session was for, so the bot still knows tomorrow.
+    // Deterministic on purpose: this codebase holds that a turn the user pays
+    // for must be visible, and a silent summarisation turn after every
+    // conversation is exactly the invisible cost that rule prevents.
+    void noteSessionInMemory(event.threadId);
   }
   broadcast({ kind: "runtime", event });
   routines?.handleRuntimeEvent(event);
@@ -1361,6 +1368,9 @@ async function startTurn(
           // what fell out of the transcript above, so it is knowledge the bot
           // has rather than history it lost
           digestSystemBlock(task.digest) +
+          // and what survived earlier sessions entirely — capped, because this
+          // rides on every turn forever
+          memoryBlock(bot.id).text +
           (computerKind === "vm"
             ? " You have a shared, isolated Cua sandbox: a Linux desktop in a container on this machine. Only /home/cua/workspace is durable; save downloads, repositories, working files, and browser profiles there because everything else inside the VM is disposable. No other host folder is mounted. Use the computer tools for desktop, accessibility, window, and shell work. Inspect the desktop state before acting, prefer accessibility targets over raw coordinates, and work carefully."
             : computerKind === "box" && instance.driverKind !== "boxAgent"
@@ -1853,6 +1863,30 @@ async function refreshRemoteIngress() {
   ingressCheck = { at: Date.now(), result };
   if (!result.ok) console.error(`remote access: ${result.error}`);
   return result;
+}
+
+/** One journal entry per bot per day, written after the day's last turn. */
+const journalled = new Map<string, string>();
+
+function noteSessionInMemory(threadId: string): void {
+  try {
+    const bot = store.botByThread(threadId);
+    if (!bot) return;
+    const today = journalDate(Date.now());
+    // Rewriting the same day on every turn would grow the file without
+    // adding anything; the last turn of a day is the one worth recording.
+    if (journalled.get(bot.id) === today) return;
+    const messages = store.activePath(threadId);
+    if (messages.length < 4) return;
+    const task = store.taskByThread(bot.id, threadId);
+    const entry = deterministicEntry(messages, { taskTitle: task?.title });
+    if (!entry) return;
+    recordJournal(bot.id, entry, Date.now());
+    journalled.set(bot.id, today);
+  } catch (error) {
+    // Bookkeeping must never break a completed turn.
+    console.error(`memory: could not journal ${threadId}: ${String(error)}`);
+  }
 }
 
 function configuredRemoteUrl(): URL | null {

@@ -20,7 +20,7 @@ const TOOL_CALL_OVERHEAD_CHARS = 50;
 export interface EstimatableMessage {
   readonly kind?: string;
   readonly text?: string | undefined;
-  readonly tool?: { readonly name?: string } | null | undefined;
+  readonly tool?: { readonly name?: string; readonly ok?: boolean } | null | undefined;
 }
 
 /** Characters a message costs, framing included. */
