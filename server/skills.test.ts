@@ -9,6 +9,7 @@ import {
   listWorkspaceSkills,
   SkillStoreError,
   skillFileMode,
+  SKILL_INDEX_BUDGET_CHARS,
   skillIndexPrompt,
   skillRootForWorkspace,
   updateWorkspaceSkill,
@@ -183,6 +184,83 @@ describe("skill index prompt", () => {
     // The turn path runs this for every bot on every turn; it must not
     // scatter .agents/skills trees under bots that never use skills.
     expect(existsSync(join(scratch, ".agents"))).toBe(false);
+  });
+
+
+  // The index rides on every single turn, so its size is a tax paid forever
+  // to advertise skills most turns never use.
+  it("stays inside its budget however many skills exist", () => {
+    for (let i = 0; i < 60; i++) {
+      createWorkspaceSkill(scratch, {
+        name: `skill-${i}`,
+        description: `A fairly wordy description of what skill ${i} does, ${"padding ".repeat(20)}`,
+        whenToUse: `Whenever situation ${i} arises, ${"more padding ".repeat(10)}`,
+        instructions: "1. Do the thing.",
+      });
+    }
+    const prompt = skillIndexPrompt(scratch);
+    expect(prompt.length).toBeLessThan(SKILL_INDEX_BUDGET_CHARS * 1.5);
+  });
+
+  // Losing a skill silently reads as the skill not existing, which is the
+  // same symptom as it being broken.
+  it("says how many it had to leave out", () => {
+    for (let i = 0; i < 80; i++) {
+      createWorkspaceSkill(scratch, {
+        name: `bulky-${i}`,
+        description: "x".repeat(400),
+        whenToUse: "y".repeat(200),
+        instructions: "1. Do the thing.",
+      });
+    }
+    expect(skillIndexPrompt(scratch)).toMatch(/more skills? not listed/);
+  });
+
+  // Detail goes before skills do: a skill the agent cannot see it has is
+  // worse than one it must open to understand.
+  it("drops the when-to-use clause before it drops a skill", () => {
+    for (let i = 0; i < 14; i++) {
+      createWorkspaceSkill(scratch, {
+        name: `mid-${i}`,
+        description: "A description of moderate length that is worth keeping around.",
+        whenToUse: "z".repeat(300),
+        instructions: "1. Do the thing.",
+      });
+    }
+    const prompt = skillIndexPrompt(scratch);
+    expect(prompt).toContain("mid-13");
+    expect(prompt).not.toContain("Use when: zzz");
+  });
+
+  it("tells the agent to open a skill rather than name it, and who outranks whom", () => {
+    createWorkspaceSkill(scratch, {
+      name: "solo",
+      description: "Only skill here.",
+      whenToUse: "Always.",
+      instructions: "1. Do the thing.",
+    });
+    const prompt = skillIndexPrompt(scratch);
+    expect(prompt).toMatch(/never just name a skill without opening it/i);
+    expect(prompt).toMatch(/outrank/i);
+  });
+
+
+  // An entry without its path is worse than no entry: the agent knows a skill
+  // exists, cannot open it, and has no way to find out what it says.
+  it("never trims away the file to read, however tight the budget", () => {
+    for (let i = 0; i < 90; i++) {
+      createWorkspaceSkill(scratch, {
+        name: `pathy-${i}`,
+        description: "d".repeat(500),
+        whenToUse: "w".repeat(300),
+        instructions: "1. Do the thing.",
+      });
+    }
+    const prompt = skillIndexPrompt(scratch);
+    const listed = prompt.match(/ • pathy-\d+ /g) ?? [];
+    expect(listed.length).toBeGreaterThan(0);
+    // every skill that IS listed carries a readable path
+    expect((prompt.match(/SKILL\.md\]/g) ?? []).length).toBe(listed.length);
   });
 
   it("names each skill, when to use it, and the absolute file to read", () => {

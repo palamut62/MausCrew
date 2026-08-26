@@ -106,6 +106,7 @@ import {
   updateWorkspaceSkill,
 } from "./skills.ts";
 import { createTeamManifest, parseTeamManifest } from "./team-manifest.ts";
+import { CONDUCT_RULES, DRIFT_REMINDER, coordinatorRules, shouldRemind } from "./conduct.ts";
 import { probeGateway } from "./drivers/claude-gateway-test.ts";
 import {
   classifyFailure,
@@ -1410,6 +1411,24 @@ async function startTurn(
         : integrations.agents
           ? "You can work with the user's other bots through the agents tools — list_bots shows who's available, ask_bot sends one of them a message and returns their reply, and ask_bots puts independent questions to several of them at once instead of waiting out one peer before starting the next."
           : "";
+      // The prompt above this line is an inventory: what the bot has. These
+      // are conduct: how to use it. The second is what separates a capable
+      // model from a good teammate, and it was missing entirely.
+      const conductPrompt =
+        " " +
+        CONDUCT_RULES +
+        " " +
+        coordinatorRules({
+          hasPeers: Boolean(integrations.agents),
+          // Engines that run their own CLI can spawn their own workers; a
+          // gateway answering raw messages cannot.
+          hasOwnSubagents: instance.driverKind === "claude" || instance.driverKind === "codex",
+        });
+      // Rules stated once lose against everything said since. Re-stated on a
+      // cadence rather than every turn, so the reminder stays a reminder.
+      const driftPrompt = shouldRemind(store.activePath(threadId).filter((m) => m.role === "user").length)
+        ? ` ${DRIFT_REMINDER}`
+        : "";
 
       // The interrupt endpoint can run while the awaits above are still
       // preparing integrations. Consume that request before spawning the
@@ -1440,6 +1459,8 @@ async function startTurn(
           // and what survived earlier sessions entirely — capped, because this
           // rides on every turn forever
           memoryBlock(bot.id).text +
+          conductPrompt +
+          driftPrompt +
           (computerKind === "vm"
             ? " You have a shared, isolated Cua sandbox: a Linux desktop in a container on this machine. Only /home/cua/workspace is durable; save downloads, repositories, working files, and browser profiles there because everything else inside the VM is disposable. No other host folder is mounted. Use the computer tools for desktop, accessibility, window, and shell work. Inspect the desktop state before acting, prefer accessibility targets over raw coordinates, and work carefully."
             : computerKind === "box" && instance.driverKind !== "boxAgent"
