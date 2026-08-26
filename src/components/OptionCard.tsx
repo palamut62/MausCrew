@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { X } from "@phosphor-icons/react";
 import { useStore, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -15,12 +15,37 @@ export function OptionCard({
   const { dispatch } = useStore();
   const [custom, setCustom] = useState("");
   const card = message.card;
-  if (!card || card.dismissed) return null;
+  const options = card?.options ?? [];
+  const settled = Boolean(!card || card.answered || card.dismissed);
 
   const answer = (text: string) => {
     if (!text.trim()) return;
     dispatch({ type: "answerCard", botId, messageId: message.id, answer: text.trim() });
   };
+  // Number keys pick an option without reaching for the mouse. Scoped to the
+  // document rather than the card because the caret is usually in the composer
+  // when a question arrives, and a shortcut you have to click into first is
+  // not a shortcut. Anything typed into a field is left alone.
+  useEffect(() => {
+    if (settled || options.length === 0) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      const typing =
+        target?.isContentEditable ||
+        target?.tagName === "INPUT" ||
+        target?.tagName === "TEXTAREA";
+      if (typing) return;
+      const index = Number(event.key) - 1;
+      if (!Number.isInteger(index) || index < 0 || index >= options.length) return;
+      event.preventDefault();
+      answer(options[index]!);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  });
+
+  if (!card || card.dismissed) return null;
 
   return (
     <div className="w-full max-w-[840px] rounded-xl border border-hairline bg-card p-4">
@@ -56,7 +81,7 @@ export function OptionCard({
             )}
           >
             <span className="flex size-6 items-center justify-center rounded-md bg-raised text-[12px] font-medium text-ink-secondary">
-              {LETTERS[i]}
+              {i < 9 ? i + 1 : LETTERS[i]}
             </span>
             {opt}
           </button>

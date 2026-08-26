@@ -418,7 +418,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
                   focused ? "scale-105 border border-hairline bg-raised/70" : "opacity-75",
                 )}
               >
-                <MausAvatar color={member.color} name={member.name} size={94} />
+                <MausAvatar color={member.color} name={member.name} seed={member.id} shape={member.shape} size={94} />
                 <span className={cn("text-[13px] font-medium", focused ? "text-ink" : "text-ink-secondary")}>
                   {member.name}
                 </span>

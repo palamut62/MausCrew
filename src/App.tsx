@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { Spin } from "@/components/Spin";
 import { List } from "@phosphor-icons/react";
 import { StoreProvider, useStore } from "@/state/store";
+import { NoBots } from "@/components/NoBots";
 import { Onboarding } from "@/components/Onboarding";
 import { emailGateDone, initAnalytics } from "@/lib/analytics";
 import { Sidebar } from "@/components/Sidebar";
@@ -115,17 +115,7 @@ function Shell() {
       ) : bot ? (
         <ChatView bot={bot} />
       ) : (
-        <main className="flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-3 bg-app text-ink-secondary">
-          <Spin size={20} weight="fill" />
-          <div className="text-[14px]">
-            {state.connected ? "No bots yet" : "Connecting to the bot server…"}
-          </div>
-          {!state.connected && (
-            <div className="text-[12px]">
-              Start it with <code className="rounded bg-raised px-1.5 py-0.5">pnpm dev:server</code>
-            </div>
-          )}
-        </main>
+        <NoBots />
       )}
       {state.settingsOpen && bot && <SettingsPanel bot={bot} />}
       {state.computerOpen && bot && <ComputerPanel bot={bot} />}

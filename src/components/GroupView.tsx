@@ -256,7 +256,7 @@ export function GroupView({ group }: { group: Group }) {
                 group.busyBotId === b.id && "ring-2 ring-accent/50 ring-offset-1 ring-offset-app",
               )}
             >
-              <MausAvatar color={b.color} name={b.name} size={24} />
+              <MausAvatar color={b.color} name={b.name} seed={b.id} shape={b.shape} size={24} />
               {group.busyBotId === b.id && (
                 <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full border border-app bg-accent" />
               )}

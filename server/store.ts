@@ -23,6 +23,17 @@ export type MausColor =
   | "teal"
   | "coral";
 
+/** The eight body shapes an avatar can be drawn as. */
+export type MausShape =
+  | "blob"
+  | "pebble"
+  | "squircle"
+  | "tablet"
+  | "wedge"
+  | "hex"
+  | "cloud"
+  | "teardrop";
+
 /**
  * The face a bot rests on, as one of the engine's state names. Kept as a plain
  * string rather than a union: bots saved under the app's earlier ten-face
@@ -167,6 +178,11 @@ export interface BotRecord {
   description: string;
   notifications: boolean;
   color: MausColor;
+  /** Body shape, stored beside the colour rather than derived from an id.
+   * Deriving it meant every avatar had to be handed the same seed, and the
+   * one call site that passed a name instead of the id drew the same bot with
+   * a different body in the sidebar and the header. */
+  shape?: MausShape;
   unread: boolean;
   modelSelection: ModelSelection;
   /** Absolute host folder used as this bot's coding workspace. Unset lets
@@ -216,6 +232,20 @@ export interface BotRecord {
 const BOTS_FILE = join(DATA_DIR, "bots.json");
 const GROUPS_FILE = join(DATA_DIR, "groups.json");
 const messagesFile = (threadId: string) => join(DATA_DIR, `messages-${threadId}.json`);
+
+/** Cycled alongside COLORS so consecutive bots differ in both at once. The
+ * two lists are deliberately coprime in length (10 and 8), so a roster has to
+ * reach forty before a colour and shape pairing repeats. */
+export const SHAPES: MausShape[] = [
+  "blob",
+  "pebble",
+  "squircle",
+  "tablet",
+  "wedge",
+  "hex",
+  "cloud",
+  "teardrop",
+];
 
 export const COLORS: MausColor[] = [
   "green",
@@ -606,7 +636,7 @@ export class Store {
 
   createBot(
     profile: Partial<
-      Pick<BotRecord, "name" | "title" | "description" | "color" | "modelSelection">
+      Pick<BotRecord, "name" | "title" | "description" | "color" | "shape" | "modelSelection">
     > = {},
   ): BotRecord {
     const name = profile.name?.trim() || pickBotName(this.bots.map((b) => b.name));
@@ -618,6 +648,7 @@ export class Store {
       description: profile.description ?? "",
       notifications: true,
       color: profile.color ?? COLORS[this.bots.length % COLORS.length],
+      shape: profile.shape ?? SHAPES[this.bots.length % SHAPES.length],
       unread: false,
       modelSelection: profile.modelSelection ?? this.defaultSelection(),
       resumeCursors: {},

@@ -22,6 +22,24 @@ export interface Pending {
 }
 
 /** Open approvals on a thread, oldest first — answered/dismissed drop out. */
+/**
+ * A plain question the bot is blocked on: it has a request waiting for a reply
+ * but no tool, so there is nothing to allow or deny — only something to answer.
+ *
+ * These were invisible to the composer, which only ever looked for permission
+ * cards. A question would render its options, the composer stayed open, and an
+ * answer typed there went out as an ordinary message while the bot went on
+ * waiting for a reply that never came.
+ */
+export function pendingQuestion(messages: Message[]): Message | undefined {
+  return messages
+    .filter(
+      (m) =>
+        m.kind === "options" && m.card?.requestId && !m.card.tool && !m.card.answered && !m.card.dismissed,
+    )
+    .at(-1);
+}
+
 export function pendingApprovals(messages: Message[]): Pending[] {
   return messages
     .filter((m) => m.kind === "options" && m.card?.requestId && m.card.tool && !m.card.answered && !m.card.dismissed)

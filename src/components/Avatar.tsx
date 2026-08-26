@@ -36,11 +36,25 @@ export type MausAvatarProps = {
   state?: MausState;
   /** Stable id so two bots never breathe in unison. Defaults to the name. */
   seed?: string;
+  /** The bot's stored body shape. Passing it is what keeps one bot looking
+   * like itself in the sidebar and the header; without it the shape falls back
+   * to the seed, and two call sites with different seeds drew two different
+   * bodies for the same bot. */
+  shape?: string;
   /** Hold the pose — for decorative or off-screen avatars. */
   paused?: boolean;
 };
 
-function MausAvatarComponent({ color, name, size = 44, label, state, seed, paused }: MausAvatarProps) {
+function MausAvatarComponent({
+  color,
+  name,
+  size = 44,
+  label,
+  state,
+  seed,
+  shape,
+  paused,
+}: MausAvatarProps) {
   const title = label ?? name ?? undefined;
   return (
     <MausMascot
@@ -48,6 +62,7 @@ function MausAvatarComponent({ color, name, size = 44, label, state, seed, pause
       state={state}
       size={size}
       seed={seed ?? name ?? color}
+      shape={shape}
       paused={paused}
       title={title}
       className="rounded-lg"
