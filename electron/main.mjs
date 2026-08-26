@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, desktopCapturer, dialog, ipcMain, Menu, safeStorage, session, shell, systemPreferences, Tray, utilityProcess } from "electron";
+import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, safeStorage, session, shell, systemPreferences, Tray, utilityProcess } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -408,13 +408,41 @@ app.on("second-instance", () => {
   if (app.isReady()) showMainWindow();
 });
 
+/**
+ * Summon the window from anywhere with one key.
+ *
+ * The app is a teammate you interrupt with a thought, and hunting for its
+ * window in the taskbar first is what stops that being true. The same chord
+ * hides it again, so it costs nothing to leave running.
+ *
+ * Registration can fail — another app may already own the chord — and that is
+ * not worth a dialog: the tray icon still opens the window.
+ */
+const SUMMON_ACCELERATOR = process.platform === "darwin" ? "Command+Shift+M" : "Control+Shift+M";
+
+function registerSummonShortcut() {
+  try {
+    if (globalShortcut.isRegistered(SUMMON_ACCELERATOR)) return true;
+    return globalShortcut.register(SUMMON_ACCELERATOR, () => {
+      const win = mainWindow;
+      if (win && !win.isDestroyed() && win.isVisible() && win.isFocused()) {
+        win.hide();
+        return;
+      }
+      showMainWindow();
+    });
+  } catch {
+    return false;
+  }
+}
+
 function createTray() {
   if (tray) return tray;
   try {
     tray = new Tray(TRAY_ICON);
     tray.setToolTip("MausCrew");
     tray.setContextMenu(Menu.buildFromTemplate([
-      { label: "Open MausCrew", click: () => showMainWindow() },
+      { label: `Open MausCrew	${SUMMON_ACCELERATOR.replace("Control", "Ctrl").replace("Command", "Cmd")}`, click: () => showMainWindow() },
       { type: "separator" },
       {
         label: "Quit MausCrew",
@@ -606,6 +634,7 @@ app.whenReady().then(async () => {
   registerCuaIpc();
   registerUpdaterIpc();
   createTray();
+  registerSummonShortcut();
   // Start the CUA daemon before the window so the harness can pick up the
   // connection descriptor on first render. Never blocks window creation on
   // failure — computer use degrades to "unavailable", the rest still works.
@@ -637,6 +666,10 @@ const CUA_STOP_TIMEOUT_MS = 2500;
 let cuaCleanedUp = false;
 app.on("before-quit", (e) => {
   quitRequested = true;
+  // a global chord must not outlive the process that claimed it
+  try {
+    globalShortcut.unregisterAll();
+  } catch {}
   if (cuaCleanedUp) return;
   e.preventDefault();
   try {
