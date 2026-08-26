@@ -6,6 +6,7 @@ import { MAUS_COLORS, MAUS_COLOR_NAMES } from "@/lib/colors";
 import { ModelPicker } from "./ModelPicker";
 import { cn } from "@/lib/cn";
 import { requestNotificationPermission } from "@/lib/notify";
+import { BotMemory } from "./BotMemory";
 import { SkillManager } from "./SkillManager";
 
 function Field({
@@ -370,6 +371,8 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                 : "This bot is given the list each turn and reads the one that fits."}
             </div>
           </div>
+
+          <BotMemory bot={bot} />
 
           {engine?.driverKind === "deepseek-harness" && (
             <>

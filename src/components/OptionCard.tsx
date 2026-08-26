@@ -21,6 +21,9 @@ export function OptionCard({
   const answer = (text: string) => {
     if (!text.trim()) return;
     dispatch({ type: "answerCard", botId, messageId: message.id, answer: text.trim() });
+    // Nothing keeps the value after it has been sent, here included: the
+    // field would otherwise sit on screen holding a credential.
+    if (card?.secret) setCustom("");
   };
   // Number keys pick an option without reaching for the mouse. Scoped to the
   // document rather than the card because the caret is usually in the composer
@@ -91,13 +94,24 @@ export function OptionCard({
       {/* a permission ask has no free-text answer — the broker only accepts
           allow/deny, so typing here used to fail silently */}
       {!card.answered && !card.tool && (
-        <input
-          value={custom}
-          onChange={(e) => setCustom(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && answer(custom)}
-          placeholder="Type your own answer"
-          className="mt-3 w-full rounded-lg border border-hairline bg-inset px-3 py-2.5 text-[15px] text-ink placeholder:text-ink-secondary focus:outline-none focus:border-hairline"
-        />
+        <>
+          <input
+            type={card.secret ? "password" : "text"}
+            autoComplete={card.secret ? "off" : undefined}
+            spellCheck={card.secret ? false : undefined}
+            value={custom}
+            onChange={(e) => setCustom(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && answer(custom)}
+            placeholder={card.secret ? "Paste the credential" : "Type your own answer"}
+            className="mt-3 w-full rounded-lg border border-hairline bg-inset px-3 py-2.5 text-[15px] text-ink placeholder:text-ink-secondary focus:outline-none focus:border-hairline"
+          />
+          {card.secret && (
+            <p className="mt-1.5 text-[11.5px] leading-[1.5] text-ink-secondary">
+              Handed to the bot for this turn only. It is not written into this conversation, so it
+              will not be in the transcript afterwards.
+            </p>
+          )}
+        </>
       )}
     </div>
   );

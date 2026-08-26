@@ -62,7 +62,12 @@ export function Composer({
   // A question the bot is waiting on. Typing an answer here is the obvious
   // thing to do, so it is made to work: the reply goes to the request instead
   // of starting a new message the bot will never read as an answer.
-  const question = bot ? pendingQuestion(threadMessages) : undefined;
+  const pending = bot ? pendingQuestion(threadMessages) : undefined;
+  // A credential must arrive through the card's masked field. Routing it
+  // through the composer would put it in a plain text box, in the draft that
+  // outlives this component, and briefly in the message the user can see.
+  const question = pending?.card?.secret ? undefined : pending;
+  const secretPending = pending?.card?.secret ? pending : undefined;
   const approvalBot = group
     ? members?.find((b) => b.id === approval?.message.from?.botId) ??
       members?.find((b) => b.id === group.busyBotId)
@@ -273,6 +278,13 @@ export function Composer({
                 <span className="shrink-0 font-mono text-xs tracking-tight text-ink-secondary">{peer.bot ? "Agent" : "Room"}</span>
               </button>
             ))}
+          </div>
+        )}
+        {secretPending && (
+          <div className="mb-2 rounded-xl border border-accent/40 bg-accent/10 px-3 py-2 text-[12.5px] text-ink">
+            <span className="text-ink-secondary">Waiting for a credential — </span>
+            {secretPending.card?.title ?? "enter it in the card above"}. Type it into the masked
+            field on that card, not here.
           </div>
         )}
         {/* A question does not take the composer over — typing an answer is
