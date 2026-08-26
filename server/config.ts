@@ -106,6 +106,9 @@ export interface AppConfig {
    * genuinely unavailable.
    */
   fallbackChain?: string[];
+  /** Browser control on this machine via Playwright. Off unless enabled: it
+   * needs a separate install, and most bots never open a browser. */
+  pcBrowser?: { enabled?: boolean; headless?: boolean };
   /** Superseded by `claudeGateways`; still read so a config written by an
    * older build keeps working, and migrated on first save. */
   claudeGateway?: { baseUrl?: string; authToken?: string; models?: string[] };

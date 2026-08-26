@@ -41,6 +41,7 @@ import {
   aguiAuthEnv,
   loadConfig,
   saveConfig,
+  DATA_DIR,
   EVENTS_DIR,
   NATIVE_DIR,
   type AppConfig,
@@ -176,6 +177,32 @@ const agentsProxyPath = (() => {
   const ts = join(dirname(fileURLToPath(import.meta.url)), "drivers", "agents-proxy.ts");
   return existsSync(ts) ? ts : ts.replace(/\.ts$/, ".js");
 })();
+const pcBrowserProxyPath = (() => {
+  const ts = join(dirname(fileURLToPath(import.meta.url)), "drivers", "playwright-proxy.ts");
+  return existsSync(ts) ? ts : ts.replace(/\.ts$/, ".js");
+})();
+
+/**
+ * Browser control on this machine, in a profile of the app's own.
+ *
+ * Deliberately not the user's everyday Chrome: attaching to that would hand a
+ * bot every session they have open — mail, bank, everything — as a side effect
+ * of being asked to check a price. The bot signs into what it needs, in a
+ * profile the user can see and delete.
+ */
+function pcBrowserIntegration() {
+  return {
+    command: process.execPath,
+    args: [pcBrowserProxyPath],
+    env: {
+      ...AGENTS_NODE_FLAG,
+      MAUSCREW_PLAYWRIGHT_PROFILE: join(DATA_DIR, "pc-browser-profile"),
+      // Visible by default: a browser acting on the user's own machine should
+      // be something they can watch and take over, not a hidden process.
+      MAUSCREW_PLAYWRIGHT_HEADLESS: cfg.pcBrowser?.headless ? "1" : "0",
+    },
+  };
+}
 // in the packaged app process.execPath is Electron — run the proxy as node
 const AGENTS_NODE_FLAG = { ELECTRON_RUN_AS_NODE: "1" };
 
@@ -1430,6 +1457,8 @@ async function startTurn(
         ? ` ${DRIFT_REMINDER}`
         : "";
 
+      if (cfg.pcBrowser?.enabled) integrations.pcBrowser = pcBrowserIntegration();
+
       // The interrupt endpoint can run while the awaits above are still
       // preparing integrations. Consume that request before spawning the
       // provider. Deleting the entry and calling sendTurn are synchronous up
@@ -1470,6 +1499,9 @@ async function startTurn(
               : "") +
           (computerKind
             ? " At a sign-in, password, MFA, CAPTCHA, or other protected-input step, stop and ask the user to complete it on the visible computer. Never type their password or ask them to paste a password or one-time code into chat."
+            : "") +
+          (integrations.pcBrowser
+            ? " You can drive a browser on the user's own computer with the pc_browser tools: pc_browser_open to go somewhere, pc_browser_snapshot for the elements on the page, then click/fill/select/press by ref, and pc_browser_read for the text. It runs in MausCrew's own browser profile, not the user's everyday one, so you are only signed into what you signed into. Prefer these over screenshots and coordinate clicks — they know when a page has finished loading and what an element actually is. At any sign-in, password, MFA or CAPTCHA step, stop and ask the user to do it themselves in that window."
             : "") +
           // gated on the integration, not the key: the hint only goes to a
           // bot whose driver actually mounted the tools
@@ -1780,6 +1812,7 @@ function configStatus() {
     // at. instanceId is echoed too — it is what the picker routes by, and
     // deriving it a second time in the renderer is how the two drift apart.
     fallbackChain: cfg.fallbackChain ?? [],
+    pcBrowser: { enabled: cfg.pcBrowser?.enabled === true, headless: cfg.pcBrowser?.headless === true },
     claudeGateways: claudeGateways(cfg).map((gw) => ({
       id: gw.id,
       instanceId: gatewayInstanceId(gw.id),
@@ -3787,7 +3820,7 @@ const server = createServer(async (req, res) => {
           .filter((id: unknown): id is string => typeof id === "string" && known.has(id))
           .slice(0, 8);
       }
-      for (const key of ["xai", "composio", "box", "opencodeGo", "deepseekHarness", "tts", "profile", "remoteAccess", "analytics"] as const) {
+      for (const key of ["xai", "composio", "box", "opencodeGo", "deepseekHarness", "tts", "profile", "remoteAccess", "analytics", "pcBrowser"] as const) {
         if (body[key] && typeof body[key] === "object") patch[key] = body[key];
       }
       if (!Object.keys(patch).length) return json(res, 400, { error: "nothing to save" });
