@@ -5,8 +5,9 @@
 // neither replaces the plain claude.ai sign-in. Hence a list, not one form.
 import { useState } from "react";
 import { Spin } from "./Spin";
-import { Check, Warning } from "@phosphor-icons/react";
+import { Check, Flask, Warning } from "@phosphor-icons/react";
 import { api, useStore, type ConfigStatus } from "@/state/store";
+import { cn } from "@/lib/cn";
 
 /** Starting points for the endpoints people actually use. Model ids are
  * seeded because a gateway with none offers Claude ids it will reject. */
@@ -90,8 +91,45 @@ const isLoopback = (url: string) => /^https?:\/\/(localhost|127\.0\.0\.1)\b/i.te
 const isRemote = (url: string) => Boolean(trimmedUrl(url)) && !isLoopback(url);
 const isPlaintext = (url: string) => /^http:\/\//i.test(trimmedUrl(url)) && !isLoopback(url);
 
+interface ProbeResult {
+  ok: boolean;
+  problem?: string;
+  detail?: string;
+}
+
 export function ClaudeGateways() {
   const { state, dispatch, refreshInstances } = useStore();
+  const [testing, setTesting] = useState<string | null>(null);
+  const [probes, setProbes] = useState<Record<string, ProbeResult>>({});
+
+  const testRow = async (row: GatewayDraft) => {
+    setTesting(row.id);
+    try {
+      // The first model is what a bot would actually be given; testing a
+      // different one would prove nothing about this configuration.
+      const model = row.models.split(",")[0]?.trim() ?? "";
+      const result = (await api("/api/claude-gateways/test", {
+        method: "POST",
+        // A null token means "the one already saved", which the UI never
+        // holds; the server looks it up by id so a saved gateway can be
+        // tested without retyping the key.
+        body: JSON.stringify({
+          id: row.id,
+          baseUrl: row.baseUrl,
+          ...(row.token !== null ? { authToken: row.token } : {}),
+          model,
+        }),
+      })) as ProbeResult;
+      setProbes((prev) => ({ ...prev, [row.id]: result }));
+    } catch (error) {
+      setProbes((prev) => ({
+        ...prev,
+        [row.id]: { ok: false, problem: error instanceof Error ? error.message : String(error) },
+      }));
+    } finally {
+      setTesting(null);
+    }
+  };
   const saved = state.config?.claudeGateways;
   // null means "showing what is saved" — a draft exists only once edited, so
   // a config refresh cannot overwrite half-typed input.
@@ -261,6 +299,31 @@ export function ClaudeGateways() {
                 <span>{text}</span>
               </div>
             ))}
+          {/* The warnings above only catch what is visibly wrong. A key that
+              belongs to another service, a model this account cannot reach and
+              an endpoint speaking a different dialect all look fine until a
+              turn dies on them, so this asks the endpoint itself. */}
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void testRow(row)}
+              disabled={testing === row.id || !row.baseUrl.trim() || !row.models.trim()}
+              className="flex items-center gap-1.5 rounded-lg border border-hairline px-2.5 py-1.5 text-[11.5px] text-ink-secondary hover:text-ink disabled:opacity-40"
+            >
+              {testing === row.id ? <Spin size={12} weight="fill" /> : <Flask size={13} weight="bold" />}
+              Test connection
+            </button>
+            {probes[row.id] && (
+              <span
+                className={cn(
+                  "min-w-0 flex-1 text-[11.5px] leading-[1.4]",
+                  probes[row.id]!.ok ? "text-success" : "text-warning",
+                )}
+              >
+                {probes[row.id]!.ok ? probes[row.id]!.detail : probes[row.id]!.problem}
+              </span>
+            )}
+          </div>
         </div>
       ))}
 

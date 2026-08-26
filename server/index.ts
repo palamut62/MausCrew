@@ -106,6 +106,7 @@ import {
   updateWorkspaceSkill,
 } from "./skills.ts";
 import { createTeamManifest, parseTeamManifest } from "./team-manifest.ts";
+import { probeGateway } from "./drivers/claude-gateway-test.ts";
 import { teachDraftFromRecording, teachDraftFromTask } from "./teach/draft.ts";
 import * as recording from "./teach/recording.ts";
 import { ensureTailscaleServe } from "./tailscale-serve.ts";
@@ -2715,6 +2716,19 @@ const server = createServer(async (req, res) => {
         if (error instanceof SkillStoreError) return json(res, error.status, { error: error.message });
         throw error;
       }
+    }
+    if (path === "/api/claude-gateways/test" && method === "POST") {
+      if (!localRequest) return json(res, 403, { error: "desktop only" });
+      const body = await readBody(req);
+      // An untouched key is not sent by the UI, which never holds it; fall
+      // back to the saved one so a gateway can be tested as configured.
+      const savedToken = cfg.claudeGateways?.find((g) => g.id === String(body.id ?? ""))?.authToken;
+      const result = await probeGateway({
+        baseUrl: String(body.baseUrl ?? ""),
+        authToken: typeof body.authToken === "string" ? body.authToken : savedToken,
+        model: typeof body.model === "string" ? body.model : undefined,
+      });
+      return json(res, 200, result);
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/teach-recording$/);
     if (m) {
