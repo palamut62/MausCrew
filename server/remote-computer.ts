@@ -95,6 +95,40 @@ if (action === "snapshot") {
   await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Backspace", code: "Backspace" });
   await send("Input.insertText", { text: String(input.text ?? "") });
   process.stdout.write(JSON.stringify({ ok: true, ref: input.ref }));
+} else if (action === "box") {
+  // Where an element actually is on the page. A model that can see a
+  // screenshot but not the geometry behind a ref has to estimate pixels, and
+  // an estimate is what makes it click the wrong thing.
+  const backendNodeId = refId(input.ref);
+  const { model } = await send("DOM.getBoxModel", { backendNodeId });
+  const quad = model?.border ?? model?.content;
+  if (!Array.isArray(quad) || quad.length < 8) throw new Error("element is not visible; take a new snapshot");
+  const xs = [quad[0], quad[2], quad[4], quad[6]], ys = [quad[1], quad[3], quad[5], quad[7]];
+  const left = Math.min(...xs), top = Math.min(...ys);
+  process.stdout.write(JSON.stringify({ ok: true, ref: input.ref, x: Math.round(left), y: Math.round(top), width: Math.round(Math.max(...xs) - left), height: Math.round(Math.max(...ys) - top) }));
+} else if (action === "drag") {
+  // Sliders, reorderable lists and canvases have no click that does the job.
+  const from = refId(input.ref), to = refId(input.toRef);
+  const centre = async (backendNodeId) => {
+    const { model } = await send("DOM.getBoxModel", { backendNodeId });
+    const quad = model?.border ?? model?.content;
+    if (!Array.isArray(quad) || quad.length < 8) throw new Error("an element is not visible; take a new snapshot");
+    return [(quad[0] + quad[2] + quad[4] + quad[6]) / 4, (quad[1] + quad[3] + quad[5] + quad[7]) / 4];
+  };
+  const [x1, y1] = await centre(from);
+  const [x2, y2] = await centre(to);
+  await send("Input.dispatchMouseEvent", { type: "mousePressed", x: x1, y: y1, button: "left", clickCount: 1 });
+  // Intermediate moves matter: drag handlers that listen for mousemove do
+  // nothing at all when a press jumps straight to a release.
+  for (let step = 1; step <= 8; step += 1) {
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: x1 + ((x2 - x1) * step) / 8, y: y1 + ((y2 - y1) * step) / 8, button: "left" });
+  }
+  await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: x2, y: y2, button: "left", clickCount: 1 });
+  process.stdout.write(JSON.stringify({ ok: true, from: input.ref, to: input.toRef }));
+} else if (action === "scrollTo") {
+  const backendNodeId = refId(input.ref);
+  await send("DOM.scrollIntoViewIfNeeded", { backendNodeId });
+  process.stdout.write(JSON.stringify({ ok: true, ref: input.ref }));
 } else if (action === "tabs") {
   await send("Page.bringToFront");
   process.stdout.write(JSON.stringify({ ok: true, activated: input.target, title: String(page.title ?? "").slice(0, 200), url: page.url }));
@@ -199,7 +233,17 @@ export function remoteComputerBootstrapCommand(botName: string): string {
   ].join("\n");
 }
 
-export type SemanticBrowserAction = "snapshot" | "click" | "fill" | "tabs" | "select" | "key" | "text";
+export type SemanticBrowserAction =
+  | "snapshot"
+  | "click"
+  | "fill"
+  | "tabs"
+  | "select"
+  | "key"
+  | "text"
+  | "box"
+  | "drag"
+  | "scrollTo";
 
 export function semanticBrowserCommand(action: SemanticBrowserAction, input: unknown): string {
   const encoded = Buffer.from(JSON.stringify(input ?? {})).toString("base64url");

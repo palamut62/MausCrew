@@ -22,6 +22,9 @@ let askResponse: unknown = { botName: "Helper", text: "hi from helper" };
 let askByBot: Map<string, { reply: unknown; delayMs?: number }> | null = null;
 let askInFlight = 0;
 let askPeakInFlight = 0;
+let lastSupervisionBody: any = null;
+let checkResponse: unknown = { name: "Helper", busy: true, doing: "Bash", lastReply: "working on it" };
+let stopResponse: unknown = { stopped: true };
 let lastDelegateBody: any = null;
 let delegateResponse: unknown = { queued: true, message: "Delegation queued." };
 let lastCreateBody: any = null;
@@ -73,6 +76,16 @@ beforeAll(async () => {
         };
         if (scripted?.delayMs) setTimeout(finish, scripted.delayMs);
         else finish();
+      });
+      return;
+    }
+    if (req.method === "POST" && (req.url === "/api/internal/check-bot" || req.url === "/api/internal/stop-bot")) {
+      let data = "";
+      req.on("data", (c) => (data += c));
+      req.on("end", () => {
+        lastSupervisionBody = JSON.parse(data);
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify(req.url === "/api/internal/check-bot" ? checkResponse : stopResponse));
       });
       return;
     }
@@ -143,6 +156,8 @@ describe("agents-proxy MCP surface", () => {
       "ask_bot",
       "ask_bots",
       "delegate_bot",
+      "check_bot",
+      "stop_bot",
       "create_bot",
     ]);
   });
@@ -294,6 +309,43 @@ describe("agents-proxy MCP surface", () => {
       expect(many.result.isError).toBe(true);
       const none = await callTool("ask_bots", { requests: [] });
       expect(none.result.isError).toBe(true);
+    });
+  });
+
+  // A delegation used to be the end of the caller's involvement: it could hand
+  // work over and never find out what happened.
+  describe("supervising what it delegated", () => {
+    it("reports what the peer is doing, including when it is stuck on the user", () => {
+      checkResponse = { name: "Helper", busy: true, waitingOnUser: true, doing: "Bash", lastReply: "one sec" };
+      return callTool("check_bot", { bot_id: "bot-a" }).then((res) => {
+        const text = res.result.content[0].text as string;
+        expect(text).toContain("running");
+        expect(text).toMatch(/waiting for the user/i);
+        expect(text).toContain("Bash");
+        expect(text).toContain("one sec");
+        expect(lastSupervisionBody.fromBotId).toBeTruthy();
+      });
+    });
+
+    it("says plainly when a peer has said nothing yet", async () => {
+      checkResponse = { name: "Helper", busy: false, lastReply: null };
+      const res = await callTool("check_bot", { bot_id: "bot-a" });
+      expect(res.result.content[0].text).toMatch(/idle/);
+      expect(res.result.content[0].text).toMatch(/not said anything/i);
+    });
+
+    it("stops a running peer, and is honest when there was nothing to stop", async () => {
+      stopResponse = { stopped: true };
+      expect((await callTool("stop_bot", { bot_id: "bot-a" })).result.content[0].text).toMatch(/Stopped it/);
+      stopResponse = { stopped: false, reason: "that bot is not running" };
+      const idle = await callTool("stop_bot", { bot_id: "bot-a" });
+      expect(idle.result.content[0].text).toMatch(/Nothing to stop/);
+      expect(idle.result.isError).toBeFalsy();
+    });
+
+    it("needs a bot id for both", async () => {
+      expect((await callTool("check_bot", { bot_id: "" })).result.isError).toBe(true);
+      expect((await callTool("stop_bot", { bot_id: "" })).result.isError).toBe(true);
     });
   });
 

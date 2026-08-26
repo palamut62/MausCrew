@@ -1385,7 +1385,7 @@ async function startTurn(
           (computerKind === "vm"
             ? " You have a shared, isolated Cua sandbox: a Linux desktop in a container on this machine. Only /home/cua/workspace is durable; save downloads, repositories, working files, and browser profiles there because everything else inside the VM is disposable. No other host folder is mounted. Use the computer tools for desktop, accessibility, window, and shell work. Inspect the desktop state before acting, prefer accessibility targets over raw coordinates, and work carefully."
             : computerKind === "box" && instance.driverKind !== "boxAgent"
-            ? " You have your own cloud computer. In Chrome, prefer browser_snapshot with browser_click/browser_fill/browser_select_option/browser_press_key for semantic, trusted actions; browser_read_text to read a page rather than squinting at a screenshot; browser_tabs to see and switch tabs, because every other browser tool acts on the front one. Use screenshot/click/type_text for visual or non-browser UI, open_url for navigation, and computer_exec for Linux tasks. Every action already returns the resulting screen, so don't follow it with screenshot; batch predictable pixel actions with computer_batch."
+            ? " You have your own cloud computer. In Chrome, prefer browser_snapshot with browser_click/browser_fill/browser_select_option/browser_press_key for semantic, trusted actions; browser_read_text to read a page rather than squinting at a screenshot; browser_tabs to see and switch tabs, because every other browser tool acts on the front one; browser_scroll_to before clicking something off-screen, browser_element_box instead of estimating pixels from a screenshot, and browser_drag for sliders and reorderable lists. Use screenshot/click/type_text for visual or non-browser UI, open_url for navigation, and computer_exec for Linux tasks. Every action already returns the resulting screen, so don't follow it with screenshot; batch predictable pixel actions with computer_batch."
               : computerKind === "local"
               ? " You can act on the user's computer through the computer tools — take a screenshot or read the desktop state first, prefer accessibility actions over raw coordinates, and act carefully."
               : "") +
@@ -2133,6 +2133,41 @@ const server = createServer(async (req, res) => {
             ? `Queued for review — @${targetName} will only pick it up if the user approves after your turn finishes.`
             : `Delegation queued — @${targetName} will pick it up after your current turn finishes.`,
         });
+      }
+      // A delegation used to be the end of the caller's involvement: it could
+      // hand work over and then never find out what happened. These two close
+      // that, so a bot can supervise what it started instead of guessing.
+      if (method === "POST" && path === "/api/internal/check-bot") {
+        const body = await readBody(req);
+        const from = store.bot(String(body.fromBotId ?? ""));
+        if (!from) return json(res, 403, { error: "unknown sender" });
+        const target = store.bot(String(body.toBotId ?? ""));
+        if (!target) return json(res, 404, { error: "no such bot" });
+        const messages = store.activePath(target.threadId);
+        const lastSaid = [...messages].reverse().find((msg) => msg.role === "bot" && msg.kind === "text" && msg.text?.trim());
+        const lastTool = [...messages].reverse().find((msg) => msg.kind === "activity" && msg.tool?.name);
+        const waiting = messages.some(
+          (msg) => msg.kind === "options" && msg.card?.requestId && !msg.card.answered && !msg.card.dismissed,
+        );
+        return json(res, 200, {
+          name: target.name,
+          busy: !!target.busy,
+          waitingOnUser: waiting,
+          doing: lastTool?.tool?.name ?? null,
+          lastReply: lastSaid?.text?.slice(0, 2000) ?? null,
+        });
+      }
+      if (method === "POST" && path === "/api/internal/stop-bot") {
+        const body = await readBody(req);
+        const from = store.bot(String(body.fromBotId ?? ""));
+        if (!from) return json(res, 403, { error: "unknown sender" });
+        const target = store.bot(String(body.toBotId ?? ""));
+        if (!target) return json(res, 404, { error: "no such bot" });
+        if (target.id === from.id) return json(res, 400, { error: "a bot cannot stop itself" });
+        if (!target.busy) return json(res, 200, { stopped: false, reason: "that bot is not running" });
+        interruptPendingTurn(target.threadId);
+        await registry.get(target.modelSelection.instanceId)?.adapter.interruptTurn(target.threadId).catch(() => {});
+        return json(res, 200, { stopped: true });
       }
       if (method === "POST" && path === "/api/internal/create-bot") {
         const body = await readBody(req);
