@@ -11,6 +11,16 @@ export function permissionQuestion(name, args) {
             intercepted: false,
         };
     }
+    if (name === "request_secret") {
+        return {
+            question: typeof input.reason === "string" ? input.reason : "A credential is needed to continue.",
+            // Offering choices for a secret makes no sense and a "no" button that
+            // looks like an answer invites tapping it with a real key in the field.
+            choices: [],
+            intercepted: false,
+            secret: true,
+        };
+    }
     if (typeof input.tool_name !== "string" || input.tool_name.toLowerCase() !== "askuserquestion")
         return null;
     const toolInput = typeof input.input === "object" && input.input !== null
