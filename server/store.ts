@@ -51,6 +51,9 @@ export interface OptionCardData {
   /** permission cards: the tool being requested, so the card can show what
    * is actually being asked and offer "always allow this tool". */
   tool?: string;
+  /** The answer is a credential. The card is what the transcript keeps, so
+   * `answered` holds a placeholder for these and never the value itself. */
+  secret?: boolean;
   /** why this stopped despite auto mode (destructive-looking command) */
   held?: string;
   /** the narrow grant "always allow" remembers, e.g. "Bash:git" */

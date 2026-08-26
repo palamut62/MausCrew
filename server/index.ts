@@ -60,7 +60,8 @@ import { isEffortLevel, type ModelSelection, type RuntimeEvent, type SubagentAct
 import { CONTENT_SECURITY_POLICY } from "./csp.ts";
 import { digestSystemBlock } from "./summarization/digest.ts";
 import { memoryBlock } from "./memory/store.ts";
-import { deterministicEntry, journalDate, recordJournal } from "./memory/harvest.ts";
+import { deterministicEntry, journalDate, planDistil, recordDistil, recordJournal } from "./memory/harvest.ts";
+import { readJournal, readProfile } from "./memory/store.ts";
 import { partitionThread } from "./summarization/partition.ts";
 
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
@@ -640,6 +641,19 @@ bus.subscribe((event: RuntimeEvent) => {
       }
       break;
     case "item.completed":
+      if (event.itemType === "assistant_text" && bot && distilling.has(bot.id)) {
+        distilling.delete(bot.id);
+        const brief = event.text.trim();
+        if (brief) {
+          recordDistil(bot.id, brief);
+          pushMessage({
+            role: "bot",
+            kind: "activity",
+            tool: { name: `memory: distilled ${readJournal(bot.id).length} day(s) of notes`, ok: true },
+          });
+        }
+        break;
+      }
       if (event.itemType === "assistant_text") {
         const rendered = bot ? extractStructuredUi(event.text) : { text: event.text };
         if (rendered.text) pushMessage({ role: "bot", kind: "text", text: rendered.text });
@@ -813,7 +827,12 @@ bus.subscribe((event: RuntimeEvent) => {
         role: "bot",
         kind: "options",
         card: {
-          title: permission ? "Approval needed" : "Your bot has a question",
+          title: permission
+            ? "Approval needed"
+            : event.secret
+              ? "Your bot needs a credential"
+              : "Your bot has a question",
+          ...(event.secret ? { secret: true } : {}),
           subtitle: event.summary,
           options: event.choices?.length ? event.choices : permission ? ["Allow", "Deny"] : [],
           requestId: event.requestId,
@@ -1030,10 +1049,30 @@ function throwIfTurnInterrupted(pending: PendingTurnDispatch) {
  */
 const answeredText = new Map<string, string>();
 
-function rememberAnswerText(threadId: string, requestId: string, behavior: unknown, message: unknown) {
+function rememberAnswerText(
+  threadId: string,
+  requestId: string,
+  behavior: unknown,
+  message: unknown,
+  secret: boolean,
+) {
   if (behavior !== "answer") return;
+  // A credential is handed to the agent and forgotten. Recording it would put
+  // it in the card, and the card is what the transcript keeps — a plain JSON
+  // file on disk, for as long as the thread exists.
+  if (secret) {
+    answeredText.set(`${threadId}:${requestId}`, "(provided, not stored)");
+    return;
+  }
   const text = typeof message === "string" ? message.trim() : "";
   if (text) answeredText.set(`${threadId}:${requestId}`, text.slice(0, 400));
+}
+
+/** Was this request asking for a credential? Read from the card we wrote. */
+function isSecretRequest(threadId: string, requestId: string): boolean {
+  const messageId = askMessageByRequest.get(`${threadId}:${requestId}`);
+  if (!messageId) return false;
+  return store.messagesFor(threadId).find((m) => m.id === messageId)?.card?.secret === true;
 }
 
 function interruptPendingTurn(threadId: string) {
@@ -2082,6 +2121,15 @@ function handOverTurn(threadId: string): boolean {
   return true;
 }
 
+/**
+ * Bots whose next reply is a distilled brief rather than an answer.
+ *
+ * Distillation is an ordinary turn — visible, on the bot's own engine — so its
+ * reply arrives through the same path as any other. This is how that reply is
+ * recognised and filed as memory instead of being read as conversation.
+ */
+const distilling = new Set<string>();
+
 /** One journal entry per bot per day, written after the day's last turn. */
 const journalled = new Map<string, string>();
 
@@ -2913,6 +2961,39 @@ const server = createServer(async (req, res) => {
       });
       return json(res, 200, result);
     }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/memory$/);
+    if (m) {
+      const bot = store.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      if (method === "GET") {
+        const entries = readJournal(bot.id);
+        return json(res, 200, {
+          profile: readProfile(bot.id),
+          journalDays: entries.length,
+          canDistil: planDistil(bot.id) !== null,
+          injected: memoryBlock(bot.id).chars,
+        });
+      }
+      if (method === "POST") {
+        const body = await readBody(req);
+        if (String(body.action ?? "") !== "distil") {
+          return json(res, 400, { error: "action must be distil" });
+        }
+        const plan = planDistil(bot.id);
+        if (!plan) return json(res, 409, { error: "not enough journal to distil yet" });
+        if (bot.busy) return json(res, 409, { error: "the bot is working — try again when it finishes" });
+        // Distillation runs on the bot's own engine and therefore costs the
+        // user a turn. This codebase holds that such a turn must be visible,
+        // so it goes through the ordinary path and appears in the thread
+        // rather than happening quietly in the background.
+        distilling.add(bot.id);
+        void startTurn(bot.id, plan.prompt, { unattended: true }).catch((error) => {
+          distilling.delete(bot.id);
+          console.error(`memory: distillation could not start for ${bot.id}: ${String(error)}`);
+        });
+        return json(res, 202, { started: true });
+      }
+    }
     m = path.match(/^\/api\/bots\/([\w-]+)\/teach-recording$/);
     if (m) {
       const bot = store.bot(m[1]);
@@ -3231,7 +3312,7 @@ const server = createServer(async (req, res) => {
       const instance = registry.get(bot.modelSelection.instanceId);
       if (!instance) return json(res, 409, { error: "provider unavailable" });
       await recordGovernanceResponse(bot.threadId, String(body.requestId), body.behavior);
-      rememberAnswerText(bot.threadId, String(body.requestId), body.behavior, body.message);
+      rememberAnswerText(bot.threadId, String(body.requestId), body.behavior, body.message, isSecretRequest(bot.threadId, String(body.requestId)));
       await instance.adapter.respondToRequest(bot.threadId, String(body.requestId), {
         behavior: body.behavior,
         message: body.message,
@@ -3260,7 +3341,7 @@ const server = createServer(async (req, res) => {
       const instance = registry.get(owner.modelSelection.instanceId);
       if (!instance) return json(res, 409, { error: "provider unavailable" });
       await recordGovernanceResponse(threadId, String(body.requestId), body.behavior);
-      rememberAnswerText(threadId, String(body.requestId), body.behavior, body.message);
+      rememberAnswerText(threadId, String(body.requestId), body.behavior, body.message, isSecretRequest(threadId, String(body.requestId)));
       await instance.adapter.respondToRequest(threadId, String(body.requestId), {
         behavior: body.behavior,
         message: body.message,

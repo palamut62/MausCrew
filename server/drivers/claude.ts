@@ -543,6 +543,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
               requestType: ask.kind,
               tool: ask.tool,
               summary: askSummary(ask),
+              // Marks the whole chain — event, card, transcript — as carrying
+              // a credential, so nothing downstream writes the value down.
+              ...(ask.input && (ask.input as { secret?: boolean }).secret ? { secret: true } : {}),
               choices: Array.isArray(ask.input?.choices) ? (ask.input.choices as string[]).slice(0, 5) : undefined,
             }),
           onResolve: (resolved) =>

@@ -31,6 +31,8 @@ export interface OptionCardData {
   dismissed?: boolean;
   /** Present when this card is a live provider ask (approval/question). */
   requestId?: string;
+  /** The answer is a credential: masked on the way in, never kept after. */
+  secret?: boolean;
   /** permission asks: the tool being requested (drives the approval box) */
   tool?: string;
   /** why auto mode stopped to ask anyway */
@@ -509,8 +511,17 @@ function reducer(state: AppState, action: Action): AppState {
       );
     }
     // optimistic card settle; the server's message.patch confirms it later
-    case "answerCard":
-      return patchCard(state, action.botId, action.messageId, { answered: action.answer });
+    case "answerCard": {
+      // For a credential the optimistic write would put the value into client
+      // state and render it on the card. The server never keeps it either;
+      // both sides show the same placeholder.
+      const card = state.bots
+        .find((b) => b.id === action.botId)
+        ?.messages.find((m) => m.id === action.messageId)?.card;
+      return patchCard(state, action.botId, action.messageId, {
+        answered: card?.secret ? "(provided, not stored)" : action.answer,
+      });
+    }
     case "dismissCard":
       return patchCard(state, action.botId, action.messageId, { dismissed: true });
     case "decideRequest":

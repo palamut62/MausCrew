@@ -116,6 +116,9 @@ export type RuntimeEvent = RuntimeEventBase &
         tool: string;
         summary: string;
         choices?: string[];
+        /** The answer is a credential: mask the field, and never persist the
+         * value anywhere the transcript can reach. */
+        secret?: boolean;
       }
     | { type: "request.resolved"; behavior: string; source: string }
     | { type: "thread.token-usage.updated"; input: number; output: number }

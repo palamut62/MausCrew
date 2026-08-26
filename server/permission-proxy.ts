@@ -65,6 +65,22 @@ const TOOLS = [
     },
   },
   {
+    name: "request_secret",
+    description:
+      "Ask the owner for a credential — an API key, a token, a password for a service you need. They type it into a masked field and the value is handed to you for this turn only: it is never written into the conversation, so asking for one here is safe in a way that asking with ask_user is not. Only ask when you genuinely cannot proceed without it, and never for something you were already given.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        reason: {
+          type: "string",
+          description: "What the credential is for and why you need it, in one line the owner can judge at a glance",
+        },
+        name: { type: "string", description: "What to call it, e.g. OPENROUTER_API_KEY" },
+      },
+      required: ["reason"],
+    },
+  },
+  {
     name: "ask_user",
     description:
       "Ask the human who owns this bot a question and wait for their answer. Use whenever you need a decision, a preference, missing information, or sign-off before doing something consequential — do not guess on things the owner would want to decide. Returns their answer as text.",
@@ -113,7 +129,17 @@ async function handle(msg: any) {
       waiting.set(askId, resolve);
       if (conn.destroyed) return dead();
       const ask = question
-        ? { t: "ask", id: askId, kind: "question", tool: "ask_user", input: { question: question.question, choices: question.choices } }
+        ? {
+            t: "ask",
+            id: askId,
+            kind: "question",
+            tool: question.secret ? "request_secret" : "ask_user",
+            input: {
+              question: question.question,
+              choices: question.choices,
+              ...(question.secret ? { secret: true } : {}),
+            },
+          }
         : { t: "ask", id: askId, tool: args.tool_name, input: args.input };
       try {
         conn.write(JSON.stringify(ask) + "\n");
