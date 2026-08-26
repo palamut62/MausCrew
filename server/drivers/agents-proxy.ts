@@ -86,6 +86,26 @@ const TOOLS = [
     },
   },
   {
+    name: "check_bot",
+    description:
+      "See what a bot you delegated to is doing now: whether it is still running, what tool it last used, whether it is stopped waiting for the user to answer something, and what it last said. Use this instead of guessing after delegate_bot.",
+    inputSchema: {
+      type: "object",
+      properties: { bot_id: { type: "string", description: "The bot's id (from list_bots)." } },
+      required: ["bot_id"],
+    },
+  },
+  {
+    name: "stop_bot",
+    description:
+      "Interrupt a bot that is running, when the work you handed it is no longer needed or has gone wrong. It stops mid-turn and keeps whatever it had already done. Does nothing if that bot is idle.",
+    inputSchema: {
+      type: "object",
+      properties: { bot_id: { type: "string", description: "The bot's id (from list_bots)." } },
+      required: ["bot_id"],
+    },
+  },
+  {
     name: "create_bot",
     description:
       "Create a durable specialist bot when work has a genuinely distinct long-lived owner, tools, approval boundary, or recurring responsibility. Do not use this for one-off subtasks. The user must approve every creation.",
@@ -219,6 +239,32 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
     // Fire-and-forget by contract: the harness returns immediately, the
     // peer turn runs after our current turn finishes.
     return { text: typeof r.message === "string" ? r.message : "Delegation queued." };
+  }
+  if (name === "check_bot") {
+    const toBotId = String(args.bot_id ?? "").trim();
+    if (!toBotId) return { text: "check_bot needs bot_id.", isError: true };
+    const r = await api(`/api/internal/check-bot`, {
+      method: "POST",
+      body: JSON.stringify({ fromBotId: BOT_ID, toBotId }),
+    });
+    if (r.error) return { text: `Couldn't check that bot: ${r.error}`, isError: true };
+    const lines = [
+      `${r.name ?? toBotId} is ${r.busy ? "running" : "idle"}.`,
+      r.waitingOnUser ? "It is stopped waiting for the user to answer something." : "",
+      r.doing ? `Last tool: ${r.doing}` : "",
+      r.lastReply ? `Last said:\n${r.lastReply}` : "It has not said anything yet.",
+    ].filter(Boolean);
+    return { text: lines.join("\n") };
+  }
+  if (name === "stop_bot") {
+    const toBotId = String(args.bot_id ?? "").trim();
+    if (!toBotId) return { text: "stop_bot needs bot_id.", isError: true };
+    const r = await api(`/api/internal/stop-bot`, {
+      method: "POST",
+      body: JSON.stringify({ fromBotId: BOT_ID, toBotId }),
+    });
+    if (r.error) return { text: `Couldn't stop that bot: ${r.error}`, isError: true };
+    return { text: r.stopped ? "Stopped it." : `Nothing to stop — ${String(r.reason ?? "it was idle")}.` };
   }
   if (name === "create_bot") {
     const botName = String(args.name ?? "").trim();

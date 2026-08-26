@@ -516,6 +516,31 @@ const TOOLS = [
     },
   },
   {
+    name: "browser_drag",
+    description:
+      "Drag one element ref onto another — for sliders, reorderable lists, and anything with no click that does the job.",
+    inputSchema: {
+      type: "object",
+      properties: { ref: { type: "string" }, to_ref: { type: "string" }, ...OBSERVE_PROPS },
+      required: ["ref", "to_ref"],
+    },
+  },
+  {
+    name: "browser_element_box",
+    description:
+      "Where an element ref actually sits on the page, in pixels. Use it before a coordinate click instead of estimating from a screenshot.",
+    inputSchema: { type: "object", properties: { ref: { type: "string" } }, required: ["ref"] },
+  },
+  {
+    name: "browser_scroll_to",
+    description: "Scroll an element ref into view. Refs off-screen cannot be clicked.",
+    inputSchema: {
+      type: "object",
+      properties: { ref: { type: "string" }, ...OBSERVE_PROPS },
+      required: ["ref"],
+    },
+  },
+  {
     name: "browser_read_text",
     description:
       "Read the front tab's visible text. Use this to read an article or result page; browser_snapshot lists controls, not prose.",
@@ -765,7 +790,7 @@ async function actAndObserve(
 
 async function semanticActAndObserve(
   id: unknown,
-  action: "click" | "fill" | "select" | "key",
+  action: "click" | "fill" | "select" | "key" | "drag" | "scrollTo",
   ref: string,
   value: string | undefined,
   args: any,
@@ -785,6 +810,7 @@ async function semanticActAndObserve(
     ...(action === "fill" ? { text: value ?? "" } : {}),
     ...(action === "select" ? { value: value ?? "" } : {}),
     ...(action === "key" ? { key: value ?? "" } : {}),
+    ...(action === "drag" ? { toRef: value ?? "" } : {}),
     url: semanticBrowserUrl,
   });
   const guarded = `if ${semantic}; then SEM=ok; else SEM=failed; fi`;
@@ -911,6 +937,31 @@ async function call(id: unknown, name: string, args: any) {
   }
   if (name === "browser_press_key") {
     return semanticActAndObserve(id, "key", String(args.ref ?? ""), String(args.key ?? ""), args);
+  }
+  if (name === "browser_drag") {
+    const ref = String(args.ref ?? "");
+    const toRef = String(args.to_ref ?? "");
+    if (!semanticBrowserRefs.has(toRef)) {
+      return text(id, "that destination ref is stale or unknown — take a new browser_snapshot", true);
+    }
+    return semanticActAndObserve(id, "drag", ref, toRef, args);
+  }
+  if (name === "browser_scroll_to") {
+    return semanticActAndObserve(id, "scrollTo", String(args.ref ?? ""), undefined, args);
+  }
+  if (name === "browser_element_box") {
+    const ref = String(args.ref ?? "");
+    if (!semanticBrowserUrl || !semanticBrowserRefs.has(ref)) {
+      return text(id, "that browser ref is stale or unknown — take a new browser_snapshot", true);
+    }
+    const out = await runOnBox(semanticBrowserCommand("box", { ref, url: semanticBrowserUrl }), 20_000);
+    if (!out.ok) return text(id, "Chrome could not measure that element.", true);
+    try {
+      const b = JSON.parse(out.stdout);
+      return text(id, `${ref} is at x=${b.x} y=${b.y}, ${b.width}x${b.height} px.`);
+    } catch {
+      return text(id, "Chrome returned an unreadable measurement.", true);
+    }
   }
   if (name === "browser_read_text") {
     const out = await runOnBox(

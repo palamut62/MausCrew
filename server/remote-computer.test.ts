@@ -11,6 +11,8 @@ import {
   semanticBrowserCommand,
 } from "./remote-computer.ts";
 
+const HELPER_PATTERN = new RegExp("const CDP_HELPER_SOURCE = String.raw`([\\s\\S]*?)`;");
+
 describe("remote Cua computer setup", () => {
   it("installs one exact checksummed 0.20.0 driver and disables telemetry", () => {
     const command = remoteComputerBootstrapCommand("Test Bot");
@@ -48,11 +50,21 @@ describe("remote Cua computer setup", () => {
   // this repo's toolchain would notice if it stopped being valid JavaScript.
   it("ships a browser helper that actually parses, and covers every action", () => {
     const source = readFileSync(new URL("./remote-computer.ts", import.meta.url), "utf8");
-    const helperPattern = new RegExp("const CDP_HELPER_SOURCE = String.raw`([\\s\\S]*?)`;");
-    const helper = helperPattern.exec(source)?.[1];
+    const helper = HELPER_PATTERN.exec(source)?.[1];
     expect(helper, "CDP helper source not found").toBeTruthy();
     expect(() => new Function(`return (async () => {${helper}})`)).not.toThrow();
-    for (const action of ["snapshot", "click", "fill", "tabs", "select", "key", "text"]) {
+    for (const action of [
+      "snapshot",
+      "click",
+      "fill",
+      "tabs",
+      "select",
+      "key",
+      "text",
+      "box",
+      "drag",
+      "scrollTo",
+    ]) {
       expect(helper, `helper handles ${action}`).toContain(`action === "${action}"`);
     }
   });
@@ -72,6 +84,21 @@ describe("remote Cua computer setup", () => {
   it("keeps a dropdown value out of the shell", () => {
     const command = semanticBrowserCommand("select", { ref: "b3", value: "$(whoami)" });
     expect(command).toContain("mauscrew-cdp.mjs select");
+    expect(command).not.toContain("whoami");
+  });
+  // A press that jumps straight to a release fires no mousemove, and drag
+  // handlers that listen for it do nothing at all.
+  it("drags through intermediate points rather than teleporting", () => {
+    const source = readFileSync(new URL("./remote-computer.ts", import.meta.url), "utf8");
+    const helper = HELPER_PATTERN.exec(source)?.[1];
+    expect(helper).toContain("mouseMoved");
+    const drag = helper!.slice(helper!.indexOf('action === "drag"'));
+    expect(drag.slice(0, drag.indexOf("scrollTo"))).toMatch(/for \(let step/);
+  });
+
+  it("keeps a drag destination out of the shell too", () => {
+    const command = semanticBrowserCommand("drag", { ref: "b1", toRef: "$(whoami)" });
+    expect(command).toContain("mauscrew-cdp.mjs drag");
     expect(command).not.toContain("whoami");
   });
 });
