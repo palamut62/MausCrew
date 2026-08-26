@@ -131,7 +131,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
 
       <div className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-5 pb-5">
         <div className="flex justify-center py-5">
-          <MausAvatar color={bot.color} name={bot.name} size={112} />
+          <MausAvatar color={bot.color} name={bot.name} seed={bot.id} shape={bot.shape} size={112} />
         </div>
 
         <div className="flex flex-col gap-4">

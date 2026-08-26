@@ -37,7 +37,17 @@ describe("ClaudeDriver.decodeConfig", () => {
   });
 
   it.skipIf(process.platform !== "win32")("names permission pipes per harness process", () => {
-    expect(permissionSocketPath("thread-abc")).toBe(`\\\\.\\pipe\\mauscrew-perm-${process.pid}-thread-a`);
+    expect(permissionSocketPath("thread-abc", "turn-123")).toBe(
+      `\\\\.\\pipe\\mauscrew-perm-${process.pid}-thread-a-turn-123`,
+    );
+  });
+
+  // Reusing one address per thread meant a turn could start while the previous
+  // turn's CLI still held it, and that turn ran with no broker at all.
+  it("gives every turn on a thread its own broker address", () => {
+    const first = permissionSocketPath("thread-abc", "turn-1");
+    const second = permissionSocketPath("thread-abc", "turn-2");
+    expect(second).not.toBe(first);
   });
 
   it("carries an Anthropic-compatible gateway through", () => {
@@ -434,11 +444,14 @@ describe("ClaudeDriver turns (fake CLI)", () => {
   it("brokers a permission ask into request.opened and answers over the socket", async () => {
     await create("hang");
     await instance.adapter.sendTurn({ threadId: "t-perm-abc", text: "go" });
-    await recorder.until((e) => e.type === "session.started");
+    const started = await recorder.until((e) => e.type === "session.started");
 
     // connect as the MCP proxy would and raise an ask — unix socket on
-    // POSIX, named pipe on Windows, same one the driver handed the proxy
-    const conn = connect(permissionSocketPath("t-perm-abc"));
+    // POSIX, named pipe on Windows, same one the driver handed the proxy.
+    // The address is per turn, so it is taken from the turn that just started
+    // rather than guessed from the thread.
+    expect(started.turnId, "session.started must carry its turn").toBeTruthy();
+    const conn = connect(permissionSocketPath("t-perm-abc", started.turnId!));
     const answered = new Promise<{ behavior: string }>((resolve) => {
       let buf = "";
       conn.on("data", (c) => {

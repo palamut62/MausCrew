@@ -479,7 +479,7 @@ function Call({ bot }: { bot: Bot }) {
         <X size={18} weight="bold" />
       </button>
 
-      <MausAvatar color={bot.color} name={bot.name} size={220} />
+      <MausAvatar color={bot.color} name={bot.name} seed={bot.id} shape={bot.shape} size={220} />
 
       <div className="flex flex-col items-center gap-1.5 text-center">
         <div className="text-[20px] font-medium text-ink">{bot.name}</div>

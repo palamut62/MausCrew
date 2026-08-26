@@ -20,12 +20,23 @@ import {
   resolvePersonaShape,
 } from "@/lib/mascot-shapes";
 
-/** Eye geometry, in the 259-unit body space. */
-const EYE = {
-  left: { x: 84, y: 92, rx: 11 },
-  right: { x: 145, y: 92, rx: 11 },
-};
-const EYE_OPEN_RY = 17;
+/** Eye geometry, in the 259-unit body space, matching the shipped artifact. */
+const EYE_DX = 29;
+const EYE_DY = -8;
+const EYE_RX = 10;
+const EYE_OPEN_RY = 7;
+const EYE_SHUT_RY = 2;
+
+/**
+ * How far the body actually travels, as a multiple of the table's amplitude.
+ *
+ * The table is authored in the same small units the artifact uses, where a
+ * working bot moves two units out of a 259-unit box. At the size the original
+ * draws its character that reads as breathing; in a 36px sidebar row it is
+ * three quarters of one pixel, which reads as nothing at all. Avatars here are
+ * small almost everywhere, so the travel is scaled up until it survives them.
+ */
+const BOB_SCALE = 6;
 
 const prefersReducedMotion = () =>
   typeof window !== "undefined" &&
@@ -87,7 +98,9 @@ function MausMascotComponent({
     let frame = 0;
     const tick = (now: number) => {
       const bob =
-        Math.sin((now / period) * Math.PI * 2 + phase) * motion.amplitude * 2.6;
+        Math.sin((now / period) * Math.PI * 2 + phase) *
+        motion.amplitude *
+        BOB_SCALE;
       body.setAttribute(
         "transform",
         `translate(0 ${(-bob).toFixed(2)}) rotate(${motion.tilt} ${CENTER} ${CENTER})`,
@@ -125,13 +138,13 @@ function MausMascotComponent({
       <g ref={bodyRef}>
         <path d={path} fill={`url(#${id}-ink)`} />
         <g ref={eyesRef} fill="rgba(0,0,0,0.82)">
-          {(["left", "right"] as const).map((side) => (
+          {([-1, 1] as const).map((side) => (
             <ellipse
               key={side}
-              cx={EYE[side].x}
-              cy={EYE[side].y}
-              rx={EYE[side].rx}
-              ry={state === "sleeping" ? 2.5 : EYE_OPEN_RY}
+              cx={CENTER + side * EYE_DX}
+              cy={CENTER + EYE_DY}
+              rx={EYE_RX}
+              ry={state === "sleeping" ? EYE_SHUT_RY : EYE_OPEN_RY}
             />
           ))}
         </g>

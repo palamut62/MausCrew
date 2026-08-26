@@ -590,7 +590,7 @@ const MessagesList = memo(function MessagesList({
     <>
       {messages.length === 0 && !bot.busy && (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 py-24 text-center">
-          <MausAvatar color={bot.color} name={bot.name} size={64} />
+          <MausAvatar color={bot.color} name={bot.name} seed={bot.id} shape={bot.shape} size={64} />
           <div className="text-[17px] font-semibold text-ink">{bot.name}</div>
           <div className="max-w-[360px] text-[14px] text-ink-secondary">
             {bot.description || "Send a message to start the conversation."}
@@ -751,7 +751,7 @@ export function ChatView({ bot }: { bot: Bot }) {
           title="Bot settings"
           style={noDrag}
         >
-          <MausAvatar color={bot.color} name={bot.name} size={22} />
+          <MausAvatar color={bot.color} name={bot.name} seed={bot.id} shape={bot.shape} size={22} />
           <span className="text-[15px] font-semibold text-ink">{bot.name}</span>
           {bot.chiefOfStaff && (
             <span className="flex items-center gap-1 rounded-md bg-accent/12 px-2 py-0.5 font-mono text-[11px] font-medium tracking-tight text-accent">

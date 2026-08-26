@@ -119,6 +119,9 @@ export interface Bot {
   description: string;
   notifications: boolean;
   color: MausColor;
+  /** Body shape, stored server-side beside the colour. Older bots saved before
+   * shapes existed have none; the avatar falls back to deriving one. */
+  shape?: string;
   unread: boolean;
   busy?: boolean;
   modelSelection: ModelSelection;

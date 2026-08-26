@@ -13,7 +13,12 @@ import {
   type Attachment,
 } from "@/lib/composer-attachments";
 import { groupComposerHint } from "@/lib/group-routing";
-import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
+import {
+  PendingApprovalActions,
+  PendingApprovalPanel,
+  pendingApprovals,
+  pendingQuestion,
+} from "./PendingApproval";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 
 /** The active @mention query at the caret: the text between an `@` that
@@ -51,8 +56,13 @@ export function Composer({
   const threadId = group?.threadId ?? bot?.threadId ?? "";
   // the VISIBLE branch only — an approval left on a branch you edited away
   // from must not keep blocking the composer
-  const approvals = pendingApprovals(group ? group.messages : bot ? visibleMessages(bot) : []);
+  const threadMessages = group ? group.messages : bot ? visibleMessages(bot) : [];
+  const approvals = pendingApprovals(threadMessages);
   const approval = approvals[0];
+  // A question the bot is waiting on. Typing an answer here is the obvious
+  // thing to do, so it is made to work: the reply goes to the request instead
+  // of starting a new message the bot will never read as an answer.
+  const question = bot ? pendingQuestion(threadMessages) : undefined;
   const approvalBot = group
     ? members?.find((b) => b.id === approval?.message.from?.botId) ??
       members?.find((b) => b.id === group.busyBotId)
@@ -135,6 +145,12 @@ export function Composer({
   const send = () => {
     const t = composeMessage(text, attachments);
     if (!t) return;
+    if (question && bot) {
+      dispatch({ type: "answerCard", botId: bot.id, messageId: question.id, answer: t });
+      setText("");
+      setAttachments([]);
+      return;
+    }
     if (busy) {
       setQueued(t);
       setText("");
@@ -259,6 +275,26 @@ export function Composer({
             ))}
           </div>
         )}
+        {/* A question does not take the composer over — typing an answer is
+            exactly what it wants — but it has to be obvious that the next
+            Enter replies to the bot instead of starting a new message. */}
+        {question && !approval && (
+          <div className="mb-2 flex items-center gap-2 rounded-xl border border-accent/40 bg-accent/10 px-3 py-2 text-[12.5px] text-ink">
+            <span className="min-w-0 flex-1 truncate">
+              <span className="text-ink-secondary">Answering — </span>
+              {question.card?.title}
+            </span>
+            <button
+              type="button"
+              onClick={() =>
+                bot && dispatch({ type: "dismissCard", botId: bot.id, messageId: question.id })
+              }
+              className="shrink-0 rounded-md px-1.5 py-0.5 text-[11.5px] text-ink-secondary hover:bg-raised hover:text-ink"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
         {/* An approval takes over the composer: you answer it before you
             can type again, so a waiting bot is impossible to miss. */}
         {approval && (
@@ -351,6 +387,8 @@ export function Composer({
           placeholder={
             approval
               ? "Answer the approval above to continue"
+              : question
+                ? `Answering: ${question.card?.title ?? "the question above"}`
               : recording
               ? "Listening…"
               : busy
