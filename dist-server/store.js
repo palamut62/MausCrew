@@ -19,6 +19,19 @@ export function titleFromMessage(text) {
 const BOTS_FILE = join(DATA_DIR, "bots.json");
 const GROUPS_FILE = join(DATA_DIR, "groups.json");
 const messagesFile = (threadId) => join(DATA_DIR, `messages-${threadId}.json`);
+/** Cycled alongside COLORS so consecutive bots differ in both at once. The
+ * two lists are deliberately coprime in length (10 and 8), so a roster has to
+ * reach forty before a colour and shape pairing repeats. */
+export const SHAPES = [
+    "blob",
+    "pebble",
+    "squircle",
+    "tablet",
+    "wedge",
+    "hex",
+    "cloud",
+    "teardrop",
+];
 export const COLORS = [
     "green",
     "blue",
@@ -399,6 +412,7 @@ export class Store {
             description: profile.description ?? "",
             notifications: true,
             color: profile.color ?? COLORS[this.bots.length % COLORS.length],
+            shape: profile.shape ?? SHAPES[this.bots.length % SHAPES.length],
             unread: false,
             modelSelection: profile.modelSelection ?? this.defaultSelection(),
             resumeCursors: {},

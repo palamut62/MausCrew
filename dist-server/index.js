@@ -29,6 +29,8 @@ import { buildNotification } from "./notify.js";
 import { isEffortLevel } from "./contracts.js";
 import { CONTENT_SECURITY_POLICY } from "./csp.js";
 import { digestSystemBlock } from "./summarization/digest.js";
+import { memoryBlock } from "./memory/store.js";
+import { deterministicEntry, journalDate, recordJournal } from "./memory/harvest.js";
 import { partitionThread } from "./summarization/partition.js";
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.js";
 import { describeBaseUrl } from "./drivers/deepseek/config.js";
@@ -51,7 +53,8 @@ import { RoutineManager } from "./routines.js";
 import { authenticateRemoteToken, claimPairing, cookieToken, createPairing, listRemoteDevices, revokeRemoteDevice, } from "./remote-access.js";
 import { createWorkspaceSkill, deleteWorkspaceSkill, listWorkspaceSkills, skillIndexPrompt, SkillStoreError, updateWorkspaceSkill, } from "./skills.js";
 import { createTeamManifest, parseTeamManifest } from "./team-manifest.js";
-import { teachDraftFromTask } from "./teach/draft.js";
+import { teachDraftFromRecording, teachDraftFromTask } from "./teach/draft.js";
+import * as recording from "./teach/recording.js";
 import { ensureTailscaleServe } from "./tailscale-serve.js";
 import { extractStructuredUi } from "./ui-runtime/schema.js";
 import { listenWebhookIngress, webhookCredential } from "./webhook-ingress.js";
@@ -498,6 +501,11 @@ bus.subscribe((event) => {
         localVmLease.release(event.threadId);
         if (localVmActiveThread === event.threadId)
             localVmActiveThread = null;
+        // Record what this session was for, so the bot still knows tomorrow.
+        // Deterministic on purpose: this codebase holds that a turn the user pays
+        // for must be visible, and a silent summarisation turn after every
+        // conversation is exactly the invisible cost that rule prevents.
+        void noteSessionInMemory(event.threadId);
     }
     broadcast({ kind: "runtime", event });
     routines?.handleRuntimeEvent(event);
@@ -551,6 +559,11 @@ bus.subscribe((event) => {
                     });
                     if (patched)
                         broadcast({ kind: "message.patch", threadId: event.threadId, message: patched });
+                    // A recording captures each action as it settles, with the detail
+                    // the transcript is about to reduce to a bare tool name.
+                    if (bot) {
+                        recording.record(bot.id, event.threadId, { at: Date.now(), kind: "action", tool: toolName, ok: event.ok }, Date.now());
+                    }
                     toolMessageByItem.delete(itemKey);
                 }
                 // the bot just acted ON ITS SCREEN — refresh the preview now. Only
@@ -715,9 +728,19 @@ bus.subscribe((event) => {
             if (messageId) {
                 const existing = store.messagesFor(event.threadId).find((m) => m.id === messageId);
                 if (existing?.card && !existing.card.answered) {
+                    // For a question the behavior is always the word "answer"; the
+                    // answer itself is what the user typed. Recording the behavior
+                    // meant the card ended up reading "answer" no matter what was
+                    // said, losing the only record of it.
+                    const spoken = answeredText.get(`${event.threadId}:${event.requestId}`);
                     const patched = store.patchMessage(event.threadId, messageId, {
-                        card: { ...existing.card, answered: event.behavior, dismissed: event.source !== "user" },
+                        card: {
+                            ...existing.card,
+                            answered: spoken ?? event.behavior,
+                            dismissed: event.source !== "user",
+                        },
                     });
+                    answeredText.delete(`${event.threadId}:${event.requestId}`);
                     if (patched)
                         broadcast({ kind: "message.patch", threadId: event.threadId, message: patched });
                 }
@@ -862,6 +885,18 @@ class TurnInterruptedBeforeDispatch extends Error {
 function throwIfTurnInterrupted(pending) {
     if (pending.interrupted)
         throw new TurnInterruptedBeforeDispatch();
+}
+/**
+ * What the user actually typed in reply to a question, held only until the
+ * provider confirms the request is resolved.
+ */
+const answeredText = new Map();
+function rememberAnswerText(threadId, requestId, behavior, message) {
+    if (behavior !== "answer")
+        return;
+    const text = typeof message === "string" ? message.trim() : "";
+    if (text)
+        answeredText.set(`${threadId}:${requestId}`, text.slice(0, 400));
 }
 function interruptPendingTurn(threadId) {
     const pending = pendingTurnDispatches.get(threadId);
@@ -1246,10 +1281,13 @@ async function startTurn(botId, text, opts) {
                     // what fell out of the transcript above, so it is knowledge the bot
                     // has rather than history it lost
                     digestSystemBlock(task.digest) +
+                    // and what survived earlier sessions entirely — capped, because this
+                    // rides on every turn forever
+                    memoryBlock(bot.id).text +
                     (computerKind === "vm"
                         ? " You have a shared, isolated Cua sandbox: a Linux desktop in a container on this machine. Only /home/cua/workspace is durable; save downloads, repositories, working files, and browser profiles there because everything else inside the VM is disposable. No other host folder is mounted. Use the computer tools for desktop, accessibility, window, and shell work. Inspect the desktop state before acting, prefer accessibility targets over raw coordinates, and work carefully."
                         : computerKind === "box" && instance.driverKind !== "boxAgent"
-                            ? " You have your own cloud computer. In Chrome, prefer browser_snapshot with browser_click/browser_fill/browser_select_option/browser_press_key for semantic, trusted actions; browser_read_text to read a page rather than squinting at a screenshot; browser_tabs to see and switch tabs, because every other browser tool acts on the front one. Use screenshot/click/type_text for visual or non-browser UI, open_url for navigation, and computer_exec for Linux tasks. Every action already returns the resulting screen, so don't follow it with screenshot; batch predictable pixel actions with computer_batch."
+                            ? " You have your own cloud computer. In Chrome, prefer browser_snapshot with browser_click/browser_fill/browser_select_option/browser_press_key for semantic, trusted actions; browser_read_text to read a page rather than squinting at a screenshot; browser_tabs to see and switch tabs, because every other browser tool acts on the front one; browser_scroll_to before clicking something off-screen, browser_element_box instead of estimating pixels from a screenshot, and browser_drag for sliders and reorderable lists. Use screenshot/click/type_text for visual or non-browser UI, open_url for navigation, and computer_exec for Linux tasks. Every action already returns the resulting screen, so don't follow it with screenshot; batch predictable pixel actions with computer_batch."
                             : computerKind === "local"
                                 ? " You can act on the user's computer through the computer tools — take a screenshot or read the desktop state first, prefer accessibility actions over raw coordinates, and act carefully."
                                 : "") +
@@ -1713,6 +1751,53 @@ function isAllowedOrigin(origin) {
         return false;
     }
 }
+/**
+ * Point Tailscale Serve at the port this process actually holds.
+ *
+ * Cached briefly because the status route is polled and each check shells out
+ * to the Tailscale CLI; the mapping only changes when we change it.
+ */
+let ingressCheck = null;
+const INGRESS_CACHE_MS = 30_000;
+async function refreshRemoteIngress() {
+    const publicUrl = configuredRemoteUrl();
+    if (!publicUrl || cfg.remoteAccess?.enabled !== true)
+        return null;
+    if (ingressCheck && Date.now() - ingressCheck.at < INGRESS_CACHE_MS)
+        return ingressCheck.result;
+    const result = await ensureTailscaleServe(publicUrl, PORT);
+    ingressCheck = { at: Date.now(), result };
+    if (!result.ok)
+        console.error(`remote access: ${result.error}`);
+    return result;
+}
+/** One journal entry per bot per day, written after the day's last turn. */
+const journalled = new Map();
+function noteSessionInMemory(threadId) {
+    try {
+        const bot = store.botByThread(threadId);
+        if (!bot)
+            return;
+        const today = journalDate(Date.now());
+        // Rewriting the same day on every turn would grow the file without
+        // adding anything; the last turn of a day is the one worth recording.
+        if (journalled.get(bot.id) === today)
+            return;
+        const messages = store.activePath(threadId);
+        if (messages.length < 4)
+            return;
+        const task = store.taskByThread(bot.id, threadId);
+        const entry = deterministicEntry(messages, { taskTitle: task?.title });
+        if (!entry)
+            return;
+        recordJournal(bot.id, entry, Date.now());
+        journalled.set(bot.id, today);
+    }
+    catch (error) {
+        // Bookkeeping must never break a completed turn.
+        console.error(`memory: could not journal ${threadId}: ${String(error)}`);
+    }
+}
 function configuredRemoteUrl() {
     if (!cfg.remoteAccess?.enabled || !cfg.remoteAccess.publicUrl)
         return null;
@@ -1794,11 +1879,16 @@ const server = createServer(async (req, res) => {
         if (path === "/api/remote/status" && method === "GET") {
             if (!localRequest)
                 return json(res, 403, { error: "desktop only" });
+            // `enabled` only ever meant "configured". Whether the address actually
+            // reaches this process is a separate fact, and the one that decides
+            // whether a phone can connect.
+            const ingress = await refreshRemoteIngress();
             return json(res, 200, {
                 enabled: cfg.remoteAccess?.enabled === true,
                 publicUrl: cfg.remoteAccess?.publicUrl ?? "",
                 localPort: PORT,
                 devices: listRemoteDevices(),
+                ...(ingress ? { reachable: ingress.ok, ...(ingress.ok ? {} : { ingressError: ingress.error }) } : {}),
             });
         }
         if (path === "/api/remote/pairings" && method === "POST") {
@@ -1948,6 +2038,45 @@ const server = createServer(async (req, res) => {
                         ? `Queued for review — @${targetName} will only pick it up if the user approves after your turn finishes.`
                         : `Delegation queued — @${targetName} will pick it up after your current turn finishes.`,
                 });
+            }
+            // A delegation used to be the end of the caller's involvement: it could
+            // hand work over and then never find out what happened. These two close
+            // that, so a bot can supervise what it started instead of guessing.
+            if (method === "POST" && path === "/api/internal/check-bot") {
+                const body = await readBody(req);
+                const from = store.bot(String(body.fromBotId ?? ""));
+                if (!from)
+                    return json(res, 403, { error: "unknown sender" });
+                const target = store.bot(String(body.toBotId ?? ""));
+                if (!target)
+                    return json(res, 404, { error: "no such bot" });
+                const messages = store.activePath(target.threadId);
+                const lastSaid = [...messages].reverse().find((msg) => msg.role === "bot" && msg.kind === "text" && msg.text?.trim());
+                const lastTool = [...messages].reverse().find((msg) => msg.kind === "activity" && msg.tool?.name);
+                const waiting = messages.some((msg) => msg.kind === "options" && msg.card?.requestId && !msg.card.answered && !msg.card.dismissed);
+                return json(res, 200, {
+                    name: target.name,
+                    busy: !!target.busy,
+                    waitingOnUser: waiting,
+                    doing: lastTool?.tool?.name ?? null,
+                    lastReply: lastSaid?.text?.slice(0, 2000) ?? null,
+                });
+            }
+            if (method === "POST" && path === "/api/internal/stop-bot") {
+                const body = await readBody(req);
+                const from = store.bot(String(body.fromBotId ?? ""));
+                if (!from)
+                    return json(res, 403, { error: "unknown sender" });
+                const target = store.bot(String(body.toBotId ?? ""));
+                if (!target)
+                    return json(res, 404, { error: "no such bot" });
+                if (target.id === from.id)
+                    return json(res, 400, { error: "a bot cannot stop itself" });
+                if (!target.busy)
+                    return json(res, 200, { stopped: false, reason: "that bot is not running" });
+                interruptPendingTurn(target.threadId);
+                await registry.get(target.modelSelection.instanceId)?.adapter.interruptTurn(target.threadId).catch(() => { });
+                return json(res, 200, { stopped: true });
             }
             if (method === "POST" && path === "/api/internal/create-bot") {
                 const body = await readBody(req);
@@ -2485,6 +2614,48 @@ const server = createServer(async (req, res) => {
                 throw error;
             }
         }
+        m = path.match(/^\/api\/bots\/([\w-]+)\/teach-recording$/);
+        if (m) {
+            const bot = store.bot(m[1]);
+            if (!bot)
+                return json(res, 404, { error: "no such bot" });
+            const now = Date.now();
+            if (method === "GET") {
+                const live = recording.active(bot.id, now);
+                return json(res, 200, {
+                    recording: live ? { label: live.label, startedAt: live.startedAt, steps: live.steps.length } : null,
+                });
+            }
+            if (method === "POST") {
+                const body = await readBody(req);
+                const action = String(body.action ?? "");
+                if (action === "start") {
+                    const task = store.taskByThread(bot.id, bot.threadId);
+                    const started = recording.start(bot.id, bot.threadId, String(body.label ?? task?.title ?? ""), now);
+                    // The opening request is the workflow's goal, and it is already on
+                    // the thread — a recording started mid-task should not lose it.
+                    const asked = store
+                        .activePath(bot.threadId)
+                        .filter((msg) => msg.role === "user" && msg.kind === "text" && msg.text?.trim())
+                        .at(-1);
+                    if (asked?.text) {
+                        recording.record(bot.id, bot.threadId, { at: now, kind: "asked", detail: asked.text }, now);
+                    }
+                    return json(res, 200, { recording: { label: started.label, startedAt: started.startedAt, steps: 0 } });
+                }
+                if (action === "stop") {
+                    const stopped = recording.stop(bot.id, now);
+                    if (!stopped)
+                        return json(res, 404, { error: "nothing was being recorded" });
+                    return json(res, 200, { draft: teachDraftFromRecording(stopped), steps: stopped.steps.length });
+                }
+                if (action === "discard") {
+                    recording.discard(bot.id);
+                    return json(res, 200, { ok: true });
+                }
+                return json(res, 400, { error: "action must be start, stop, or discard" });
+            }
+        }
         m = path.match(/^\/api\/bots\/([\w-]+)\/teach-draft$/);
         if (m && method === "POST") {
             const bot = store.bot(m[1]);
@@ -2777,6 +2948,7 @@ const server = createServer(async (req, res) => {
             if (!instance)
                 return json(res, 409, { error: "provider unavailable" });
             await recordGovernanceResponse(bot.threadId, String(body.requestId), body.behavior);
+            rememberAnswerText(bot.threadId, String(body.requestId), body.behavior, body.message);
             await instance.adapter.respondToRequest(bot.threadId, String(body.requestId), {
                 behavior: body.behavior,
                 message: body.message,
@@ -2808,6 +2980,7 @@ const server = createServer(async (req, res) => {
             if (!instance)
                 return json(res, 409, { error: "provider unavailable" });
             await recordGovernanceResponse(threadId, String(body.requestId), body.behavior);
+            rememberAnswerText(threadId, String(body.requestId), body.behavior, body.message);
             await instance.adapter.respondToRequest(threadId, String(body.requestId), {
                 behavior: body.behavior,
                 message: body.message,
@@ -3633,6 +3806,12 @@ const server = createServer(async (req, res) => {
 });
 server.listen(PORT, "127.0.0.1", () => {
     console.log(`mauscrew server on http://127.0.0.1:${PORT}`);
+    // The harness takes whichever port is free, so it rarely lands on the same
+    // one twice. Tailscale Serve keeps forwarding to the port it was told about
+    // once, which means every already-paired phone gets a 502 while the desktop
+    // still shows a healthy-looking address. Reconcile on boot instead of only
+    // when someone asks for a new pairing link.
+    void refreshRemoteIngress();
 });
 // Backstop for every other way this process ends — an uncaught throw, a parent
 // that kills the utilityProcess, `process.exit` from the signal path above.
