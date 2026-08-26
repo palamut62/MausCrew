@@ -1,3 +1,5 @@
+import { analysePaste, pasteGuidance } from "./paste-kind.js";
+
 // What is attached to the next message: text too long for the input or a
 // file dropped onto the window. Chips fold back into a normal prompt on
 // send, so every driver receives the same message shape.
@@ -144,7 +146,24 @@ export function composeMessage(text: string, attachments: Attachment[]): string 
   const parts = [text.trim()];
   attachments.forEach((a, i) => {
     if (a.kind === "paste") {
-      parts.push(`<pasted-text index="${i + 1}">\n${a.text}\n</pasted-text>`);
+      // Everything pasted used to arrive as the same untyped blob, so a stack
+      // trace and a CSV looked identical. Saying which it is costs one
+      // attribute and saves the model working it out first.
+      const { kind, language } = analysePaste(a.text);
+      const guidance = pasteGuidance(kind);
+      const attributes = [
+        `index="${i + 1}"`,
+        `kind="${kind}"`,
+        ...(language ? [`language="${language}"`] : []),
+      ].join(" ");
+      parts.push(
+        [
+          guidance ? `${guidance}` : "",
+          `<pasted-text ${attributes}>\n${a.text}\n</pasted-text>`,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      );
     } else {
       parts.push(`<attached-file path="${escapeAttribute(a.path)}" />`);
     }

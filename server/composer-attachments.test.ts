@@ -28,15 +28,42 @@ describe("composer paste attachments", () => {
     expect(pasteSummary(attachment)).toMatch(/^2 lines, /);
   });
 
+
+  // The label is the point: a stack trace and a spreadsheet used to reach the
+  // model as the same untyped blob.
+  it("says what each pasted blob is, and guides where guiding helps", () => {
+    const trace = composeMessage("", [
+      {
+        kind: "paste",
+        id: "a",
+        size: 10,
+        lines: 2,
+        text: 'Error: boom\n    at run (app.ts:3:1)',
+      },
+    ]);
+    expect(trace).toContain('kind="stack-trace"');
+    expect(trace).toMatch(/top frame/i);
+
+    const csv = composeMessage("", [
+      { kind: "paste", id: "b", size: 10, lines: 3, text: "a,b\n1,2\n3,4" },
+    ]);
+    expect(csv).toContain('kind="csv"');
+
+    const code = composeMessage("", [
+      { kind: "paste", id: "c", size: 10, lines: 1, text: "export interface X { a: string }" },
+    ]);
+    expect(code).toContain('language="typescript"');
+  });
+
   it("composes attachment-only and mixed messages in a stable order", () => {
     const first = pasteAttachment("first");
     const second = pasteAttachment("second");
     expect(composeMessage("", [first])).toBe(
-      '<pasted-text index="1">\nfirst\n</pasted-text>',
+      '<pasted-text index="1" kind="text">\nfirst\n</pasted-text>',
     );
     expect(composeMessage("  intro  ", [first, second])).toBe(
-      'intro\n\n<pasted-text index="1">\nfirst\n</pasted-text>\n\n' +
-        '<pasted-text index="2">\nsecond\n</pasted-text>',
+      'intro\n\n<pasted-text index="1" kind="text">\nfirst\n</pasted-text>\n\n' +
+        '<pasted-text index="2" kind="text">\nsecond\n</pasted-text>',
     );
   });
 

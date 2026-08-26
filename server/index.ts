@@ -805,9 +805,19 @@ bus.subscribe((event: RuntimeEvent) => {
       if (messageId) {
         const existing = store.messagesFor(event.threadId).find((m) => m.id === messageId);
         if (existing?.card && !existing.card.answered) {
+          // For a question the behavior is always the word "answer"; the
+          // answer itself is what the user typed. Recording the behavior
+          // meant the card ended up reading "answer" no matter what was
+          // said, losing the only record of it.
+          const spoken = answeredText.get(`${event.threadId}:${event.requestId}`);
           const patched = store.patchMessage(event.threadId, messageId, {
-            card: { ...existing.card, answered: event.behavior, dismissed: event.source !== "user" },
+            card: {
+              ...existing.card,
+              answered: spoken ?? event.behavior,
+              dismissed: event.source !== "user",
+            },
           });
+          answeredText.delete(`${event.threadId}:${event.requestId}`);
           if (patched) broadcast({ kind: "message.patch", threadId: event.threadId, message: patched });
         }
         if (event.requestId) askMessageByRequest.delete(`${event.threadId}:${event.requestId}`);
@@ -964,6 +974,18 @@ class TurnInterruptedBeforeDispatch extends Error {}
 
 function throwIfTurnInterrupted(pending: PendingTurnDispatch) {
   if (pending.interrupted) throw new TurnInterruptedBeforeDispatch();
+}
+
+/**
+ * What the user actually typed in reply to a question, held only until the
+ * provider confirms the request is resolved.
+ */
+const answeredText = new Map<string, string>();
+
+function rememberAnswerText(threadId: string, requestId: string, behavior: unknown, message: unknown) {
+  if (behavior !== "answer") return;
+  const text = typeof message === "string" ? message.trim() : "";
+  if (text) answeredText.set(`${threadId}:${requestId}`, text.slice(0, 400));
 }
 
 function interruptPendingTurn(threadId: string) {
@@ -3012,6 +3034,7 @@ const server = createServer(async (req, res) => {
       const instance = registry.get(bot.modelSelection.instanceId);
       if (!instance) return json(res, 409, { error: "provider unavailable" });
       await recordGovernanceResponse(bot.threadId, String(body.requestId), body.behavior);
+      rememberAnswerText(bot.threadId, String(body.requestId), body.behavior, body.message);
       await instance.adapter.respondToRequest(bot.threadId, String(body.requestId), {
         behavior: body.behavior,
         message: body.message,
@@ -3040,6 +3063,7 @@ const server = createServer(async (req, res) => {
       const instance = registry.get(owner.modelSelection.instanceId);
       if (!instance) return json(res, 409, { error: "provider unavailable" });
       await recordGovernanceResponse(threadId, String(body.requestId), body.behavior);
+      rememberAnswerText(threadId, String(body.requestId), body.behavior, body.message);
       await instance.adapter.respondToRequest(threadId, String(body.requestId), {
         behavior: body.behavior,
         message: body.message,
