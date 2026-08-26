@@ -155,6 +155,10 @@ export interface SendTurnInput {
     computer?: { kind?: "box"; boxId: string; token: string };
     /** Direct stdio connection to a Cua Driver MCP server (host or sandbox). */
     localComputer?: { command: string; args: string[]; env: Record<string, string> };
+    /** Playwright driving a browser on the user's own machine, in MausCrew's
+     * own profile. Separate from `computer`: that clicks pixels on a desktop,
+     * this knows what an element is and when a page finished loading. */
+    pcBrowser?: { command: string; args: string[]; env: Record<string, string> };
     /** Peer-agent comms: an MCP proxy (list_bots / ask_bot) that routes back
      * through the harness so this bot can message other bots. The harness
      * owns turns, permissions, and recursion limits; the proxy only forwards. */

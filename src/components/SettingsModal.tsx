@@ -8,6 +8,7 @@ import { useStore, type AppSettingsSection } from "@/state/store";
 import { ApiKeyRow, DeepSeekOptions } from "./ApiKeys";
 import { ClaudeGateways } from "./ClaudeGateways";
 import { FallbackChain } from "./FallbackChain";
+import { PcBrowser } from "./PcBrowser";
 import { useUpdaterState } from "@/lib/updater";
 import { LocalComputerSection } from "./LocalComputerSection";
 import { Card } from "./SettingsPrimitives";
@@ -322,6 +323,7 @@ export function SettingsModal() {
               >
                 <ClaudeGateways />
                 <FallbackChain />
+                <PcBrowser />
               </Card>
             )}
 

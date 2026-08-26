@@ -184,6 +184,8 @@ export function messageVersions(bot: Bot, message: Message): Message[] {
 export interface ConfigStatus {
   /** Engines to try, in order, when one runs out mid-turn. */
   fallbackChain?: string[];
+  /** Browser control on this machine, via Playwright. */
+  pcBrowser?: { enabled: boolean; headless: boolean };
   xai?: { configured: boolean };
   composio: { configured: boolean };
   box: { configured: boolean };
