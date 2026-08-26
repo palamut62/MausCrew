@@ -106,7 +106,8 @@ import {
   updateWorkspaceSkill,
 } from "./skills.ts";
 import { createTeamManifest, parseTeamManifest } from "./team-manifest.ts";
-import { teachDraftFromTask } from "./teach/draft.ts";
+import { teachDraftFromRecording, teachDraftFromTask } from "./teach/draft.ts";
+import * as recording from "./teach/recording.ts";
 import { ensureTailscaleServe } from "./tailscale-serve.ts";
 import { extractStructuredUi } from "./ui-runtime/schema.ts";
 import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./webhook-ingress.ts";
@@ -632,6 +633,16 @@ bus.subscribe((event: RuntimeEvent) => {
             ...(subagent ? { subagent } : {}),
           });
           if (patched) broadcast({ kind: "message.patch", threadId: event.threadId, message: patched });
+          // A recording captures each action as it settles, with the detail
+          // the transcript is about to reduce to a bare tool name.
+          if (bot) {
+            recording.record(
+              bot.id,
+              event.threadId,
+              { at: Date.now(), kind: "action", tool: toolName, ok: event.ok },
+              Date.now(),
+            );
+          }
           toolMessageByItem.delete(itemKey);
         }
         // the bot just acted ON ITS SCREEN — refresh the preview now. Only
@@ -2646,6 +2657,46 @@ const server = createServer(async (req, res) => {
       } catch (error) {
         if (error instanceof SkillStoreError) return json(res, error.status, { error: error.message });
         throw error;
+      }
+    }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/teach-recording$/);
+    if (m) {
+      const bot = store.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      const now = Date.now();
+      if (method === "GET") {
+        const live = recording.active(bot.id, now);
+        return json(res, 200, {
+          recording: live ? { label: live.label, startedAt: live.startedAt, steps: live.steps.length } : null,
+        });
+      }
+      if (method === "POST") {
+        const body = await readBody(req);
+        const action = String(body.action ?? "");
+        if (action === "start") {
+          const task = store.taskByThread(bot.id, bot.threadId);
+          const started = recording.start(bot.id, bot.threadId, String(body.label ?? task?.title ?? ""), now);
+          // The opening request is the workflow's goal, and it is already on
+          // the thread — a recording started mid-task should not lose it.
+          const asked = store
+            .activePath(bot.threadId)
+            .filter((msg) => msg.role === "user" && msg.kind === "text" && msg.text?.trim())
+            .at(-1);
+          if (asked?.text) {
+            recording.record(bot.id, bot.threadId, { at: now, kind: "asked", detail: asked.text }, now);
+          }
+          return json(res, 200, { recording: { label: started.label, startedAt: started.startedAt, steps: 0 } });
+        }
+        if (action === "stop") {
+          const stopped = recording.stop(bot.id, now);
+          if (!stopped) return json(res, 404, { error: "nothing was being recorded" });
+          return json(res, 200, { draft: teachDraftFromRecording(stopped), steps: stopped.steps.length });
+        }
+        if (action === "discard") {
+          recording.discard(bot.id);
+          return json(res, 200, { ok: true });
+        }
+        return json(res, 400, { error: "action must be start, stop, or discard" });
       }
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/teach-draft$/);
