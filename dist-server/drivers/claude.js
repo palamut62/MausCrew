@@ -494,6 +494,9 @@ export const ClaudeDriver = {
                         requestType: ask.kind,
                         tool: ask.tool,
                         summary: askSummary(ask),
+                        // Marks the whole chain — event, card, transcript — as carrying
+                        // a credential, so nothing downstream writes the value down.
+                        ...(ask.input && ask.input.secret ? { secret: true } : {}),
                         choices: Array.isArray(ask.input?.choices) ? ask.input.choices.slice(0, 5) : undefined,
                     }),
                     onResolve: (resolved) => emit({
