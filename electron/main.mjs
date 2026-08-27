@@ -503,6 +503,19 @@ ipcMain.handle("workspace:choose", async () => {
   return result.canceled ? null : (result.filePaths[0] ?? null);
 });
 
+ipcMain.handle("startup:get", () => ({
+  available: app.isPackaged && (process.platform === "win32" || process.platform === "darwin"),
+  enabled: app.isPackaged ? app.getLoginItemSettings().openAtLogin : false,
+}));
+
+ipcMain.handle("startup:set", (_event, enabled) => {
+  if (!app.isPackaged || (process.platform !== "win32" && process.platform !== "darwin")) {
+    return { available: false, enabled: false };
+  }
+  app.setLoginItemSettings({ openAtLogin: enabled === true });
+  return { available: true, enabled: app.getLoginItemSettings().openAtLogin };
+});
+
 ipcMain.handle("perm:status", () => ({
   mic:
     process.platform === "darwin"

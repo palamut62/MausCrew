@@ -37,6 +37,8 @@ export function claudeGateways(cfg: AppConfig): ClaudeGateway[] {
 }
 
 export interface AppConfig {
+  /** Default host workspace shared by bots that do not choose a private one. */
+  sharedWorkspacePath?: string;
   /** Optional HTTPS address exposed by a local trusted reverse proxy such as
    * Tailscale Serve. The harness itself remains bound to loopback. */
   remoteAccess?: { enabled?: boolean; publicUrl?: string };
@@ -223,6 +225,11 @@ export function saveConfig(patch: Partial<AppConfig>): void {
   }
   if (patch.aguiAgents) disk.aguiAgents = patch.aguiAgents;
   if (patch.mcpServers) disk.mcpServers = patch.mcpServers;
+  if (patch.sharedWorkspacePath !== undefined) {
+    const sharedWorkspacePath = patch.sharedWorkspacePath.trim();
+    if (sharedWorkspacePath) disk.sharedWorkspacePath = sharedWorkspacePath;
+    else delete disk.sharedWorkspacePath;
+  }
   mkdirSync(DATA_DIR, { recursive: true });
   writeFileAtomic(p, JSON.stringify(disk, null, 2), { mode: 0o600 });
 }

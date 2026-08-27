@@ -56,6 +56,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
         | "modelSelection"
         | "workspacePath"
         | "dynamicCordis"
+        | "section"
       >
     >,
   ) => dispatch({ type: "updateBot", botId: bot.id, patch: p });
@@ -195,13 +196,23 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
             />
           </Field>
 
+          <Field label="Sidebar section">
+            <input
+              className={inputCls}
+              placeholder="Unassigned"
+              value={bot.section ?? ""}
+              onChange={(event) => patch({ section: event.target.value })}
+              onBlur={(event) => patch({ section: event.currentTarget.value.trim() })}
+            />
+          </Field>
+
           <div className="block">
-            <div className="mb-1.5 text-[13px] text-ink-secondary">Workspace directory</div>
+            <div className="mb-1.5 text-[13px] text-ink-secondary">Private workspace override</div>
             <div className="flex gap-2">
               <input
                 aria-label="Workspace directory"
                 className={inputCls}
-                placeholder="Private bot workspace (default)"
+                placeholder="Use shared workspace"
                 value={workspaceDraft}
                 onChange={(event) => setWorkspaceDraft(event.target.value)}
                 onBlur={saveWorkspace}
@@ -221,7 +232,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
               </button>
             </div>
             <div className="mt-1.5 text-[11.5px] leading-relaxed text-ink-secondary">
-              Coding engines work in this absolute host folder. Leave blank to use a private workspace scoped to this bot.
+              Coding engines work in this absolute host folder. Leave blank to use the shared workspace from App Settings → General.
             </div>
           </div>
 

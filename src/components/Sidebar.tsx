@@ -2,7 +2,7 @@ import { track } from "@/lib/analytics";
 import { Spin } from "./Spin";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowClockwise, ArrowLineDown, BellRinging, CalendarDots, Check, ClipboardText, Copy, Crown, EyeSlash, FileArrowUp, FolderPlus, Gear, MagnifyingGlass, Pencil, Plus, PushPin, PushPinSlash, PuzzlePiece, Robot as BotIcon, Trash, Users } from "@phosphor-icons/react";
+import { ArrowClockwise, ArrowLineDown, BellRinging, CalendarDots, CaretDown, CaretRight, Check, ClipboardText, Copy, Crown, EyeSlash, FileArrowUp, FolderPlus, Gear, MagnifyingGlass, Pencil, Plus, PushPin, PushPinSlash, PuzzlePiece, Robot as BotIcon, Trash, Users } from "@phosphor-icons/react";
 import { api, useStore, formatTime, visibleMessages, type Bot, type Group, type Message } from "@/state/store";
 import { MausAvatar, InitialsAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot-motion";
@@ -114,6 +114,21 @@ function preview(bot: Bot, visible: Message[]): string {
   if (last.kind === "activity" && last.tool) return last.tool.name;
   if (last.kind === "screen") return "Screen frame";
   return last.text ?? "";
+}
+
+function messageSearchText(message: Message): string {
+  return [
+    message.text,
+    message.card?.title,
+    message.card?.subtitle,
+    ...(message.card?.options ?? []),
+    message.tool?.name,
+    message.tool?.spoken,
+    message.from?.name,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
 }
 
 interface MenuState {
@@ -907,6 +922,13 @@ export function Sidebar({ open, onClose, onOpenDirectory }: { open: boolean; onC
   const [pendingImport, setPendingImport] = useState<PendingTeamImport | null>(null);
   const [teamFeedback, setTeamFeedback] = useState<{ error: boolean; text: string } | null>(null);
   const [query, setQuery] = useState("");
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem("mauscrew.sidebar.collapsed-sections") ?? "[]"));
+    } catch {
+      return new Set();
+    }
+  });
 
   // Esc closes the drawer, mirroring ApiKeys.tsx:75-85. Bound only while the
   // drawer is open — on mobile, exactly when a bot/room context menu or the
@@ -957,13 +979,42 @@ export function Sidebar({ open, onClose, onOpenDirectory }: { open: boolean; onC
         !q ||
         b.name.toLowerCase().includes(q) ||
         (b.title ?? "").toLowerCase().includes(q) ||
-        preview(b, visibleMessages(b)).toLowerCase().includes(q),
+        (b.section ?? "").toLowerCase().includes(q) ||
+        (b.tasks ?? []).some((task) => task.title.toLowerCase().includes(q)) ||
+        visibleMessages(b).some((message) => messageSearchText(message).includes(q)),
     );
   const chiefBot = matchingBots.find((bot) => bot.chiefOfStaff);
   const visibleBots = matchingBots
     .filter((bot) => !bot.chiefOfStaff)
     .sort((a, b) => Number(b.pinned ?? false) - Number(a.pinned ?? false));
-  const visibleGroups = state.groups.filter((g) => !q || g.name.toLowerCase().includes(q));
+  const visibleGroups = state.groups.filter(
+    (group) =>
+      !q ||
+      group.name.toLowerCase().includes(q) ||
+      group.bulletin.toLowerCase().includes(q) ||
+      group.messages.some((message) => messageSearchText(message).includes(q)),
+  );
+  const sectionedBots = new Map<string, Bot[]>();
+  for (const bot of visibleBots) {
+    const section = bot.section?.trim() || "Unassigned";
+    const members = sectionedBots.get(section) ?? [];
+    members.push(bot);
+    sectionedBots.set(section, members);
+  }
+  const orderedSections = [...sectionedBots.entries()].sort(([left], [right]) => {
+    if (left === "Unassigned") return 1;
+    if (right === "Unassigned") return -1;
+    return left.localeCompare(right);
+  });
+  const toggleSection = (section: string) => {
+    setCollapsedSections((previous) => {
+      const next = new Set(previous);
+      if (next.has(section)) next.delete(section);
+      else next.add(section);
+      localStorage.setItem("mauscrew.sidebar.collapsed-sections", JSON.stringify([...next]));
+      return next;
+    });
+  };
 
   return (
     <aside
@@ -1101,9 +1152,24 @@ export function Sidebar({ open, onClose, onOpenDirectory }: { open: boolean; onC
           {visibleGroups.map((g) => (
             <GroupListItem key={g.id} group={g} onMenu={setRoomMenu} />
           ))}
-          {visibleBots.map((b) => (
-            <BotListItem key={b.id} bot={b} onMenu={setMenu} />
-          ))}
+          {orderedSections.map(([section, bots]) => {
+            const collapsed = !q && collapsedSections.has(section);
+            return (
+              <div key={section} className="mt-1">
+                <button
+                  type="button"
+                  onClick={() => toggleSection(section)}
+                  className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-[11px] font-medium uppercase tracking-[0.08em] text-ink-secondary hover:bg-raised/50 hover:text-ink"
+                  aria-expanded={!collapsed}
+                >
+                  {collapsed ? <CaretRight size={12} weight="bold" /> : <CaretDown size={12} weight="bold" />}
+                  <span className="min-w-0 flex-1 truncate">{section}</span>
+                  <span className="font-mono text-[10px] tracking-normal">{bots.length}</span>
+                </button>
+                {!collapsed && bots.map((bot) => <BotListItem key={bot.id} bot={bot} onMenu={setMenu} />)}
+              </div>
+            );
+          })}
         </div>
       </div>
 

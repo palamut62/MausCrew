@@ -227,6 +227,23 @@ describe("harness HTTP API", () => {
     expect((await api("GET", "/api/config")).body.analytics.enabled).toBe(true);
   });
 
+  it("stores and clears a desktop-only shared workspace", async () => {
+    const workspace = join(home, "projects", "shared-workspace");
+    expect((await api("GET", "/api/shared-workspace")).body).toEqual({ path: "" });
+
+    const saved = await api("PUT", "/api/shared-workspace", { path: workspace });
+    expect(saved).toEqual({ status: 200, body: { path: workspace } });
+    expect((await api("GET", "/api/shared-workspace")).body).toEqual({ path: workspace });
+    expect(JSON.parse(readFileSync(join(home, ".mauscrew", "config.json"), "utf8")).sharedWorkspacePath).toBe(workspace);
+
+    expect((await api("PUT", "/api/shared-workspace", { path: "relative/workspace" })).status).toBe(400);
+    expect((await api("PUT", "/api/shared-workspace", { path: home })).status).toBe(400);
+
+    expect((await api("PUT", "/api/shared-workspace", { path: "" })).body).toEqual({ path: "" });
+    expect((await api("GET", "/api/shared-workspace")).body).toEqual({ path: "" });
+    expect(JSON.parse(readFileSync(join(home, ".mauscrew", "config.json"), "utf8")).sharedWorkspacePath).toBeUndefined();
+  });
+
   it("identifies itself on /api/health", async () => {
     const { status, body } = await api("GET", "/api/health");
     expect(status).toBe(200);
@@ -348,15 +365,17 @@ describe("harness HTTP API", () => {
     const patched = await api("PATCH", `/api/bots/${bot.id}`, {
       name: "Renamed",
       pinned: true,
+      section: "Work & projects",
       workspacePath,
       dynamicCordis: true,
     });
     expect(patched.status).toBe(200);
-    expect(patched.body.bot).toMatchObject({ name: "Renamed", pinned: true, workspacePath, dynamicCordis: true });
+    expect(patched.body.bot).toMatchObject({ name: "Renamed", pinned: true, section: "Work & projects", workspacePath, dynamicCordis: true });
 
     expect((await api("PATCH", `/api/bots/${bot.id}`, { workspacePath: "relative/project" })).status).toBe(400);
     expect((await api("PATCH", `/api/bots/${bot.id}`, { workspacePath: home })).status).toBe(400);
     expect((await api("PATCH", `/api/bots/${bot.id}`, { dynamicCordis: "yes" })).status).toBe(400);
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { section: "x".repeat(65) })).status).toBe(400);
     const cleared = await api("PATCH", `/api/bots/${bot.id}`, { workspacePath: "" });
     expect(cleared.status).toBe(200);
     expect(cleared.body.bot.workspacePath).toBeUndefined();
@@ -603,6 +622,15 @@ describe("harness HTTP API", () => {
     const send = await api("POST", `/api/bots/${bot.id}/messages`, { text: "hello?" });
     expect(send.status).toBe(409);
     expect(send.body.error).toContain("unavailable");
+  });
+
+  it("validates direct turn redirects at the HTTP boundary", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    expect((await api("POST", `/api/bots/${bot.id}/steer`, { text: "" })).status).toBe(400);
+    expect((await api("POST", "/api/bots/does-not-exist/steer", { text: "redirect" })).status).toBe(404);
+    // Idle redirects use the ordinary turn path; this test fleet intentionally
+    // has no runnable provider, so the route must surface that same conflict.
+    expect((await api("POST", `/api/bots/${bot.id}/steer`, { text: "redirect" })).status).toBe(409);
   });
 
   it("refuses to fork a message when the provider is unavailable, without mutating", async () => {

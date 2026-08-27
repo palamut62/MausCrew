@@ -71,6 +71,11 @@ contextBridge.exposeInMainWorld("mauscrew", {
   openInstallTerminal: (command) => ipcRenderer.invoke("engine:open-terminal", command),
   /** Choose one absolute host directory for a bot's coding workspace. */
   chooseWorkspace: () => ipcRenderer.invoke("workspace:choose"),
+  /** User-controlled OS login startup. Packaged Windows/macOS only. */
+  startup: {
+    get: () => ipcRenderer.invoke("startup:get"),
+    set: (enabled) => ipcRenderer.invoke("startup:set", enabled),
+  },
   /** Store a provider credential with OS-backed encryption. */
   setCredential: (name, value) => ipcRenderer.invoke("credential:set", name, value),
 

@@ -160,6 +160,164 @@ function UpdatesRow() {
   );
 }
 
+function StartupRow() {
+  const startup = window.mauscrew?.startup;
+  const [status, setStatus] = useState<{ available: boolean; enabled: boolean } | null>(null);
+  const [pending, setPending] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    void startup?.get().then((result) => alive && setStatus(result));
+    return () => {
+      alive = false;
+    };
+  }, [startup]);
+
+  if (!startup || !status?.available) return null;
+  const toggle = async () => {
+    setPending(true);
+    try {
+      setStatus(await startup.set(!status.enabled));
+    } finally {
+      setPending(false);
+    }
+  };
+  return (
+    <Card
+      title="Start at login"
+      subtitle="Keep the local harness, routines, and notifications available whenever this PC is on. Closing the window still leaves MausCrew in the system tray."
+    >
+      <div className="flex items-center gap-3">
+        <div className="min-w-0 flex-1 text-[13px] text-ink-secondary">
+          {status.enabled ? "MausCrew starts when you sign in." : "MausCrew starts only when you open it."}
+        </div>
+        <button
+          role="switch"
+          aria-checked={status.enabled}
+          aria-label="Start MausCrew at login"
+          disabled={pending}
+          onClick={() => void toggle()}
+          className={cn(
+            "relative h-[26px] w-[44px] shrink-0 rounded-md transition-colors disabled:opacity-40",
+            status.enabled ? "bg-accent" : "bg-raised",
+          )}
+        >
+          <span className={cn("absolute top-[3px] size-5 rounded-sm bg-white transition-all", status.enabled ? "left-[21px]" : "left-[3px]")} />
+        </button>
+      </div>
+    </Card>
+  );
+}
+
+function SharedWorkspaceRow() {
+  const chooser = window.mauscrew?.chooseWorkspace;
+  const [path, setPath] = useState("");
+  const [savedPath, setSavedPath] = useState("");
+  const [pending, setPending] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    void fetch("/api/shared-workspace")
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Shared workspace is available only in the desktop app.");
+        return response.json() as Promise<{ path?: string }>;
+      })
+      .then((result) => {
+        if (!alive) return;
+        const nextPath = result.path ?? "";
+        setPath(nextPath);
+        setSavedPath(nextPath);
+      })
+      .catch((cause) => alive && setError(cause instanceof Error ? cause.message : "Could not load workspace."))
+      .finally(() => alive && setPending(false));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  if (!chooser) return null;
+
+  const save = async (nextPath = path.trim()) => {
+    setPending(true);
+    setError("");
+    try {
+      const response = await fetch("/api/shared-workspace", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ path: nextPath }),
+      });
+      const result = (await response.json()) as { path?: string; error?: string };
+      if (!response.ok) throw new Error(result.error ?? "Could not save workspace.");
+      const saved = result.path ?? "";
+      setPath(saved);
+      setSavedPath(saved);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not save workspace.");
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const choose = async () => {
+    const selected = await chooser();
+    if (selected) {
+      setPath(selected);
+      await save(selected);
+    }
+  };
+
+  return (
+    <Card
+      title="Shared workspace"
+      subtitle="Bots without a private workspace work in this local folder and can share files. A bot's private workspace always takes priority."
+    >
+      <div className="flex gap-2">
+        <input
+          aria-label="Shared workspace directory"
+          value={path}
+          onChange={(event) => setPath(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") void save();
+          }}
+          placeholder="Choose a local folder"
+          disabled={pending}
+          className="min-w-0 flex-1 rounded-lg border border-hairline bg-inset px-3 py-2 text-[14px] text-ink placeholder:text-ink-secondary focus:outline-none disabled:opacity-50"
+        />
+        <button
+          type="button"
+          onClick={() => void choose()}
+          disabled={pending}
+          className="rounded-lg border border-hairline px-3 py-2 text-[13px] text-ink hover:bg-raised disabled:opacity-40"
+        >
+          Choose
+        </button>
+        {path.trim() !== savedPath && (
+          <button
+            type="button"
+            onClick={() => void save()}
+            disabled={pending}
+            className="rounded-lg bg-accent px-3 py-2 text-[13px] text-white disabled:opacity-40"
+          >
+            Save
+          </button>
+        )}
+        {savedPath && (
+          <button
+            type="button"
+            onClick={() => void save("")}
+            disabled={pending}
+            className="rounded-lg border border-hairline px-3 py-2 text-[13px] text-ink-secondary hover:bg-raised disabled:opacity-40"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+      {error && <div role="alert" className="mt-2 text-[12px] text-danger">{error}</div>}
+    </Card>
+  );
+}
+
 export function SettingsModal() {
   const { state, dispatch } = useStore();
   const section = state.appSettingsSection;
@@ -275,6 +433,8 @@ export function SettingsModal() {
                   <ProfileFields />
                 </Card>
                 <AnalyticsRow />
+                <StartupRow />
+                <SharedWorkspaceRow />
                 <UpdatesRow />
               </>
             )}

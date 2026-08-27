@@ -143,6 +143,8 @@ export interface Bot {
   voice?: string;
   pinned?: boolean;
   hidden?: boolean;
+  /** User-defined sidebar section; empty means Unassigned. */
+  section?: string;
   /** The workspace's one primary coordinator. */
   chiefOfStaff?: boolean;
   /** When this bot wants to talk to another bot (ask_bot/delegate_bot),
@@ -337,6 +339,7 @@ type Action =
   | { type: "configStatus"; config: ConfigStatus }
   | { type: "select"; id: string }
   | { type: "send"; botId: string; text: string }
+  | { type: "steer"; botId: string; text: string }
   | { type: "editMessage"; botId: string; messageId: string; text: string }
   | { type: "switchBranch"; botId: string; messageId: string }
   | { type: "threadActive"; threadId: string; activeLeafId: string }
@@ -397,6 +400,7 @@ type Action =
           | "voice"
           | "pinned"
           | "hidden"
+          | "section"
           | "chiefOfStaff"
           | "approvePeerComms"
           | "modelSelection"
@@ -769,6 +773,7 @@ function reducer(state: AppState, action: Action): AppState {
     }
     // handled entirely by the async wrapper
     case "send":
+    case "steer":
     case "editMessage":
       return state;
     case "newTask":
@@ -1088,6 +1093,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   name: `${source.name} copy`,
                   title: source.title,
                   description: source.description,
+                  ...(source.section ? { section: source.section } : {}),
                   notifications: source.notifications,
                   modelSelection: source.modelSelection,
                   ...(source.workspacePath ? { workspacePath: source.workspacePath } : {}),
@@ -1164,6 +1170,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "interrupt":
           api(`/api/bots/${action.botId}/interrupt`, { method: "POST" }).catch(showError);
+          break;
+        case "steer":
+          api(`/api/bots/${action.botId}/steer`, {
+            method: "POST",
+            body: JSON.stringify({ text: action.text }),
+          }).catch(showError);
           break;
         // tasks: the server answers with the bot AND the live transcript,
         // because switching changes which conversation is on screen
