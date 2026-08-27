@@ -193,17 +193,30 @@ export class Store {
         // bots saved before tasks existed have one endless thread; adopt it as
         // their first task so nothing is lost and nothing special-cases it
         for (const b of this.bots) {
-            if (b.tasks?.length)
-                continue;
-            b.tasks = [
-                {
-                    threadId: b.threadId,
-                    title: this.firstUserLine(b.threadId) ?? UNTITLED_TASK,
-                    createdAt: b.createdAt,
-                    resumeCursors: b.resumeCursors ?? {},
-                },
-            ];
+            if (!b.tasks?.length) {
+                b.tasks = [
+                    {
+                        threadId: b.threadId,
+                        title: this.firstUserLine(b.threadId) ?? UNTITLED_TASK,
+                        createdAt: b.createdAt,
+                        resumeCursors: b.resumeCursors ?? {},
+                    },
+                ];
+                botsMigrated = true;
+            }
+            // Before lastInstanceId existed, the selected engine is the best
+            // available record of which provider owns the native session. Seed
+            // only tasks with history; an untouched task has nothing to replay.
+            for (const task of b.tasks) {
+                const hasUserHistory = this.messagesFor(task.threadId).some((message) => message.role === "user" && message.kind === "text" && message.text?.trim());
+                if (task.lastInstanceId || !hasUserHistory)
+                    continue;
+                task.lastInstanceId = b.modelSelection.instanceId;
+                botsMigrated = true;
+            }
         }
+        if (botsMigrated)
+            this.saveBots();
     }
     saveBots() {
         writeFileAtomic(BOTS_FILE, JSON.stringify(this.bots, null, 2));
@@ -505,6 +518,13 @@ export class Store {
         // routine task working in the background.
         if (!threadId || bot.threadId === threadId)
             bot.resumeCursors[instanceId] = cursor;
+        this.saveBots();
+    }
+    setTaskInstance(botId, threadId, instanceId) {
+        const task = this.taskByThread(botId, threadId);
+        if (!task || task.lastInstanceId === instanceId)
+            return;
+        task.lastInstanceId = instanceId;
         this.saveBots();
     }
     // ── tasks ─────────────────────────────────────────────────────────────
