@@ -21,7 +21,7 @@ describe("local computer descriptor", () => {
     expect(readCuaConnection({ platform: "linux", userData })).toBeNull();
   });
 
-  it("reads and validates an exact platform userData descriptor", () => {
+  it("reads and validates an exact macOS userData descriptor", () => {
     const userData = join(process.env.HOME!, "windows-user-data");
     mkdirSync(userData, { recursive: true });
     writeFileSync(
@@ -34,7 +34,7 @@ describe("local computer descriptor", () => {
       }),
     );
 
-    expect(readCuaConnection({ platform: "win32", userData })).toEqual({
+    expect(readCuaConnection({ platform: "darwin", userData })).toEqual({
       command: "C:\\cua-driver.exe",
       args: ["mcp"],
       env: { CUA_DRIVER_EMBEDDED: "1" },
@@ -49,7 +49,7 @@ describe("local computer descriptor", () => {
       JSON.stringify({ mode: "embedded", mcpCommand: "cua-driver", mcpArgs: "mcp" }),
     );
 
-    expect(readCuaConnection({ platform: "win32", userData })).toBeNull();
+    expect(readCuaConnection({ platform: "darwin", userData })).toBeNull();
   });
 
   it("rejects an array environment descriptor", () => {
@@ -64,6 +64,23 @@ describe("local computer descriptor", () => {
       }),
     );
 
-    expect(readCuaConnection({ platform: "win32", userData })).toBeNull();
+    expect(readCuaConnection({ platform: "darwin", userData })).toBeNull();
+  });
+
+  it("uses the bundled native Windows MCP bridge without a descriptor", () => {
+    const moduleDir = join(process.env.HOME!, "windows-native-module");
+    const proxy = join(moduleDir, "host-cua", "host-computer-proxy.mjs");
+    mkdirSync(join(moduleDir, "host-cua", "native"), { recursive: true });
+    writeFileSync(proxy, "// test bridge");
+
+    expect(readCuaConnection({ platform: "win32", moduleDir })).toEqual({
+      command: process.execPath,
+      args: [proxy],
+      env: {
+        ELECTRON_RUN_AS_NODE: "1",
+        CUA_DRIVER_RS_TELEMETRY_ENABLED: "0",
+        MAUSCREW_CUA_SDK_LIBRARY: join(moduleDir, "host-cua", "native", "cua_driver_sdk.dll"),
+      },
+    });
   });
 });

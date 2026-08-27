@@ -166,7 +166,7 @@ function skillsWorkspaceFor(bot) {
     return defaultWorkspaceFor(bot.modelSelection.instanceId, bot.threadId);
 }
 function skillsSystemPrompt(bot) {
-    return skillIndexPrompt(bot.workspacePath || skillsWorkspaceFor(bot));
+    return skillIndexPrompt(bot.workspacePath || cfg.sharedWorkspacePath || skillsWorkspaceFor(bot));
 }
 // ── self-scheduling wiring ─────────────────────────────────────────────
 // The routines-proxy reaches /api/internal/routines with the same shared
@@ -836,7 +836,10 @@ bus.subscribe((event) => {
             if (bot) {
                 store.patchBot(bot.id, { busy: false, unread: true });
                 broadcast({ kind: "bot", bot: wireBot(store.bot(bot.id)) });
-                notify(buildNotification("done", bot, event.threadId, reply));
+                if (steerQueues.has(event.threadId))
+                    runNextSteer(event.threadId);
+                else
+                    notify(buildNotification("done", bot, event.threadId, reply));
                 if (screenPollers.has(bot.id)) {
                     // the last live frame becomes a settled inline screen message —
                     // the screenshot-in-chat moment. One fresh capture first, so the
@@ -941,6 +944,7 @@ bus.subscribe((event) => {
 });
 const screenPollers = new Map();
 const pendingTurnDispatches = new Map();
+const steerQueues = new Map();
 class TurnInterruptedBeforeDispatch extends Error {
 }
 function throwIfTurnInterrupted(pending) {
@@ -977,6 +981,32 @@ function interruptPendingTurn(threadId) {
     const pending = pendingTurnDispatches.get(threadId);
     if (pending)
         pending.interrupted = true;
+}
+/** Start the next user redirect only after the dying provider turn settled. */
+function runNextSteer(threadId) {
+    const queue = steerQueues.get(threadId);
+    const text = queue?.shift();
+    if (!text) {
+        steerQueues.delete(threadId);
+        return;
+    }
+    if (queue?.length === 0)
+        steerQueues.delete(threadId);
+    const bot = store.botByThread(threadId);
+    if (!bot)
+        return;
+    queueMicrotask(() => {
+        void startTurn(bot.id, text, { threadId }).catch((error) => {
+            const detail = error instanceof Error ? error.message : String(error);
+            const failure = store.appendMessage(threadId, {
+                role: "bot",
+                kind: "activity",
+                tool: { name: `redirect failed: ${detail.slice(0, 160)}`, ok: false },
+            });
+            broadcast({ kind: "message", threadId, message: failure });
+            runNextSteer(threadId);
+        });
+    });
 }
 /** The preview shares the box's single command endpoint with the agent's
  * own actions, so every frame we take is latency stolen from the work the
@@ -1381,7 +1411,7 @@ async function startTurn(botId, text, opts) {
                 // A handover has no session on this engine at all.
                 resumeCursor: rewound || handedOver ? undefined : task.resumeCursors[instanceId],
                 transcript,
-                cwd: bot.workspacePath || undefined,
+                cwd: bot.workspacePath || cfg.sharedWorkspacePath || undefined,
                 runtimeFeatures: { dynamicCordis: bot.dynamicCordis === true },
                 system: persona +
                     // what fell out of the transcript above, so it is knowledge the bot
@@ -1450,6 +1480,7 @@ async function startTurn(botId, text, opts) {
             if (e instanceof TurnInterruptedBeforeDispatch) {
                 store.patchBot(bot.id, { busy: false });
                 broadcast({ kind: "bot", bot: wireBot(store.bot(bot.id)) });
+                runNextSteer(threadId);
                 return;
             }
             const message = e instanceof Error ? e.message : String(e);
@@ -1462,6 +1493,8 @@ async function startTurn(botId, text, opts) {
             store.patchBot(bot.id, { busy: false });
             broadcast({ kind: "bot", bot: wireBot(store.bot(bot.id)) });
             opts?.onDispatchError?.(message);
+            if (steerQueues.has(threadId))
+                runNextSteer(threadId);
         }
     })();
 }
@@ -2795,7 +2828,7 @@ const server = createServer(async (req, res) => {
             // is portable `.agents/skills/<name>/SKILL.md` that any agent can read.
             // Every bot therefore gets a skills home: its own workspace when the
             // user picked one, else the same per-thread default DeepSeek uses.
-            const workspacePath = bot.workspacePath || skillsWorkspaceFor(bot);
+            const workspacePath = bot.workspacePath || cfg.sharedWorkspacePath || skillsWorkspaceFor(bot);
             try {
                 if (method === "GET" && !m[2]) {
                     const result = listWorkspaceSkills(workspacePath);
@@ -2950,6 +2983,16 @@ const server = createServer(async (req, res) => {
                     return json(res, 400, { error: "title is too long" });
                 body.title = title;
             }
+            if (body.section !== undefined) {
+                if (typeof body.section !== "string") {
+                    return json(res, 400, { error: "section must be a string" });
+                }
+                const section = body.section.trim();
+                if (section.length > 64 || /[\0\r\n]/.test(section)) {
+                    return json(res, 400, { error: "section must be at most 64 characters on one line" });
+                }
+                body.section = section || undefined;
+            }
             if (body.color !== undefined && !COLORS.includes(String(body.color))) {
                 return json(res, 400, { error: "unknown color" });
             }
@@ -2994,7 +3037,7 @@ const server = createServer(async (req, res) => {
                 }
             }
             const patch = {};
-            for (const key of ["name", "title", "description", "notifications", "modelSelection", "unread", "computer", "color", "pinned", "hidden", "speakReplies", "voice"]) {
+            for (const key of ["name", "title", "description", "notifications", "modelSelection", "unread", "computer", "color", "pinned", "hidden", "section", "speakReplies", "voice"]) {
                 if (body[key] !== undefined)
                     patch[key] = body[key];
             }
@@ -3125,6 +3168,32 @@ const server = createServer(async (req, res) => {
                 return json(res, 400, { error: "text required" });
             await startTurn(m[1], text);
             return json(res, 202, { ok: true });
+        }
+        m = path.match(/^\/api\/bots\/([\w-]+)\/steer$/);
+        if (m && method === "POST") {
+            const bot = store.bot(m[1]);
+            if (!bot)
+                return json(res, 404, { error: "no such bot" });
+            const body = await readBody(req);
+            const text = String(body.text ?? "").trim();
+            if (!text)
+                return json(res, 400, { error: "text required" });
+            if (text.length > 100_000)
+                return json(res, 413, { error: "message is too large" });
+            if (!bot.busy) {
+                await startTurn(bot.id, text);
+                return json(res, 202, { redirected: false });
+            }
+            const queue = steerQueues.get(bot.threadId) ?? [];
+            if (queue.length >= 10)
+                return json(res, 409, { error: "too many pending redirects" });
+            queue.push(text);
+            steerQueues.set(bot.threadId, queue);
+            if (queue.length === 1) {
+                interruptPendingTurn(bot.threadId);
+                await registry.get(bot.modelSelection.instanceId)?.adapter.interruptTurn(bot.threadId).catch(() => { });
+            }
+            return json(res, 202, { redirected: true, position: queue.length });
         }
         // edit a user message → fork the conversation there and rerun the turn.
         // Rewinding a live thread is refused, exactly like switching versions
@@ -3608,6 +3677,28 @@ const server = createServer(async (req, res) => {
             return json(res, 200, status);
         }
         // ── app config (API keys — never echoed back, booleans only) ──
+        if (path === "/api/shared-workspace" && (method === "GET" || method === "PUT")) {
+            if (!localRequest)
+                return json(res, 403, { error: "this setting can only be changed on the desktop" });
+            if (method === "GET")
+                return json(res, 200, { path: cfg.sharedWorkspacePath ?? "" });
+            const body = await readBody(req);
+            if (typeof body.path !== "string")
+                return json(res, 400, { error: "path must be a string" });
+            const sharedWorkspacePath = body.path.trim();
+            if (sharedWorkspacePath && (sharedWorkspacePath.length > 4096 || /[\0\r\n]/.test(sharedWorkspacePath))) {
+                return json(res, 400, { error: "path contains invalid characters" });
+            }
+            if (sharedWorkspacePath && !isAbsolute(sharedWorkspacePath)) {
+                return json(res, 400, { error: "path must be absolute" });
+            }
+            if (sharedWorkspacePath && resolve(sharedWorkspacePath) === resolve(homedir())) {
+                return json(res, 400, { error: "path cannot be the home directory itself" });
+            }
+            cfg.sharedWorkspacePath = sharedWorkspacePath || undefined;
+            saveConfig({ sharedWorkspacePath });
+            return json(res, 200, { path: cfg.sharedWorkspacePath ?? "" });
+        }
         if (method === "GET" && path === "/api/config") {
             return json(res, 200, configStatus());
         }

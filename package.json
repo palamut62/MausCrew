@@ -36,7 +36,7 @@
     "test:cua-container": "node scripts/smoke-cua-container.mjs",
     "check:electron": "node scripts/check-electron.mjs",
     "preview": "vite preview",
-    "build:server": "tsc -p tsconfig.server.build.json && esbuild server/drivers/agui.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist-server/drivers/agui.js && node scripts/copy-deepseek-assets.mjs",
+    "build:server": "tsc -p tsconfig.server.build.json && esbuild server/drivers/agui.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist-server/drivers/agui.js && node scripts/copy-deepseek-assets.mjs && node scripts/prepare-host-cua.mjs",
     "build:speech": "node electron/build-speech-helper.mjs",
     "build:cua": "node scripts/prepare-cua.mjs",
     "build:updater": "node scripts/bundle-updater.mjs",

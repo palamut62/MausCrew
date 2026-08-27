@@ -117,6 +117,13 @@ export function saveConfig(patch) {
         disk.aguiAgents = patch.aguiAgents;
     if (patch.mcpServers)
         disk.mcpServers = patch.mcpServers;
+    if (patch.sharedWorkspacePath !== undefined) {
+        const sharedWorkspacePath = patch.sharedWorkspacePath.trim();
+        if (sharedWorkspacePath)
+            disk.sharedWorkspacePath = sharedWorkspacePath;
+        else
+            delete disk.sharedWorkspacePath;
+    }
     mkdirSync(DATA_DIR, { recursive: true });
     writeFileAtomic(p, JSON.stringify(disk, null, 2), { mode: 0o600 });
 }
