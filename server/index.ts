@@ -324,7 +324,7 @@ store.seedIfEmpty();
  * paired phone has even less business holding provider session identifiers
  * than the desktop window did. Stripped here rather than at each call site
  * so a new broadcast cannot forget. */
-const wireTask = ({ resumeCursors, ...task }: TaskRecord) => task;
+const wireTask = ({ resumeCursors, lastInstanceId, ...task }: TaskRecord) => task;
 
 const wireBot = (bot: NonNullable<ReturnType<typeof store.bot>>) => {
   const { resumeCursors, tasks, ...rest } = bot;
@@ -1292,7 +1292,14 @@ async function startTurn(
   // an engine change, so it is replayed inline exactly as a rewind replays it.
   // This is what makes "carry on where you left off" true across providers
   // rather than only within one CLI's memory.
-  const handedOver = Boolean(opts?.overrideInstanceId);
+  // Provider-native cursors are only an optimisation. MausCrew owns the
+  // conversation. If the user changes this bot's engine (including changing
+  // away and later back), replay the persisted MausCrew history and refuse
+  // the stale provider cursor. This keeps memory attached to the bot rather
+  // than whichever CLI happened to answer last.
+  const handedOver = Boolean(opts?.overrideInstanceId) || (
+    Boolean(task.lastInstanceId) && task.lastInstanceId !== instanceId
+  );
   const needsHistoryInline = (rewound || handedOver) && instance.driverKind !== "grok" && transcript.length > 0;
   const turnText = needsHistoryInline
       ? [
@@ -1599,6 +1606,7 @@ async function startTurn(
             : ""),
         integrations,
       });
+      store.setTaskInstance(bot.id, threadId, instanceId);
       // dispatched: the rewind is spent, and the old cursors are dead
       if (rewound) store.patchBot(bot.id, { rewound: false, resumeCursors: {} });
       if (previewBoxId) startScreenPoller(bot.id, previewBoxId);

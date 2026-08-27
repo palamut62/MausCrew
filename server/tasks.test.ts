@@ -79,6 +79,24 @@ describe("tasks", () => {
     expect(store.activeTask(bot.id)!.resumeCursors.claude).toBe("session-two");
   });
 
+  it("remembers the last engine per task so provider changes can replay bot history", async () => {
+    const { store } = await freshStore();
+    const bot = store.createBot();
+    const first = bot.threadId;
+    store.setTaskInstance(bot.id, first, "claude");
+
+    const second = store.createTask(bot.id)!;
+    store.setTaskInstance(bot.id, second.threadId, "codex");
+
+    expect(store.taskByThread(bot.id, first)?.lastInstanceId).toBe("claude");
+    expect(store.taskByThread(bot.id, second.threadId)?.lastInstanceId).toBe("codex");
+
+    const { Store } = await import("./store.ts");
+    const reloaded = new Store(() => ({ instanceId: "claude", model: "m" }));
+    expect(reloaded.taskByThread(bot.id, first)?.lastInstanceId).toBe("claude");
+    expect(reloaded.taskByThread(bot.id, second.threadId)?.lastInstanceId).toBe("codex");
+  });
+
   it("names a task after the first thing you asked it", async () => {
     const { store, UNTITLED_TASK, titleFromMessage } = await freshStore();
     const bot = store.createBot();

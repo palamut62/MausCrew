@@ -139,6 +139,11 @@ export interface TaskRecord {
   createdAt: number;
   /** provider-native continuation per instance, for THIS task only */
   resumeCursors: Record<string, unknown>;
+  /** Engine that most recently accepted a turn for this task. This belongs
+   * to MausCrew, not to any provider: when it changes, the new engine must
+   * receive the bot's persisted conversation instead of resuming one of its
+   * own stale native sessions. */
+  lastInstanceId?: string;
   /** Everything older than the sent transcript, folded into prose. A resume
    * cursor continues a session the engine still holds; this survives that
    * session being lost, and it is what the bot is told it already knows. */
@@ -416,16 +421,30 @@ export class Store {
     // bots saved before tasks existed have one endless thread; adopt it as
     // their first task so nothing is lost and nothing special-cases it
     for (const b of this.bots) {
-      if (b.tasks?.length) continue;
-      b.tasks = [
-        {
-          threadId: b.threadId,
-          title: this.firstUserLine(b.threadId) ?? UNTITLED_TASK,
-          createdAt: b.createdAt,
-          resumeCursors: b.resumeCursors ?? {},
-        },
-      ];
+      if (!b.tasks?.length) {
+        b.tasks = [
+          {
+            threadId: b.threadId,
+            title: this.firstUserLine(b.threadId) ?? UNTITLED_TASK,
+            createdAt: b.createdAt,
+            resumeCursors: b.resumeCursors ?? {},
+          },
+        ];
+        botsMigrated = true;
+      }
+      // Before lastInstanceId existed, the selected engine is the best
+      // available record of which provider owns the native session. Seed
+      // only tasks with history; an untouched task has nothing to replay.
+      for (const task of b.tasks) {
+        const hasUserHistory = this.messagesFor(task.threadId).some(
+          (message) => message.role === "user" && message.kind === "text" && message.text?.trim(),
+        );
+        if (task.lastInstanceId || !hasUserHistory) continue;
+        task.lastInstanceId = b.modelSelection.instanceId;
+        botsMigrated = true;
+      }
     }
+    if (botsMigrated) this.saveBots();
   }
 
   private saveBots() {
@@ -742,6 +761,13 @@ export class Store {
     // The legacy mirror follows the task visible in chat, never a detached
     // routine task working in the background.
     if (!threadId || bot.threadId === threadId) bot.resumeCursors[instanceId] = cursor;
+    this.saveBots();
+  }
+
+  setTaskInstance(botId: string, threadId: string, instanceId: string): void {
+    const task = this.taskByThread(botId, threadId);
+    if (!task || task.lastInstanceId === instanceId) return;
+    task.lastInstanceId = instanceId;
     this.saveBots();
   }
 
