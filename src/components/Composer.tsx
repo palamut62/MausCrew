@@ -142,8 +142,9 @@ export function Composer({
     });
   };
 
-  // One message may be queued while the bot works; it auto-sends the moment
-  // the turn settles. Enter during a turn queues instead of silently dying.
+  // Rooms still serialize member turns here. A direct bot message uses the
+  // server-side steer queue so it can interrupt the live turn and survive
+  // closing this window while the local harness keeps running.
   const [queued, setQueued] = useState<string | null>(null);
   // a chip on its own is a message: the send control has to appear for it
   const hasContent = Boolean(text.trim()) || attachments.length > 0;
@@ -157,7 +158,12 @@ export function Composer({
       return;
     }
     if (busy) {
-      setQueued(t);
+      if (bot) {
+        dispatch({ type: "steer", botId: bot.id, text: t });
+        track("message_sent", { redirected: true, driver: bot.modelSelection?.instanceId });
+      } else {
+        setQueued(t);
+      }
       setText("");
       setAttachments([]);
       return;
@@ -404,7 +410,9 @@ export function Composer({
               : recording
               ? "Listening…"
               : busy
-                ? `${busyName} is working — Enter queues your message`
+                ? bot
+                  ? `${busyName} is working — Enter redirects the task`
+                  : `${busyName} is working — Enter queues your message`
                 : group
                   ? `Message ${group.name} — ${groupComposerHint(group, members ?? [])}`
                   : `Message ${bot?.name ?? ""}`
@@ -443,8 +451,8 @@ export function Composer({
         {hasContent && (
           <button
             onClick={send}
-            aria-label={busy ? "Queue message" : "Send message"}
-            title={busy ? "Queue — sends when the bot finishes" : "Send"}
+            aria-label={busy ? (bot ? "Redirect task" : "Queue message") : "Send message"}
+            title={busy ? (bot ? "Redirect — stops the current turn and applies this instruction" : "Queue — sends when the bot finishes") : "Send"}
             className={cn(
               "flex size-8 shrink-0 items-center justify-center rounded-md",
               busy ? "bg-inset text-ink-secondary hover:bg-raised-hover" : "bg-white text-black hover:bg-white/90",

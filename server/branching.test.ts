@@ -223,4 +223,33 @@ posixOnly("conversation branching e2e (fake ACP fleet)", () => {
     },
     45_000,
   );
+
+  it(
+    "interrupts a live turn and starts a redirected instruction on the same thread",
+    async () => {
+      const created = (await api("POST", "/api/bots")).body.bot;
+      await api("PATCH", `/api/bots/${created.id}`, {
+        modelSelection: { instanceId: "hang", model: "fake-model" },
+      });
+
+      expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "old priority" })).status).toBe(202);
+      await waitFor(async () => (await getBot(created.id)).busy === true, "the old turn to start");
+
+      const redirected = await api("POST", `/api/bots/${created.id}/steer`, { text: "new priority" });
+      expect(redirected.status).toBe(202);
+      expect(redirected.body).toMatchObject({ redirected: true, position: 1 });
+
+      await waitFor(async () => {
+        const bot = await getBot(created.id);
+        return bot.busy && bot.messages.some((message: Msg) => message.role === "user" && message.text === "new priority");
+      }, "the redirected turn to start", 20_000);
+
+      const bot = await getBot(created.id);
+      expect(bot.messages.filter((message: Msg) => message.text === "old priority")).toHaveLength(1);
+      expect(bot.messages.filter((message: Msg) => message.text === "new priority")).toHaveLength(1);
+      expect((await api("POST", `/api/bots/${created.id}/interrupt`)).status).toBe(200);
+      await waitFor(async () => (await getBot(created.id)).busy === false, "the redirected turn to stop", 20_000);
+    },
+    45_000,
+  );
 });

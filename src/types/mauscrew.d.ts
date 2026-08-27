@@ -76,6 +76,11 @@ declare global {
       openInstallTerminal?(command: string): Promise<boolean>;
       /** Native directory picker for a bot's coding workspace. */
       chooseWorkspace?(): Promise<string | null>;
+      /** Start the packaged desktop app when the user signs in. */
+      startup?: {
+        get(): Promise<{ available: boolean; enabled: boolean }>;
+        set(enabled: boolean): Promise<{ available: boolean; enabled: boolean }>;
+      };
       /** Save a provider credential through Electron's OS-backed store. */
       setCredential?(name: "composioApiKey" | `aguiAuth:${string}` | `mcpEnv:${string}:${string}`, value: string): Promise<ConfigStatus>;
       /** In-app auto-update (packaged app only; dormant in dev). onState
