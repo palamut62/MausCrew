@@ -3,6 +3,7 @@ node_modules
 dist
 dist-electron
 dist-native
+dist-server/host-cua/
 *.local
 .DS_Store
 *.tsbuildinfo
