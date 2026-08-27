@@ -806,14 +806,17 @@ describe("harness HTTP API", () => {
     expect(array.body.error).toContain("opencodeGo");
   });
 
-  it("never hands a client the provider session cursors", async () => {
+  it("never hands a client provider-native task bookkeeping", async () => {
     // resumeCursors is the harness's own bookkeeping. It reached clients for
     // a long time as harmless noise; once a phone is a client it is provider
     // session state leaving the machine, so nothing carrying a bot may have it.
     const listed = await api("GET", "/api/bots");
     for (const bot of listed.body.bots) {
       expect(bot).not.toHaveProperty("resumeCursors");
-      for (const task of bot.tasks ?? []) expect(task).not.toHaveProperty("resumeCursors");
+      for (const task of bot.tasks ?? []) {
+        expect(task).not.toHaveProperty("resumeCursors");
+        expect(task).not.toHaveProperty("lastInstanceId");
+      }
     }
 
     const created = await api("POST", "/api/bots");
@@ -828,6 +831,7 @@ describe("harness HTTP API", () => {
       for (const t of task.body.bot.tasks ?? []) expect(t).not.toHaveProperty("resumeCursors");
       // the task alone, not just the bot it came attached to
       expect(task.body.task).not.toHaveProperty("resumeCursors");
+      expect(task.body.task).not.toHaveProperty("lastInstanceId");
       const renamed = await api("PATCH", `/api/bots/${botId}/tasks/${task.body.task.threadId}`, {
         title: "Cursorless task",
       });
