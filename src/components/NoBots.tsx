@@ -9,7 +9,7 @@
 // opens it, which is the whole first run: the app is worth something once one
 // teammate exists, and the fastest way to that is to offer a few.
 import { useState } from "react";
-import { Plus } from "@phosphor-icons/react";
+import { Plus, Robot } from "@phosphor-icons/react";
 import { MausAvatar } from "./Avatar";
 import { Spin } from "./Spin";
 import { api, useStore, type Bot } from "@/state/store";
@@ -66,7 +66,7 @@ const STARTERS: Starter[] = [
   },
 ];
 
-export function NoBots() {
+export function NoBots({ onBrowseDirectory }: { onBrowseDirectory: () => void }) {
   const { state, dispatch } = useStore();
   const [creating, setCreating] = useState<string | null>(null);
 
@@ -153,15 +153,27 @@ export function NoBots() {
           ))}
         </div>
 
-        <button
-          type="button"
-          disabled={Boolean(creating)}
-          onClick={() => void create()}
-          className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-hairline px-4 py-3 text-[13px] font-medium text-ink-secondary transition-colors hover:border-accent/50 hover:text-ink disabled:opacity-50"
-        >
-          {creating === "blank" ? <Spin size={13} weight="fill" /> : <Plus size={15} weight="bold" />}
-          Start from scratch
-        </button>
+        <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
+          <button
+            type="button"
+            disabled={Boolean(creating)}
+            onClick={() => void create()}
+            className="flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-hairline px-4 py-3 text-[13px] font-medium text-ink-secondary transition-colors hover:border-accent/50 hover:text-ink disabled:opacity-50"
+          >
+            {creating === "blank" ? <Spin size={13} weight="fill" /> : <Plus size={15} weight="bold" />}
+            Start from scratch
+          </button>
+          {/* The four starters above are a taste; the directory is the rest of
+            * the menu, and an empty app is exactly when it is worth offering. */}
+          <button
+            type="button"
+            onClick={onBrowseDirectory}
+            className="flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-hairline px-4 py-3 text-[13px] font-medium text-ink-secondary transition-colors hover:border-accent/50 hover:text-ink"
+          >
+            <Robot size={15} weight="bold" />
+            Browse ready-made bots
+          </button>
+        </div>
       </div>
     </main>
   );

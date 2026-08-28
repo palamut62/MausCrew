@@ -1,8 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { Spin } from "./Spin";
-import { ArrowLeft, ArrowRight, ArrowSquareOut, Check, MagnifyingGlass, Robot, X } from "@phosphor-icons/react";
+import { ArrowLeft, ArrowRight, ArrowSquareOut, Check, MagnifyingGlass, Plus, Robot, X } from "@phosphor-icons/react";
 import { api, useStore, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
+
+interface DirectorySource {
+  kind: string;
+  url: string;
+}
 
 interface DirectoryBot {
   slug: string;
@@ -12,6 +17,17 @@ interface DirectoryBot {
   prompt: string;
   contributor: string;
   detailUrl: string;
+  /** ISO timestamp. Optional: the directory has not always sent one. */
+  addedAt?: string | null;
+  sources?: DirectorySource[];
+}
+
+/** The directory's own date, shown as the reader's date. An unparseable value
+ * is not worth a broken line in the UI — drop it instead. */
+function addedOn(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? null : date.toLocaleDateString();
 }
 
 interface DirectoryResponse {
@@ -121,22 +137,41 @@ export function BotDirectoryPanel({ onClose }: { onClose: () => void }) {
             {loading ? (
               <div className="flex items-center justify-center gap-2 py-12 text-[13px] text-ink-secondary"><Spin size={15} weight="fill" /> Loading directory...</div>
             ) : result?.bots.length ? result.bots.map((bot) => (
-              <button key={bot.slug} onClick={() => setSelected(bot)} className={cn("block w-full border-b border-hairline px-4 py-3 text-left", selected?.slug === bot.slug ? "bg-raised" : "bg-card hover:bg-raised/60")}>
-                <div className="flex items-start justify-between gap-3"><span className="text-[14px] font-semibold text-ink">{bot.name}</span><span className="shrink-0 rounded-full bg-inset px-2 py-0.5 font-mono text-[10px] text-ink-secondary">{bot.category}</span></div>
-                <p className="mt-1 line-clamp-2 text-[12px] leading-5 text-ink-secondary">{bot.prompt}</p>
-                {bot.integrations.length > 0 && <div className="mt-2 truncate text-[11px] text-accent">{bot.integrations.join(" · ")}</div>}
-              </button>
+              // Row and add button are siblings, not nested: a button inside a
+              // button is invalid, and the add action must be reachable without
+              // reading the detail pane first.
+              <div key={bot.slug} className={cn("flex items-start gap-2 border-b border-hairline pr-3", selected?.slug === bot.slug ? "bg-raised" : "bg-card hover:bg-raised/60")}>
+                <button onClick={() => setSelected(bot)} aria-current={selected?.slug === bot.slug} className="min-w-0 flex-1 py-3 pl-4 text-left">
+                  <div className="flex items-start justify-between gap-3"><span className="text-[14px] font-semibold text-ink">{bot.name}</span><span className="shrink-0 rounded-full bg-inset px-2 py-0.5 font-mono text-[10px] text-ink-secondary">{bot.category}</span></div>
+                  <p className="mt-1 line-clamp-2 text-[12px] leading-5 text-ink-secondary">{bot.prompt}</p>
+                  {bot.integrations.length > 0 && <div className="mt-2 truncate text-[11px] text-accent">{bot.integrations.join(" · ")}</div>}
+                </button>
+                <button
+                  type="button"
+                  disabled={Boolean(importing)}
+                  onClick={() => void importBot(bot)}
+                  title={`Add ${bot.name} to my bots`}
+                  aria-label={`Add ${bot.name} to my bots`}
+                  className="mt-3 flex size-8 shrink-0 items-center justify-center rounded-lg border border-hairline bg-panel text-ink-secondary hover:border-accent/50 hover:text-accent disabled:opacity-40"
+                >
+                  {importing === bot.slug ? <Spin size={13} weight="fill" /> : imported === bot.slug ? <Check size={14} weight="bold" className="text-accent" /> : <Plus size={15} weight="bold" />}
+                </button>
+              </div>
             )) : <div className="py-12 text-center text-[13px] text-ink-secondary">No templates found.</div>}
           </section>
 
           <section className="min-h-0 overflow-y-auto bg-card p-5">
             {selected ? <div className="mx-auto max-w-[560px]">
-              <div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-raised px-2.5 py-1 text-[11px] font-medium text-ink-secondary">{selected.category}</span><span className="text-[11px] text-ink-secondary">by @{selected.contributor}</span></div>
+              <div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-raised px-2.5 py-1 text-[11px] font-medium text-ink-secondary">{selected.category}</span><span className="text-[11px] text-ink-secondary">by @{selected.contributor}</span>{addedOn(selected.addedAt) && <span className="text-[11px] text-ink-secondary">· added {addedOn(selected.addedAt)}</span>}</div>
               <h2 className="mt-3 text-[22px] font-semibold text-ink">{selected.name}</h2>
               <h3 className="mt-5 font-mono text-[11px] uppercase tracking-wider text-ink-secondary">Bot instructions</h3>
               <div className="mt-2 whitespace-pre-wrap rounded-xl border border-hairline bg-inset p-4 text-[13px] leading-6 text-ink">{selected.prompt}</div>
               <h3 className="mt-5 font-mono text-[11px] uppercase tracking-wider text-ink-secondary">Suggested apps</h3>
               <div className="mt-2 flex flex-wrap gap-2">{selected.integrations.length ? selected.integrations.map((item) => <span key={item} className="rounded-lg border border-hairline bg-panel px-2.5 py-1.5 text-[12px] text-ink">{item}</span>) : <span className="text-[13px] text-ink-secondary">No connected apps required.</span>}</div>
+              {selected.sources && selected.sources.length > 0 && <>
+                <h3 className="mt-5 font-mono text-[11px] uppercase tracking-wider text-ink-secondary">Where it came from</h3>
+                <div className="mt-2 flex flex-wrap gap-2">{selected.sources.map((source) => <a key={source.url} href={source.url} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 rounded-lg border border-hairline bg-panel px-2.5 py-1.5 text-[12px] text-ink hover:border-accent/50">{source.kind} <ArrowSquareOut size={12} weight="bold" className="text-ink-secondary" /></a>)}</div>
+              </>}
               <div className="mt-6 flex flex-wrap items-center gap-3">
                 <button disabled={Boolean(importing)} onClick={() => void importBot(selected)} className="flex min-w-[150px] items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2.5 text-[13px] font-semibold text-white disabled:opacity-60">{importing === selected.slug ? <><Spin size={14} weight="fill" /> Adding...</> : imported === selected.slug ? <><Check size={15} weight="bold" /> Added</> : "Add to my bots"}</button>
                 <a href={selected.detailUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-[12px] text-ink-secondary hover:text-ink">View source <ArrowSquareOut size={13} weight="bold" /></a>

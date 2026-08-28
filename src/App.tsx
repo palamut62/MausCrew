@@ -115,7 +115,7 @@ function Shell() {
       ) : bot ? (
         <ChatView bot={bot} />
       ) : (
-        <NoBots />
+        <NoBots onBrowseDirectory={() => setDirectoryOpen(true)} />
       )}
       {state.settingsOpen && bot && <SettingsPanel bot={bot} />}
       {state.computerOpen && bot && <ComputerPanel bot={bot} />}
