@@ -22,6 +22,7 @@ import { TaskPicker } from "./TaskPicker";
 import { ReactionBar, ReactionChips } from "./Reactions";
 import { SpeakButton } from "./SpeakButton";
 import { CallButton, CallOverlay } from "./CallView";
+import { MobileActions } from "./MobileActions";
 import { cn } from "@/lib/cn";
 import { webhookMessageView } from "@/lib/webhook-message";
 import { StructuredResult } from "./StructuredResult";
@@ -407,10 +408,10 @@ function ActivityChip({ message }: { message: Message }) {
         <button
           onClick={() => dispatch({ type: "select", id: comm.groupId })}
           title={`Open the conversation with ${comm.withName}`}
-          className="flex items-center gap-2 rounded-md border border-hairline bg-panel px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
+          className="flex min-w-0 items-center gap-2 rounded-md border border-hairline bg-panel px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
         >
           <MausAvatar color={comm.withColor} name={comm.withName} size={16} />
-          <span className="max-w-[480px] truncate font-mono tracking-tight">{tool.name}</span>
+          <span className="min-w-0 max-w-[480px] truncate font-mono tracking-tight">{tool.name}</span>
           <CaretRight size={13} weight="bold" />
         </button>
       </div>
@@ -422,7 +423,7 @@ function ActivityChip({ message }: { message: Message }) {
     <div className="flex justify-start">
       <div
         className={cn(
-          "flex items-center gap-2 rounded-md border border-hairline bg-panel px-3 py-1.5 text-[13px]",
+          "flex min-w-0 items-center gap-2 rounded-md border border-hairline bg-panel px-3 py-1.5 text-[13px]",
           failed ? "text-danger" : "text-ink-secondary",
         )}
       >
@@ -433,7 +434,7 @@ function ActivityChip({ message }: { message: Message }) {
         ) : (
           <Check size={13} weight="fill" className="text-success" />
         )}
-        <span className="max-w-[480px] truncate font-mono tracking-tight">{tool.name}</span>
+        <span className="min-w-0 max-w-[480px] truncate font-mono tracking-tight">{tool.name}</span>
       </div>
     </div>
   );
@@ -747,24 +748,26 @@ export function ChatView({ bot }: { bot: Bot }) {
       >
         <button
           onClick={() => dispatch({ type: "toggleSettings" })}
-          className="flex items-center gap-2 rounded-lg px-1 py-1 hover:bg-raised/50"
+          className="flex min-w-0 items-center gap-2 rounded-lg px-1 py-1 hover:bg-raised/50"
           title="Bot settings"
           style={noDrag}
         >
           <MausAvatar color={bot.color} name={bot.name} seed={bot.id} shape={bot.shape} size={22} />
-          <span className="text-[15px] font-semibold text-ink">{bot.name}</span>
+          <span className="min-w-0 truncate text-[15px] font-semibold text-ink">{bot.name}</span>
+          {/* The badge is a label, not a control, and it is the first thing
+              worth dropping when a phone header runs out of room. */}
           {bot.chiefOfStaff && (
-            <span className="flex items-center gap-1 rounded-md bg-accent/12 px-2 py-0.5 font-mono text-[11px] font-medium tracking-tight text-accent">
+            <span className="flex shrink-0 items-center gap-1 rounded-md bg-accent/12 px-2 py-0.5 font-mono text-[11px] font-medium tracking-tight text-accent max-sm:hidden">
               <Crown size={11} weight="fill" /> Chief of Staff
             </span>
           )}
-          {bot.busy && <Spin size={14} weight="fill" className="text-accent" />}
+          {bot.busy && <Spin size={14} weight="fill" className="shrink-0 text-accent" />}
         </button>
-        <div className="flex items-center gap-2" style={noDrag}>
+        <div className="flex shrink-0 items-center gap-2" style={noDrag}>
           {bot.busy && (
             <button
               onClick={() => dispatch({ type: "interrupt", botId: bot.id })}
-              className="flex items-center gap-1.5 rounded-md border border-hairline bg-raised/60 px-2.5 py-1 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
+              className="flex items-center gap-1.5 rounded-md border border-hairline bg-raised/60 px-2.5 py-1 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink max-sm:hidden"
               title="Stop this turn"
             >
               <Square size={12} weight="fill" />
@@ -773,19 +776,24 @@ export function ChatView({ bot }: { bot: Bot }) {
           )}
           <span className="contents max-xl:hidden">
             <TaskPicker bot={bot} />
-            <ModelPicker bot={bot} />
             <CallButton bot={bot} />
           </span>
+          {/* Choosing a provider is the most-used control in the app, so it
+              stays in the header at every width — below xl it opens as a
+              bottom sheet instead of a 320px dropdown. Everything else that
+              used to be hidden below xl moved into the ⋯ sheet. */}
+          <ModelPicker bot={bot} />
           <button
             onClick={() => dispatch({ type: "toggleComputer" })}
             className={cn(
-              "rounded-md p-1.5 hover:bg-raised",
+              "flex size-10 items-center justify-center rounded-md hover:bg-raised max-xl:hidden",
               state.computerOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
             )}
             title="Bot's computer"
           >
             <Monitor size={18} weight={state.computerOpen ? "fill" : "bold"} />
           </button>
+          <MobileActions bot={bot} className="xl:hidden" />
         </div>
       </div>
 

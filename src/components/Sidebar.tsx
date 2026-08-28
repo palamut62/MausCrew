@@ -2,7 +2,7 @@ import { track } from "@/lib/analytics";
 import { Spin } from "./Spin";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowClockwise, ArrowLineDown, BellRinging, CalendarDots, CaretDown, CaretRight, Check, ClipboardText, Copy, Crown, EyeSlash, FileArrowUp, FolderPlus, Gear, MagnifyingGlass, Pencil, Plus, PushPin, PushPinSlash, PuzzlePiece, Robot as BotIcon, Trash, Users } from "@phosphor-icons/react";
+import { ArrowClockwise, ArrowLineDown, BellRinging, CalendarDots, CaretDown, CaretRight, Check, ClipboardText, Copy, Crown, EyeSlash, FileArrowUp, FolderPlus, Gear, MagnifyingGlass, Pencil, Plus, PushPin, PushPinSlash, PuzzlePiece, Robot as BotIcon, Trash, Users, X } from "@phosphor-icons/react";
 import { api, useStore, formatTime, visibleMessages, type Bot, type Group, type Message } from "@/state/store";
 import { MausAvatar, InitialsAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot-motion";
@@ -1028,6 +1028,10 @@ export function Sidebar({ open, onClose, onOpenDirectory }: { open: boolean; onC
         // silently reparents NewRoomPanel's overlay and the "+" menu backdrop on
         // desktop.
         "max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:z-40",
+        // A 280px drawer leaves a 80px sliver of chat on a 360px phone — too
+        // narrow to read, wide enough to look like a mistake. Take most of
+        // the screen and keep a strip of backdrop to tap on.
+        "max-md:w-[min(86vw,340px)] max-md:shadow-[0_0_40px_rgba(0,0,0,0.5)]",
         "max-md:transition-transform max-md:duration-200",
         open ? "max-md:translate-x-0" : "max-md:-translate-x-full",
       )}
@@ -1040,7 +1044,22 @@ export function Sidebar({ open, onClose, onOpenDirectory }: { open: boolean; onC
         className="flex h-[52px] items-center justify-between px-4 pb-1 pt-3.5"
         style={macInset ? ({ WebkitAppRegion: "drag" } as React.CSSProperties) : undefined}
       >
-        {macInset ? <div className="w-14" /> : <div />}
+        {macInset ? (
+          <div className="w-14" />
+        ) : (
+          // On a phone the drawer covers the chat, so it needs its own way
+          // back. Above md it is a permanent column with nothing to close —
+          // invisible rather than hidden, because it is also the spacer that
+          // justify-between uses to push the "+" to the right edge.
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close bot list"
+            className="-ml-2 flex size-10 items-center justify-center rounded-lg text-ink-secondary hover:bg-raised hover:text-ink md:invisible"
+          >
+            <X size={18} weight="bold" />
+          </button>
+        )}
         <div
           className="relative"
           style={macInset ? ({ WebkitAppRegion: "no-drag" } as React.CSSProperties) : undefined}
@@ -1174,7 +1193,7 @@ export function Sidebar({ open, onClose, onOpenDirectory }: { open: boolean; onC
       </div>
 
       {/* Footer */}
-      <div className="border-t border-hairline/70 px-3 pb-3 pt-2">
+      <div className="border-t border-hairline/70 px-3 pb-[max(0.75rem,var(--safe-bottom))] pt-2">
         <SidebarUpdateCard />
         <button
           onClick={() => dispatch({ type: "showRoutines" })}
@@ -1209,8 +1228,9 @@ export function Sidebar({ open, onClose, onOpenDirectory }: { open: boolean; onC
           <UpdateButton />
           <button
             onClick={() => dispatch({ type: "toggleAppSettings" })}
-            className="rounded-md p-2 text-ink-secondary hover:bg-raised hover:text-ink"
+            className="flex size-10 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink"
             title="App settings"
+            aria-label="App settings"
           >
             <Gear size={18} weight="bold" />
           </button>

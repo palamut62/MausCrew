@@ -368,7 +368,7 @@ export function SettingsModal() {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-6 backdrop-blur-[2px]"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 backdrop-blur-[2px] max-md:p-0 md:p-6"
       onMouseDown={(e) => e.target === e.currentTarget && dispatch({ type: "toggleAppSettings", open: false })}
     >
       <div
@@ -380,7 +380,10 @@ export function SettingsModal() {
         className="animate-pop-in flex h-[calc(100dvh-3rem)] w-full max-w-[1100px] overflow-hidden rounded-2xl border border-hairline bg-panel shadow-[0_24px_80px_rgba(0,0,0,0.55)] outline-none max-md:h-full max-md:flex-col max-md:rounded-none"
       >
         {/* section nav */}
-        <nav className="flex w-[210px] shrink-0 flex-col gap-1 border-r border-hairline bg-card/35 p-3 max-md:w-full max-md:flex-row max-md:overflow-x-auto max-md:border-r-0 max-md:border-b">
+        {/* Below md this is a horizontal, scrollable tab strip. It claims the
+            top inset itself: the dialog is `fixed`, so it is laid out against
+            the viewport and never sees #root's safe-area padding. */}
+        <nav className="flex w-[210px] shrink-0 flex-col gap-1 border-r border-hairline bg-card/35 p-3 max-md:w-full max-md:flex-row max-md:overflow-x-auto max-md:border-r-0 max-md:border-b max-md:pt-[max(0.75rem,env(safe-area-inset-top))]">
           <div id="app-settings-title" className="px-2 pb-2 pt-1 text-[15px] font-semibold text-ink max-md:hidden">
             Settings
           </div>
@@ -391,6 +394,9 @@ export function SettingsModal() {
               aria-current={section === id ? "page" : undefined}
               className={cn(
                 "flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[14px]",
+                // In the mobile tab strip a label must not be squeezed to a
+                // vertical sliver by the tabs beside it.
+                "max-md:min-h-[44px] max-md:shrink-0 max-md:whitespace-nowrap",
                 section === id ? "bg-raised text-ink" : "text-ink-secondary hover:bg-raised/50 hover:text-ink",
               )}
             >
@@ -420,13 +426,13 @@ export function SettingsModal() {
             <button
               onClick={() => dispatch({ type: "toggleAppSettings", open: false })}
               aria-label="Close settings"
-              className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+              className="-mr-2 flex size-10 shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink"
             >
               <X size={18} weight="bold" />
             </button>
           </div>
 
-          <div className="flex flex-1 flex-col gap-5 overflow-y-auto px-8 pb-8 max-md:px-5 max-md:pb-5">
+          <div className="flex flex-1 flex-col gap-5 overflow-y-auto px-8 pb-8 max-md:px-5 max-md:pb-[max(1.25rem,env(safe-area-inset-bottom))]">
             {section === "general" && (
               <>
                 <Card title="Profile" subtitle="Shown in the sidebar. Saved as you go.">

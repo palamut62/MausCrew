@@ -79,11 +79,11 @@ const Transcript = memo(function Transcript({
             <div className="flex justify-start">
               <div
                 className={cn(
-                  "flex items-center gap-2 rounded-md border border-hairline bg-panel px-3 py-1.5 text-[13px]",
+                  "flex min-w-0 items-center gap-2 rounded-md border border-hairline bg-panel px-3 py-1.5 text-[13px]",
                   m.tool.ok === false ? "text-danger" : "text-ink-secondary",
                 )}
               >
-                <span className="max-w-[480px] truncate font-mono">{m.tool.name}</span>
+                <span className="min-w-0 max-w-[480px] truncate font-mono">{m.tool.name}</span>
               </div>
             </div>
           ) : m.kind === "text" && m.text ? (
@@ -207,6 +207,9 @@ export function GroupView({ group }: { group: Group }) {
     [group.memberIds, state.bots],
   );
   const speaker = members.find((b) => b.id === group.busyBotId);
+  // Mirrors the max-sm:hidden rule on the header roster below: the working
+  // bot is never one of the faces that gets folded into the "+N".
+  const hiddenBelowSm = members.filter((b, index) => index >= 2 && group.busyBotId !== b.id).length;
 
   useEffect(() => setFollow(true), [group.id]);
   useEffect(() => setBulletinDraft(group.bulletin), [group.id, group.bulletin]);
@@ -243,16 +246,21 @@ export function GroupView({ group }: { group: Group }) {
         )}
         style={drag}
       >
-        <span className="text-[15px] font-semibold text-ink">{group.name}</span>
-        <div className="flex items-center gap-1.5" style={noDrag}>
+        <span className="min-w-0 truncate text-[15px] font-semibold text-ink">{group.name}</span>
+        <div className="flex shrink-0 items-center gap-1.5" style={noDrag}>
           <GroupCallButton group={group} members={members} />
           {!group.dm && <DefaultResponderSelect group={group} members={members} />}
-          {members.map((b) => (
+          {/* Every member's face plus a lead picker plus a call button does
+              not fit a 375px header. Below sm the roster collapses to the
+              working bot and a count — the full list is in the room's own
+              members panel either way. */}
+          {members.map((b, index) => (
             <span
               key={b.id}
               title={`${b.name}${group.busyBotId === b.id ? " — working…" : ""}`}
               className={cn(
                 "relative inline-flex rounded-full",
+                index >= 2 && group.busyBotId !== b.id && "max-sm:hidden",
                 group.busyBotId === b.id && "ring-2 ring-accent/50 ring-offset-1 ring-offset-app",
               )}
             >
@@ -262,6 +270,14 @@ export function GroupView({ group }: { group: Group }) {
               )}
             </span>
           ))}
+          {hiddenBelowSm > 0 && (
+            <span
+              className="font-mono text-[11px] tracking-tight text-ink-secondary sm:hidden"
+              title={members.map((b) => b.name).join(", ")}
+            >
+              +{hiddenBelowSm}
+            </span>
+          )}
         </div>
       </div>
 

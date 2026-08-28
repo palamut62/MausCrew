@@ -94,8 +94,8 @@ export function BotDirectoryPanel({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-3 backdrop-blur-sm sm:p-5" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="directory-title" className="animate-pop-in flex h-[min(820px,calc(100dvh-1.5rem))] w-full max-w-[980px] flex-col overflow-hidden rounded-xl border border-hairline bg-panel">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 backdrop-blur-sm max-md:p-0 md:p-5" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="directory-title" className="animate-pop-in flex h-[min(820px,calc(100dvh-1.5rem))] w-full max-w-[980px] flex-col overflow-hidden rounded-xl border border-hairline bg-panel max-md:h-full max-md:rounded-none max-md:pb-[var(--safe-bottom)] max-md:pt-[env(safe-area-inset-top)]">
         <header className="flex items-start justify-between gap-4 border-b border-hairline px-5 py-4">
           <div>
             <div className="flex items-center gap-2">

@@ -188,7 +188,7 @@ export function PluginsPanel() {
     // assistive tech, which is far worse than the warning being silenced here.
     // eslint-disable-next-line jsx-a11y/click-events-have-key-events
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-6 backdrop-blur-[2px]"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 backdrop-blur-[2px] max-md:p-0 md:p-6"
       onClick={() => dispatch({ type: "togglePlugins", open: false })}
     >
       {/* stopPropagation keeps a click inside the dialog from reaching the
@@ -201,7 +201,7 @@ export function PluginsPanel() {
         aria-modal="true"
         aria-labelledby="connected-apps-title"
         tabIndex={-1}
-        className="animate-pop-in flex h-[calc(100dvh-3rem)] w-full max-w-[1100px] flex-col overflow-hidden rounded-2xl border border-hairline bg-panel p-8 shadow-[0_24px_80px_rgba(0,0,0,0.55)] max-md:p-5"
+        className="animate-pop-in flex h-[calc(100dvh-3rem)] w-full max-w-[1100px] flex-col overflow-hidden rounded-2xl border border-hairline bg-panel p-8 shadow-[0_24px_80px_rgba(0,0,0,0.55)] max-md:h-full max-md:rounded-none max-md:px-4 max-md:pb-[max(1rem,env(safe-area-inset-bottom))] max-md:pt-[max(1rem,env(safe-area-inset-top))]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">

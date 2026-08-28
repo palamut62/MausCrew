@@ -5,6 +5,7 @@ import { ArrowSquareOut, CalendarDot, CalendarDots, CaretLeft, CaretRight, Check
 import { MausAvatar } from "@/components/Avatar";
 import { WebhooksPanel } from "@/components/WebhooksPanel";
 import { cn } from "@/lib/cn";
+import { useIsMobile } from "@/lib/use-media";
 import { MAUS_COLORS } from "@/lib/colors";
 import type { Routine, RoutineInput, RoutineRun, RoutineRunOn, RoutineRunStatus } from "@/lib/routines";
 import { api, useStore, type Bot } from "@/state/store";
@@ -375,8 +376,8 @@ export function RoutineEditor({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-5 backdrop-blur-sm" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div className="max-h-[90vh] w-full max-w-[620px] overflow-y-auto rounded-xl border border-hairline bg-panel">
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 backdrop-blur-sm max-md:p-0 sm:items-center sm:p-5" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <div className="max-h-[calc(100dvh-env(safe-area-inset-top))] w-full max-w-[620px] overflow-y-auto rounded-t-2xl border border-hairline bg-panel pb-[var(--safe-bottom)] sm:max-h-[90dvh] sm:rounded-xl sm:pb-0">
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-hairline bg-panel/95 px-5 py-4 backdrop-blur">
           <div>
             <div className="text-[17px] font-semibold text-ink">{routine ? "Edit schedule" : "New schedule"}</div>
@@ -531,8 +532,8 @@ function RoutineDetails({ item, bot, onClose, onEdit }: { item: CalendarItem; bo
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-5 backdrop-blur-sm" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div className="w-full max-w-[520px] overflow-hidden rounded-xl border border-hairline bg-panel">
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 backdrop-blur-sm max-md:p-0 sm:items-center sm:p-5" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <div className="max-h-[calc(100dvh-env(safe-area-inset-top))] w-full max-w-[520px] overflow-y-auto rounded-t-2xl border border-hairline bg-panel pb-[var(--safe-bottom)] sm:max-h-[90dvh] sm:rounded-xl sm:pb-0">
         <div className="relative overflow-hidden border-b border-hairline px-5 py-5" style={{ background: `linear-gradient(135deg, color-mix(in srgb, ${MAUS_COLORS[bot.color]} 28%, #111), #111)` }}>
           <button onClick={onClose} className="absolute right-3 top-3 rounded-lg p-2 text-white/60 hover:bg-white/10 hover:text-white"><X size={18} weight="bold" /></button>
           <div className="flex items-center gap-4 pr-10">
@@ -587,8 +588,8 @@ function RoutineDetails({ item, bot, onClose, onEdit }: { item: CalendarItem; bo
 function PausedRoutines({ routines, bots, onClose, onEdit }: { routines: Routine[]; bots: Bot[]; onClose: () => void; onEdit: (routine: Routine) => void }) {
   const { dispatch } = useStore();
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-5 backdrop-blur-sm" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div className="w-full max-w-[560px] overflow-hidden rounded-xl border border-hairline bg-panel">
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 backdrop-blur-sm max-md:p-0 sm:items-center sm:p-5" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <div className="max-h-[calc(100dvh-env(safe-area-inset-top))] w-full max-w-[560px] overflow-y-auto rounded-t-2xl border border-hairline bg-panel pb-[var(--safe-bottom)] sm:max-h-[90dvh] sm:rounded-xl sm:pb-0">
         <div className="flex items-center justify-between border-b border-hairline px-5 py-4">
           <div><div className="text-[17px] font-semibold text-ink">Paused routines</div><div className="mt-0.5 text-[12px] text-ink-secondary">They keep their history and will not create new runs.</div></div>
           <button onClick={onClose} className="rounded-lg p-2 text-ink-secondary hover:bg-raised hover:text-ink"><X size={18} weight="bold" /></button>
@@ -615,8 +616,11 @@ function PausedRoutines({ routines, bots, onClose, onEdit }: { routines: Routine
 export function RoutinesPage() {
   const { state, dispatch } = useStore();
   const [section, setSection] = useState<"calendar" | "webhooks">("calendar");
-  const [viewDays, setViewDays] = useState<1 | 3 | 7>(7);
-  const [anchor, setAnchor] = useState(() => startOfWeek(Date.now()));
+  // A seven-column week is ~50px per day on a phone: unreadable. Open on a
+  // single day there; the Day/3 days/Week switch still works either way.
+  const isMobile = useIsMobile();
+  const [viewDays, setViewDays] = useState<1 | 3 | 7>(() => (isMobile ? 1 : 7));
+  const [anchor, setAnchor] = useState(() => (isMobile ? startOfDay(Date.now()) : startOfWeek(Date.now())));
   const [botFilter, setBotFilter] = useState("all");
   const [editor, setEditor] = useState<Routine | "new" | null>(null);
   const [selected, setSelected] = useState<CalendarItem | null>(null);

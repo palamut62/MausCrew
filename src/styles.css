@@ -53,6 +53,126 @@ body {
   overflow: hidden;
 }
 
+/* ── Mobile shell ───────────────────────────────────────────────────────
+   The app is also a PWA ("MausCrew Remote"), so the browser build has to
+   survive a phone: a viewport that changes height, a notch, a home
+   indicator, and a keyboard that covers the composer.
+
+   dvh handles the collapsing URL bar. It does NOT shrink for the iOS
+   keyboard, so lib/viewport.ts sets --app-height from visualViewport for
+   that case only and removes it again the moment the keyboard closes — dvh
+   is the more reliable of the two whenever it is right at all. The 100%
+   first line is the fallback for browsers without dvh. */
+#root {
+  height: 100%;
+  height: 100dvh;
+  height: var(--app-height, 100dvh);
+  /* The safe-area padding lives here rather than on every panel: each panel
+     is a child of #root, so a phone's notch is cleared once, and on desktop
+     every inset resolves to 0px and nothing moves. */
+  padding-top: env(safe-area-inset-top);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/* Bottom is deliberately NOT padded on #root — the chat has to scroll under
+   the home indicator — so the controls that sit at the bottom edge claim it
+   themselves through this variable. */
+:root {
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+@media (pointer: coarse) {
+  /* iOS Safari zooms the page whenever a focused field is under 16px, and
+     never zooms back out. Every composer/settings input in this app was
+     13–15px, so typing anywhere left the layout scaled and scrolled. */
+  input,
+  textarea,
+  select {
+    font-size: max(16px, 1em);
+  }
+
+  /* No 300ms tap delay, no grey flash on the buttons that make up most of
+     this UI. */
+  button,
+  a,
+  [role="button"],
+  [role="switch"],
+  [role="option"],
+  label {
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+}
+
+@media (max-width: 767px) {
+  /* This UI is dimensioned for a desktop window: metadata at 10–12px,
+     body copy at 13–14px. Held at arm's length on a phone that is the
+     single loudest complaint about the mobile build, and the sizes are
+     spread across ~50 components as arbitrary values.
+
+     Raising the floor here fixes all of them at once and stays honest —
+     the rule only ever grows text, only below md, and the classes it
+     matches are exactly the arbitrary sizes the components use. Unlayered,
+     so it wins over Tailwind's utility layer without !important. */
+  .text-\[9px\],
+  .text-\[9\.5px\],
+  .text-\[10px\],
+  .text-\[10\.5px\],
+  .text-\[11px\],
+  .text-\[11\.5px\] {
+    font-size: 12px;
+  }
+  .text-\[12px\],
+  .text-\[12\.5px\] {
+    font-size: 13px;
+  }
+  .text-\[13px\] {
+    font-size: 14px;
+  }
+  .text-\[13\.5px\],
+  .text-\[14px\] {
+    font-size: 15px;
+  }
+  .text-xs {
+    font-size: 12px;
+  }
+
+  /* Belt and braces with the pointer:coarse rule above. A phone-width
+     viewport is the case that actually zooms on iOS, and a browser that
+     reports a fine pointer at 375px wide (desktop dev tools, a folded
+     device) would otherwise slip past.
+
+     !important because the floor rules right above are class selectors and
+     would win on specificity — and 16px on a focused field is a hard
+     platform constraint, not a preference. */
+  input,
+  textarea,
+  select {
+    font-size: max(16px, 1em) !important;
+  }
+
+  /* A phone scrolls with a finger: momentum inside a panel must not drag
+     the page behind it. */
+  .overflow-y-auto,
+  .overflow-auto {
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+/* Bottom sheets: the mobile stand-in for a desktop dropdown. */
+@keyframes sheet-in {
+  from { transform: translateY(16px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.animate-sheet-in {
+  animation: sheet-in 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-sheet-in { animation: none; }
+}
+
 ::-webkit-scrollbar {
   width: 6px;
 }

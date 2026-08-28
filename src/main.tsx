@@ -3,11 +3,16 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import { RemotePairingPage } from "./components/RemotePairingPage";
 import { installSttCapture } from "./lib/stt/capture";
+import { installViewportHeight } from "./lib/viewport";
 import "./styles.css";
 
 // Windows speech recognition captures in this window (see capture.ts);
 // registering is a no-op wherever the bridge or the tap is absent.
 installSttCapture();
+
+// Keeps --app-height on the real visible height so the composer stays above
+// a phone's keyboard. No-op without visualViewport, where CSS dvh stands.
+installViewportHeight();
 
 function Root() {
   const [authorized, setAuthorized] = useState<boolean | null>(null);

@@ -115,7 +115,8 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
       >
         <button
           onClick={() => dispatch({ type: "toggleSettings", open: false })}
-          className="shrink-0 rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+          className="flex size-10 shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink"
+          aria-label="Back to the conversation"
           style={noDrag}
         >
           <CaretLeft size={18} weight="bold" />
@@ -123,7 +124,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
         <span className="min-w-0 truncate text-[15px] font-semibold text-ink">Settings</span>
         <button
           onClick={() => dispatch({ type: "toggleSettings", open: false })}
-          className="shrink-0 rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+          className="flex size-10 shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink"
           aria-label="Close bot settings"
           style={noDrag}
         >
@@ -131,7 +132,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
         </button>
       </div>
 
-      <div className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-5 pb-5">
+      <div className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-5 pb-[max(1.25rem,var(--safe-bottom))]">
         <div className="flex justify-center py-5">
           <MausAvatar color={bot.color} name={bot.name} seed={bot.id} shape={bot.shape} size={112} />
         </div>
@@ -316,14 +317,14 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
             </button>
           </div>
 
-          <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4">
-            <div>
+          <div className="flex items-center justify-between gap-3 rounded-xl bg-card p-4">
+            <div className="min-w-0">
               <div className="text-[15px] font-medium text-ink">Model</div>
               <div className="mt-0.5 text-[13px] text-ink-secondary">
                 Which provider and model this bot runs on
               </div>
             </div>
-            <ModelPicker bot={bot} />
+            <ModelPicker bot={bot} className="shrink-0" />
           </div>
 
           {bot.usage && (
@@ -467,7 +468,10 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
             <div className="mt-0.5 text-[13px] text-ink-secondary">
               Where this bot's computer runs{bot.computer ? "" : " (currently: auto)"}
             </div>
-            <div className="mt-3 grid grid-cols-4 overflow-hidden rounded-lg border border-hairline">
+            {/* Four columns in a 312px desktop panel is tight; in a
+                full-width phone panel it wrapped "This computer" onto three
+                lines. Two rows of two below sm, the original strip above. */}
+            <div className="mt-3 grid grid-cols-2 overflow-hidden rounded-lg border border-hairline sm:grid-cols-4">
               {(
                 [
                   ["cloud", "Cloud"],
@@ -480,8 +484,10 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                   key={mode}
                   onClick={() => patch({ computer: mode })}
                   className={cn(
-                    "min-h-[52px] min-w-0 break-words px-1 py-2 text-center text-[11.5px] leading-tight",
-                    i > 0 && "border-l border-hairline",
+                    "min-h-[52px] min-w-0 break-words px-2 py-2 text-center text-[11.5px] leading-tight",
+                    i % 2 === 1 && "border-l border-hairline",
+                    i > 1 && "border-t border-hairline sm:border-t-0",
+                    i > 0 && "sm:border-l sm:border-hairline",
                     bot.computer === mode
                       ? "bg-raised text-ink"
                       : "text-ink-secondary hover:bg-raised/60 hover:text-ink",

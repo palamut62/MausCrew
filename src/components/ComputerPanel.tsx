@@ -396,8 +396,9 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
       >
         <button
           onClick={() => dispatch({ type: "toggleSettings", open: true })}
-          className="shrink-0 rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+          className="flex size-10 shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink"
           title="Bot settings"
+          aria-label="Bot settings"
           style={noDrag}
         >
           <Gear size={18} weight="bold" />
@@ -405,7 +406,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
         <span className="min-w-0 truncate text-[15px] font-semibold text-ink">Computer</span>
         <button
           onClick={() => dispatch({ type: "toggleComputer", open: false })}
-          className="shrink-0 rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+          className="flex size-10 shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink"
           aria-label="Close computer panel"
           style={noDrag}
         >
@@ -413,7 +414,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
         </button>
       </div>
 
-      <div className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-5 pb-5">
+      <div className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-5 pb-[max(1.25rem,var(--safe-bottom))]">
           {/* Screen preview */}
           <div className="mb-1.5 mt-2 flex items-center justify-between text-[13px] text-ink-secondary">
             <span>{bot.name}'s screen</span>

@@ -54,41 +54,29 @@ export function CallButton({ bot }: { bot: Bot }) {
   );
 }
 
-export function CallTargetButton({
-  targetId,
-  targetName,
-  voices,
-  onStart,
-}: {
-  targetId: string;
-  targetName: string;
-  voices: Array<string | undefined>;
-  onStart: () => void;
-}) {
-  const { state, dispatch } = useStore();
+/** Whether a call can start right now, and the sentence explaining why not.
+ * Shared with the mobile action sheet, which offers the same call as a row
+ * instead of an icon and has to give the same answer. `active` is passed in
+ * because "unavailable" is only meaningful for a call that has not begun. */
+export function useCallAvailability(voices: Array<string | undefined>, active: boolean) {
+  const { state } = useStore();
   const { capabilities, ready: capabilitiesReady } = useDesktopCapabilities();
-  const active = useOnCall() === targetId;
   const supported = capabilities.dictation.available && Boolean(window.mauscrew?.speechStart);
   const configured = Boolean(state.config?.tts?.configured);
   const voiceReady =
     configured && Boolean(state.config?.tts?.ready || (voices.length > 0 && voices.every((voice) => Boolean(voice))));
   const unavailable = !active && (!capabilitiesReady || !supported || !voiceReady);
   const voiceSetupRequired = capabilitiesReady && supported && !voiceReady;
-  const [helpOpen, setHelpOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const helpId = useId();
-  const label = active
-    ? `Hang up on ${targetName}`
-    : !capabilitiesReady
-      ? "Checking call availability"
-      : !supported
-        ? "Calls need the MausCrew desktop app"
-        : !configured
-          ? "Add an ElevenLabs key in App Settings to make calls"
-          : !voiceReady
-            ? "Pick a voice in App Settings to make calls"
-            : `Call ${targetName}`;
+
+  const shortReason = !capabilitiesReady
+    ? "Checking call availability"
+    : !supported
+      ? "Calls need the MausCrew desktop app"
+      : !configured
+        ? "Add an ElevenLabs key in App Settings to make calls"
+        : !voiceReady
+          ? "Pick a voice in App Settings to make calls"
+          : "";
 
   const reason = !capabilitiesReady
     ? "Checking whether this device can make calls."
@@ -103,6 +91,29 @@ export function CallTargetButton({
               ? "Choose an app voice, or give every room member their own ElevenLabs voice."
               : "Choose an ElevenLabs voice before starting a call."
             : "";
+
+  return { unavailable, voiceSetupRequired, shortReason, reason };
+}
+
+export function CallTargetButton({
+  targetId,
+  targetName,
+  voices,
+  onStart,
+}: {
+  targetId: string;
+  targetName: string;
+  voices: Array<string | undefined>;
+  onStart: () => void;
+}) {
+  const { dispatch } = useStore();
+  const active = useOnCall() === targetId;
+  const { unavailable, voiceSetupRequired, shortReason, reason } = useCallAvailability(voices, active);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const helpId = useId();
+  const label = active ? `Hang up on ${targetName}` : shortReason || `Call ${targetName}`;
 
   useEffect(() => {
     if (!helpOpen) return;

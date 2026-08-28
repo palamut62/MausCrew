@@ -20,6 +20,7 @@ import {
   pendingQuestion,
 } from "./PendingApproval";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
+import { useMediaQuery } from "@/lib/use-media";
 
 /** The active @mention query at the caret: the text between an `@` that
  * starts a word and the caret. null = no mention being typed. */
@@ -48,6 +49,9 @@ export function Composer({
 }) {
   const { state, dispatch } = useStore();
   const { capabilities } = useDesktopCapabilities();
+  // Touch, not width: a soft keyboard is what changes what Enter should do,
+  // and a narrow desktop window still has a real one.
+  const touchKeyboard = useMediaQuery("(pointer: coarse)");
   // Unified target: a 1:1 bot thread or a room. In a room the @ picker
   // offers members plus @everyone; explicit mentions override the room's
   // configured default responder.
@@ -229,7 +233,9 @@ export function Composer({
   };
 
   return (
-    <div className="px-4 pb-4 pt-2">
+    // The bottom edge of a phone belongs to the home indicator; --safe-bottom
+    // is 0px everywhere else, so this is the desktop `pb-4` until it isn't.
+    <div className="px-4 pb-[max(1rem,var(--safe-bottom))] pt-2">
       {speechError && (
         <div className="mx-auto mb-2 max-w-[900px] rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[12px] text-warning">
           {speechError}
@@ -339,7 +345,7 @@ export function Composer({
             htmlFor="mauscrew-attachment-picker"
             aria-label="Attach files"
             title="Attach files"
-            className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-inset text-ink-secondary hover:bg-raised-hover hover:text-ink"
+            className="flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-full bg-inset text-ink-secondary hover:bg-raised-hover hover:text-ink md:size-8"
           >
             <Plus size={20} weight="bold" />
           </label>
@@ -394,8 +400,13 @@ export function Composer({
               onEditLast();
               return;
             }
-            // Shift+Enter inserts a newline; plain Enter sends
-            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+            // Shift+Enter inserts a newline; plain Enter sends.
+            //
+            // Not on a touch keyboard, where the return key is the ONLY way
+            // to type a newline and there is no Shift to hold: there, Enter
+            // breaks the line and the send button sends, like every other
+            // chat app on a phone.
+            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && !touchKeyboard) {
               e.preventDefault();
               send();
             }
@@ -411,14 +422,17 @@ export function Composer({
               ? "Listening…"
               : busy
                 ? bot
-                  ? `${busyName} is working — Enter redirects the task`
-                  : `${busyName} is working — Enter queues your message`
+                  ? `${busyName} is working — sending redirects the task`
+                  : `${busyName} is working — sending queues your message`
                 : group
                   ? `Message ${group.name} — ${groupComposerHint(group, members ?? [])}`
                   : `Message ${bot?.name ?? ""}`
           }
           aria-label={`Message ${group ? group.name : (bot?.name ?? "")}`}
-          className="max-h-40 w-full resize-none self-center bg-transparent py-1 text-[15px] leading-6 text-ink placeholder:text-ink-secondary focus:outline-none"
+          // 16px below md is not a style choice: iOS Safari zooms the whole
+          // page whenever a focused field is smaller, and never zooms back.
+          className="max-h-40 w-full resize-none self-center bg-transparent py-1 text-[16px] leading-6 text-ink placeholder:text-ink-secondary focus:outline-none md:text-[15px]"
+          enterKeyHint={touchKeyboard ? "enter" : "send"}
         />
         {busy && (
           <button
@@ -427,7 +441,7 @@ export function Composer({
               else if (bot) dispatch({ type: "interrupt", botId: bot.id });
             }}
             aria-label="Stop this turn"
-            className="flex size-8 shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink"
+            className="flex size-10 shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink md:size-8"
             title="Stop"
           >
             <Square size={14} weight="fill" />
@@ -438,7 +452,7 @@ export function Composer({
             onClick={toggleMic}
             aria-label={recording ? "Stop dictation" : "Start dictation"}
             className={cn(
-              "flex size-8 shrink-0 items-center justify-center rounded-md",
+              "flex size-10 shrink-0 items-center justify-center rounded-md md:size-8",
               recording
                 ? "animate-pulse bg-danger/20 text-danger"
                 : "bg-white text-black hover:bg-white/90",
@@ -454,7 +468,7 @@ export function Composer({
             aria-label={busy ? (bot ? "Redirect task" : "Queue message") : "Send message"}
             title={busy ? (bot ? "Redirect — stops the current turn and applies this instruction" : "Queue — sends when the bot finishes") : "Send"}
             className={cn(
-              "flex size-8 shrink-0 items-center justify-center rounded-md",
+              "flex size-10 shrink-0 items-center justify-center rounded-md md:size-8",
               busy ? "bg-inset text-ink-secondary hover:bg-raised-hover" : "bg-white text-black hover:bg-white/90",
             )}
           >

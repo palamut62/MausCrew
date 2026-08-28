@@ -1,19 +1,65 @@
 // Emoji reactions — iMessage grammar: a hover bar to give one, small chips
 // under the bubble to show them. `by` is "user" or a member botId; in rooms
 // a bot's own reactions render with its name in the tooltip.
+import { useState } from "react";
+import { Smiley } from "@phosphor-icons/react";
 import { useStore, type Bot, type Message } from "@/state/store";
+import { useIsMobile } from "@/lib/use-media";
+import { Sheet } from "./Sheet";
 import { cn } from "@/lib/cn";
 
 export const REACTION_SET = ["👍", "❤️", "😂", "🎉", "👀"] as const;
 
 export function ReactionBar({ threadId, message }: { threadId: string; message: Message }) {
   const { dispatch } = useStore();
+  // On touch the bar is always visible (there is no hover to reveal it), and
+  // five 44px targets beside a bubble is wider than a phone. Below md it
+  // collapses to one button that opens the same five as a sheet.
+  const isMobile = useIsMobile();
+  const [open, setOpen] = useState(false);
+  const react = (emoji: string) =>
+    dispatch({ type: "toggleReaction", threadId, messageId: message.id, emoji });
+
+  if (isMobile) {
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-label="React to this message"
+          className="flex size-9 shrink-0 items-center justify-center rounded-md text-ink-secondary opacity-0 pointer-coarse:opacity-100 hover:bg-raised hover:text-ink focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100"
+        >
+          <Smiley size={18} weight="bold" />
+        </button>
+        {open && (
+          <Sheet title="React" onClose={() => setOpen(false)}>
+            <div className="flex justify-around py-2">
+              {REACTION_SET.map((emoji) => (
+                <button
+                  key={emoji}
+                  onClick={() => {
+                    react(emoji);
+                    setOpen(false);
+                  }}
+                  aria-label={`React ${emoji}`}
+                  className="flex size-14 items-center justify-center rounded-xl text-[26px] hover:bg-raised"
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
+          </Sheet>
+        )}
+      </>
+    );
+  }
+
   return (
     <div className="flex items-center gap-0.5 rounded-md border border-hairline bg-panel px-1 py-0.5 opacity-0 pointer-coarse:opacity-100 shadow-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
       {REACTION_SET.map((emoji) => (
         <button
           key={emoji}
-          onClick={() => dispatch({ type: "toggleReaction", threadId, messageId: message.id, emoji })}
+          onClick={() => react(emoji)}
           aria-label={`React ${emoji}`}
           className="rounded-md px-1 py-0.5 text-[13px] leading-none hover:bg-raised pointer-coarse:flex pointer-coarse:size-11 pointer-coarse:items-center pointer-coarse:justify-center pointer-coarse:text-[17px]"
         >
