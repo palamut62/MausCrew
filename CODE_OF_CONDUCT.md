@@ -10,6 +10,6 @@ The short version:
 - Assume good faith, especially with first-time contributors, and remember maintainers are people
   with finite time.
 
-Unacceptable behavior can be reported privately to **soni.mil2001@gmail.com**. Reports are handled
-confidentially. Maintainers may edit, remove, or reject contributions and comments that violate this
-code, and may ban repeat offenders.
+Unacceptable behavior can be reported privately to the maintainer,
+[@palamut62](https://github.com/palamut62). Reports are handled confidentially. Maintainers may edit,
+remove, or reject contributions and comments that violate this code, and may ban repeat offenders.
