@@ -6,7 +6,7 @@
 
 **Your own team of AI bots, in a chat app.**
 
-<sub>An open-source version of **Grok Bot** — bring-your-own-agent, local-first, on the models you already have.</sub>
+<sub>Bring your own agent · local-first · runs on the models you already pay for.</sub>
 
 Every bot in the sidebar is a real agent — Claude, Codex, Grok, or DeepSeek Harness running locally under
 the hood — with its own personality, its own model, its own cloud computer, and its own connected apps.
@@ -37,10 +37,10 @@ Talk to them like contacts. Watch them work. Approve what matters.
 
 ## Why
 
-One assistant in one box is the wrong shape for agents. MausCrew is an open-source take on **Grok Bot** —
-it keeps the idea (AI as a *messaging app*: a roster of bots you chat with, each with its own personality,
-memory of its thread, model, computer, and apps) and rebuilds it open, local-first, and on the agents you
-already have:
+One assistant in one box is the wrong shape for agents. Real work is a *roster* — different specialists,
+different models, different machines, each holding the memory of its own thread. So MausCrew gives agents
+the shape we already use for people: a messaging app. Every chat is a bot with its own personality, model,
+computer, and connected apps — and it all runs on your machine, on the agents you already have:
 
 - **Bring your own agents.** Bots run on the `claude`, `codex`, and `grok` CLIs installed on your own machine,
   or on DeepSeek's own runtime via DeepSeek Harness — your existing logins and subscriptions, no new
@@ -331,6 +331,13 @@ events and approval cards; provider credentials and device administration stay
 desktop-only. The harness continues listening only on loopback and rejects every
 remote host other than the exact configured HTTPS origin.
 
+The phone owns its own reconnection — it wakes the stream on resume, resumes
+from a cursor rather than re-downloading transcripts, declines live desktop
+captures unless the computer panel is open, and shows a banner with a retry
+when the gap is real. Notifications go through the service worker while the
+app is open or backgrounded; background push with the app fully closed is not
+implemented.
+
 See [`docs/mobile-remote.md`](docs/mobile-remote.md) for setup, revocation and
 the security boundary.
 
@@ -366,13 +373,12 @@ small; adding a provider is one file in [`server/drivers/`](server/drivers/) plu
 
 ## License
 
-[MIT](LICENSE) © 2026 Umut Çelik and MausCrew contributors. The original OpenMausBot copyright and MIT
-notice are preserved in the license.
+[MIT](LICENSE) © 2026 Umut Çelik and MausCrew contributors. Prior copyright notices carried by earlier
+MIT-licensed code are preserved in the [license file](LICENSE), as that license requires.
 
 Product Owner: [Umut Çelik on X](https://x.com/palamut62) · [GitHub](https://github.com/palamut62)
 
-MausCrew is an independent, open-source project inspired by Grok Bot. It is
-not affiliated with, endorsed by, or associated with xAI; "Grok" is a trademark
-of its respective owner.
-
-MausCrew began as a fork of [OpenMausBot](https://github.com/milind-soni/OpenMausBot).
+MausCrew is an independent project. It is not affiliated with, endorsed by, or associated with Anthropic,
+OpenAI, xAI, DeepSeek, ElevenLabs, Composio, or any other provider it can be pointed at; each product name
+and trademark belongs to its respective owner. Support for an engine means MausCrew can drive the CLI or
+API you already have — nothing more.

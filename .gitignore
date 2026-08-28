@@ -9,7 +9,6 @@ dist-server/host-cua/
 *.tsbuildinfo
 electron/resources/speech-helper
 electron/resources/MausCrew Speech.app
-electron/resources/OpenMausBot Speech.app
 release
 .mauscrew-scratch
 output/
