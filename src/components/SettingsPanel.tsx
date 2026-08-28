@@ -4,6 +4,7 @@ import { api, useStore, type Bot } from "@/state/store";
 import { MausAvatar } from "./Avatar";
 import { MAUS_COLORS, MAUS_COLOR_NAMES } from "@/lib/colors";
 import { ModelPicker } from "./ModelPicker";
+import { TaskPicker } from "./TaskPicker";
 import { cn } from "@/lib/cn";
 import { requestNotificationPermission } from "@/lib/notify";
 import { BotMemory } from "./BotMemory";
@@ -324,6 +325,19 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
               </div>
             </div>
             <ModelPicker bot={bot} />
+          </div>
+
+          {/* The chat header drops this below xl to keep itself readable, and
+              a phone is always below xl — so without a second home here,
+              starting or switching a task was desktop-only for no reason. */}
+          <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4 xl:hidden">
+            <div>
+              <div className="text-[15px] font-medium text-ink">Task</div>
+              <div className="mt-0.5 text-[13px] text-ink-secondary">
+                A separate context on this bot — its own transcript and session
+              </div>
+            </div>
+            <TaskPicker bot={bot} />
           </div>
 
           {bot.usage && (

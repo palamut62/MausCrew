@@ -82,7 +82,7 @@ function ThinkingStrip({ text, active }: { text: string; active: boolean }) {
   }, [text, open]);
   return (
     <div className="flex w-full justify-start">
-      <div className="max-w-[70%] min-w-[200px]">
+      <div className="max-w-[88%] sm:max-w-[70%] sm:min-w-[200px]">
         <button
           onClick={() => setOpen((o) => !o)}
           aria-expanded={open}
@@ -131,7 +131,7 @@ function ErrorRow({
 }) {
   return (
     <div className="flex justify-start">
-      <div className="max-w-[70%] rounded-xl border border-danger/30 bg-danger/10 px-3.5 py-2.5 text-[13.5px] text-danger">
+      <div className="max-w-[88%] sm:max-w-[70%] rounded-xl border border-danger/30 bg-danger/10 px-3.5 py-2.5 text-[13.5px] text-danger">
         <div className="flex items-start gap-2">
           <Warning size={15} weight="bold" className="mt-0.5 shrink-0" />
           <span className="min-w-0 break-words">{message}</span>
@@ -196,7 +196,7 @@ function BubbleEditor({
     if (draft.trim()) onSubmit(draft.trim());
   };
   return (
-    <div className="w-full max-w-[70%] rounded-xl border border-hairline bg-bubble-user px-4 py-3">
+    <div className="w-full max-w-[88%] sm:max-w-[70%] rounded-xl border border-hairline bg-bubble-user px-4 py-3">
       <textarea
         ref={ref}
         value={draft}
@@ -295,7 +295,7 @@ function Bubble({
           className={cn(
             "text-[14px] leading-snug",
             user && webhookView
-              ? "max-w-[70%] overflow-hidden rounded-xl border border-accent bg-card text-ink shadow-[0_10px_30px_rgba(0,0,0,0.18)]"
+              ? "max-w-[88%] sm:max-w-[70%] overflow-hidden rounded-xl border border-accent bg-card text-ink shadow-[0_10px_30px_rgba(0,0,0,0.18)]"
               : user
                 ? "max-w-[72%] rounded-2xl bg-bubble-user px-4 py-2.5 whitespace-pre-wrap text-ink"
                 : "max-w-[78%] rounded-2xl bg-raised px-4 py-3 text-ink",
@@ -303,7 +303,7 @@ function Bubble({
           title={new Date(message.at).toLocaleString()}
         >
           {user && webhookView ? (
-            <div className="min-w-[300px] max-w-[520px]">
+            <div className="min-w-0 max-w-[520px] sm:min-w-[300px]">
               <div className="flex items-center gap-2 border-b border-accent/15 bg-accent/[0.055] px-4 py-2.5 font-mono text-[11.5px] font-medium tracking-tight text-accent">
                 <WebhooksLogo size={13} weight="bold" />
                 <span>Webhook task</span>
@@ -519,7 +519,7 @@ function ScreenFrame({ png, mime }: { png: string; mime?: string }) {
       <img
         src={`data:${mime ?? "image/png"};base64,${png}`}
         alt="Bot's screen"
-        className="max-w-[70%] rounded-xl border border-hairline"
+        className="max-w-[88%] sm:max-w-[70%] rounded-xl border border-hairline"
       />
     </div>
   );

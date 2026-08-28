@@ -32,6 +32,28 @@ self.addEventListener("activate", (event) =>
   ),
 );
 
+// A notification shown through this worker (the installed PWA path — see
+// src/lib/notify.ts) has no page-side onclick, so the click comes back here.
+// Focus an existing window rather than opening a second one, and tell it
+// which bot to select; opening a bare "/" would land the user on whatever
+// chat they had last and hide the request they just tapped.
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const botId = event.notification.data && event.notification.data.botId;
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((windows) => {
+      const open = windows.find((client) => client.url.startsWith(self.registration.scope));
+      if (open) {
+        if (botId) open.postMessage({ type: "notification-click", botId });
+        return open.focus();
+      }
+      // Nothing running: the fresh page cannot receive a postMessage, so the
+      // bot travels in the URL and the app reads it on load.
+      return self.clients.openWindow(botId ? `/?bot=${encodeURIComponent(botId)}` : "/");
+    }),
+  );
+});
+
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   const { pathname } = new URL(event.request.url);

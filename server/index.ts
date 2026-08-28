@@ -2664,9 +2664,15 @@ const server = createServer(async (req, res) => {
       }
 
       sseClients.add(client);
+      // A real frame rather than an SSE comment: a comment keeps proxies and
+      // sockets warm, but EventSource never surfaces one, so a phone whose
+      // socket died while it was asleep had no way to tell a live stream from
+      // a suspended one. This gives the client a heartbeat it can time out on.
+      // Deliberately outside the sequence: it carries no state, so it must
+      // never advance a resume cursor or occupy a replay slot.
       const keepalive = setInterval(() => {
         try {
-          res.write(": keepalive\n\n");
+          res.write(`data: ${JSON.stringify({ kind: "ping" })}\n\n`);
         } catch {}
         // Same backpressure sweep as broadcast(): a stalled client must not
         // survive just because no frames are flowing to give it the shove.

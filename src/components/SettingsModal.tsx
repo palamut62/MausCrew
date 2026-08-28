@@ -379,8 +379,13 @@ export function SettingsModal() {
         tabIndex={-1}
         className="animate-pop-in flex h-[calc(100dvh-3rem)] w-full max-w-[1100px] overflow-hidden rounded-2xl border border-hairline bg-panel shadow-[0_24px_80px_rgba(0,0,0,0.55)] outline-none max-md:h-full max-md:flex-col max-md:rounded-none"
       >
-        {/* section nav */}
-        <nav className="flex w-[210px] shrink-0 flex-col gap-1 border-r border-hairline bg-card/35 p-3 max-md:w-full max-md:flex-row max-md:overflow-x-auto max-md:border-r-0 max-md:border-b">
+        {/* section nav — hidden on a paired phone, where every section below
+            is a form the server will refuse. See the remote branch of the
+            body for why. */}
+        <nav className={cn(
+          "flex w-[210px] shrink-0 flex-col gap-1 border-r border-hairline bg-card/35 p-3 max-md:w-full max-md:flex-row max-md:overflow-x-auto max-md:border-r-0 max-md:border-b",
+          state.remote && "hidden",
+        )}>
           <div id="app-settings-title" className="px-2 pb-2 pt-1 text-[15px] font-semibold text-ink max-md:hidden">
             Settings
           </div>
@@ -415,7 +420,7 @@ export function SettingsModal() {
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="flex items-center justify-between px-8 pb-4 pt-7 max-md:px-5 max-md:pt-4">
             <span className="text-[18px] font-semibold text-ink">
-              {SECTIONS.find((s) => s.id === section)?.label}
+              {state.remote ? "Settings" : SECTIONS.find((s) => s.id === section)?.label}
             </span>
             <button
               onClick={() => dispatch({ type: "toggleAppSettings", open: false })}
@@ -427,7 +432,25 @@ export function SettingsModal() {
           </div>
 
           <div className="flex flex-1 flex-col gap-5 overflow-y-auto px-8 pb-8 max-md:px-5 max-md:pb-5">
-            {section === "general" && (
+            {/* Every panel below writes through /api/config, /api/security,
+                /api/agui-agents or /api/mcp-servers, and the harness refuses
+                all four from a paired device — provider credentials and device
+                administration stay on the machine that holds them. Rendering
+                the forms anyway meant a phone could fill one in and get a 403
+                for its trouble, so say it up front instead. */}
+            {state.remote ? (
+              <Card
+                title="These settings live on the desktop"
+                subtitle="Provider keys, MCP servers, security policy and device pairing can only be changed on the computer running MausCrew. This phone is a paired client — it can chat, follow tasks, answer approvals and change each bot's own settings."
+              >
+                <div className="text-[13px] leading-relaxed text-ink-secondary">
+                  Open MausCrew on that computer to change anything here. To stop this
+                  phone from connecting at all, revoke it there under Settings → Mobile.
+                </div>
+              </Card>
+            ) : null}
+
+            {!state.remote && section === "general" && (
               <>
                 <Card title="Profile" subtitle="Shown in the sidebar. Saved as you go.">
                   <ProfileFields />
@@ -439,7 +462,7 @@ export function SettingsModal() {
               </>
             )}
 
-            {section === "connections" && (
+            {!state.remote && section === "connections" && (
               <Card
                 title="Keys"
                 subtitle="Shared by all bots. Saving a key reloads providers instantly; keys are stored locally and never shown again."
@@ -458,7 +481,7 @@ export function SettingsModal() {
               </Card>
             )}
 
-            {section === "connections" && (
+            {!state.remote && section === "connections" && (
               <Card
                 title="Remote AG-UI agents"
                 subtitle="Bring a LangGraph, CrewAI, Mastra, Pydantic AI, or custom AG-UI endpoint into MausCrew as a bot engine."
@@ -467,7 +490,7 @@ export function SettingsModal() {
               </Card>
             )}
 
-            {section === "connections" && (
+            {!state.remote && section === "connections" && (
               <Card
                 title="MCP servers"
                 subtitle="Add local stdio tools, test their handshake, grant them to bots, and route calls through MausCrew approvals."
@@ -476,7 +499,7 @@ export function SettingsModal() {
               </Card>
             )}
 
-            {section === "connections" && (
+            {!state.remote && section === "connections" && (
               <Card
                 title="Claude gateways"
                 subtitle="Run the Claude Code engine against another provider. Each gateway is its own engine in the model picker."
@@ -487,11 +510,11 @@ export function SettingsModal() {
               </Card>
             )}
 
-            {section === "voice" && <VoiceSettings />}
+            {!state.remote && section === "voice" && <VoiceSettings />}
 
-            {section === "computer" && <LocalComputerSection />}
-            {section === "security" && <SecuritySection />}
-            {section === "remote" && <RemoteAccessSection />}
+            {!state.remote && section === "computer" && <LocalComputerSection />}
+            {!state.remote && section === "security" && <SecuritySection />}
+            {!state.remote && section === "remote" && <RemoteAccessSection />}
           </div>
         </div>
       </div>

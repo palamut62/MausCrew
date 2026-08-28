@@ -243,8 +243,11 @@ export function GroupView({ group }: { group: Group }) {
         )}
         style={drag}
       >
-        <span className="text-[15px] font-semibold text-ink">{group.name}</span>
-        <div className="flex items-center gap-1.5" style={noDrag}>
+        <span className="min-w-0 truncate text-[15px] font-semibold text-ink">{group.name}</span>
+        {/* The member strip grows with the room, and a phone header does not.
+            Letting it shrink and scroll keeps a five-bot room's name and its
+            controls on screen instead of pushing them off the right edge. */}
+        <div className="flex min-w-0 items-center gap-1.5 overflow-x-auto" style={noDrag}>
           <GroupCallButton group={group} members={members} />
           {!group.dm && <DefaultResponderSelect group={group} members={members} />}
           {members.map((b) => (
@@ -252,7 +255,7 @@ export function GroupView({ group }: { group: Group }) {
               key={b.id}
               title={`${b.name}${group.busyBotId === b.id ? " — working…" : ""}`}
               className={cn(
-                "relative inline-flex rounded-full",
+                "relative inline-flex shrink-0 rounded-full",
                 group.busyBotId === b.id && "ring-2 ring-accent/50 ring-offset-1 ring-offset-app",
               )}
             >

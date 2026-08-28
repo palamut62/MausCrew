@@ -15,6 +15,7 @@ import { DesktopCapabilitiesProvider } from "@/components/DesktopCapabilities";
 import { RoutinesPage } from "@/components/RoutinesPage";
 import { NoEngines } from "@/components/NoEngines";
 import { BotDirectoryPanel } from "@/components/BotDirectoryPanel";
+import { ConnectionBanner } from "@/components/ConnectionBanner";
 
 function Shell() {
   const { state, dispatch } = useStore();
@@ -80,6 +81,7 @@ function Shell() {
 
   return (
     <div className="flex h-full flex-col">
+      <ConnectionBanner />
       <div className="relative flex min-h-0 flex-1">
       <button
         type="button"

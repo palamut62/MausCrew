@@ -45,6 +45,13 @@ body,
   height: 100%;
 }
 
+:root {
+  /* How much of the viewport the software keyboard is covering. Kept up to
+     date by src/lib/viewport.ts; 0 everywhere that has no keyboard, and on
+     any browser that already resizes the viewport for one. */
+  --keyboard-inset: 0px;
+}
+
 body {
   background-color: var(--color-app);
   color: var(--color-ink);

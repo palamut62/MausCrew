@@ -3,11 +3,15 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import { RemotePairingPage } from "./components/RemotePairingPage";
 import { installSttCapture } from "./lib/stt/capture";
+import { trackKeyboardInset } from "./lib/viewport";
 import "./styles.css";
 
 // Windows speech recognition captures in this window (see capture.ts);
 // registering is a no-op wherever the bridge or the tap is absent.
 installSttCapture();
+// Publishes the software keyboard's overlap as --keyboard-inset. No-op on any
+// platform without a visualViewport, which is every desktop build.
+trackKeyboardInset();
 
 function Root() {
   const [authorized, setAuthorized] = useState<boolean | null>(null);

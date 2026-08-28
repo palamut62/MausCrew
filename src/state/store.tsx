@@ -301,6 +301,14 @@ interface AppState {
   /** bots whose cloud computer is being provisioned */
   provisioning: Record<string, boolean>;
   connected: boolean;
+  /** When the stream last went down, so the UI can wait out the sub-second
+   * reconnects an EventSource does on its own before saying anything. */
+  disconnectedSince: number | null;
+  /** True on a paired phone reaching the harness through its HTTPS ingress.
+   * The server refuses credential and device administration from here
+   * (see server/index.ts), so those panels have to say so rather than
+   * offering a save that can only 403. */
+  remote: boolean;
   error: string | null;
   /** Approval decisions currently being sent, keyed by threadId:requestId. */
   pendingDecisions: Record<string, "allow" | "always-allow" | "deny">;
@@ -378,6 +386,7 @@ type Action =
   | { type: "setModel"; botId: string; selection: ModelSelection }
   | { type: "interrupt"; botId: string }
   | { type: "connected"; value: boolean }
+  | { type: "remoteSession"; remote: boolean }
   | { type: "error"; message: string | null }
   | { type: "toggleSettings"; open?: boolean }
   | { type: "togglePlugins"; open?: boolean }
@@ -676,7 +685,17 @@ function reducer(state: AppState, action: Action): AppState {
     case "setModel":
       return updateBot(state, action.botId, (b) => ({ ...b, modelSelection: action.selection }));
     case "connected":
-      return { ...state, connected: action.value };
+      // Keep the FIRST moment it went down, not the latest: an EventSource
+      // that retries every few seconds would otherwise reset the clock on
+      // every attempt and the banner's grace period would never elapse.
+      if (state.connected === action.value && (action.value || state.disconnectedSince !== null)) return state;
+      return {
+        ...state,
+        connected: action.value,
+        disconnectedSince: action.value ? null : (state.disconnectedSince ?? Date.now()),
+      };
+    case "remoteSession":
+      return state.remote === action.remote ? state : { ...state, remote: action.remote };
     case "error":
       return { ...state, error: action.message };
     // bot settings, the computer panel, and app settings share the right slot
@@ -823,6 +842,8 @@ const initialState: AppState = {
   screens: {},
   provisioning: {},
   connected: false,
+  disconnectedSince: null,
+  remote: false,
   error: null,
   pendingDecisions: {},
 };
@@ -864,6 +885,9 @@ const StoreContext = createContext<{
   dispatch: React.Dispatch<Action>;
   /** Re-fetch engine availability — after an install, without a restart. */
   refreshInstances: () => Promise<void>;
+  /** Tear down and re-open the event stream, resuming from our cursor. What
+   * the connection banner's "Try again" calls. */
+  reconnectStream: () => void;
 } | null>(null);
 
 export function StoreProvider({ children }: { children: ReactNode }) {
@@ -1224,6 +1248,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return wrapped;
   }, []);
 
+  // Handles into the live connection, which owns its own state inside the
+  // effect below. Refs rather than deps on purpose: re-running that effect
+  // would tear down the stream and force a full rehydrate, which is exactly
+  // what the cursor exists to avoid.
+  const reconnectRef = useRef<(() => void) | null>(null);
+  const setScreensRef = useRef<((want: boolean) => void) | null>(null);
+
   // ── initial load + SSE fold ──────────────────────────────────────────
   useEffect(() => {
     let alive = true;
@@ -1243,6 +1274,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           .catch(() => {}),
         api("/api/webhooks")
           .then(({ webhooks, attempts, ingress }) => alive && rawDispatch({ type: "webhooksHydrated", webhooks, attempts: attempts ?? [], ingress }))
+          .catch(() => {}),
+        // Which ingress this client came in through. The server refuses
+        // credential and device administration from a paired phone; the
+        // panels that own those settings need to know that before they
+        // offer a save that can only come back 403.
+        api("/api/remote/session")
+          .then(({ remote }) => alive && rawDispatch({ type: "remoteSession", remote: remote === true }))
           .catch(() => {}),
       ]);
 
@@ -1294,12 +1332,114 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // gap before that connection opened.
     const hydrationFallback = setTimeout(hydrate, 1_000);
 
-    const es = new EventSource("/api/events");
-    // The hydrate decision belongs to the hello frame, not to onopen: the
-    // server replays what we missed when it can, and re-downloading every
-    // transcript on a reconnect it already covered is pure waste.
-    es.onopen = () => rawDispatch({ type: "connected", value: true });
-    es.onerror = () => rawDispatch({ type: "connected", value: false });
+    // ── the connection ───────────────────────────────────────────────────
+    // A phone is not a desktop. The radio drops, iOS suspends a backgrounded
+    // tab's socket without telling the page, and an EventSource that met an
+    // HTTP error never retries at all — so a paired phone whose cookie
+    // expired went quiet forever. The connection is therefore owned here
+    // rather than left entirely to the browser, and carries its own cursor
+    // so a deliberate reconnect resumes instead of re-downloading every
+    // transcript.
+    let es: EventSource | null = null;
+    let cursor: string | null = null; // `<streamId>:<seq>`, opaque to us
+    let lastFrameAt = Date.now();
+    let retries = 0;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    // Live desktop captures are hundreds of kilobytes every few seconds. A
+    // client not showing the computer panel must decline them: on a phone
+    // they are what fills the server's per-client buffer, and past that
+    // ceiling the server drops the client rather than buffer it (see
+    // MAX_CLIENT_BUFFER_BYTES in server/index.ts). That drop, every time a
+    // bot with a computer worked, was the connection "randomly" dying.
+    let screens = false;
+
+    const scheduleRetry = () => {
+      if (!alive || retryTimer !== null) return;
+      const delay = Math.min(15_000, 1_000 * 2 ** retries);
+      retries += 1;
+      retryTimer = setTimeout(() => {
+        retryTimer = null;
+        connect();
+      }, delay);
+    };
+
+    // A CLOSED EventSource is either "the server is unreachable" — retry — or
+    // "this device is no longer paired", which no amount of retrying fixes.
+    // Only the second one should send the phone back to the pairing screen,
+    // and only a 401 says so: a dev server behind a proxy answers 5xx while
+    // it restarts, and reloading the page for that would throw away a session
+    // that is about to come back on its own.
+    const probeThenRetry = async () => {
+      let unpaired = false;
+      try {
+        unpaired = (await fetch("/api/remote/session", { cache: "no-store" })).status === 401;
+      } catch {
+        /* offline: a transport failure, not a lost pairing */
+      }
+      if (!alive) return;
+      // The reload lands on the pairing screen, which is where a phone whose
+      // 30-day session expired has to start again.
+      if (unpaired) return window.location.reload();
+      scheduleRetry();
+    };
+
+    function connect() {
+      if (!alive) return;
+      if (retryTimer !== null) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+      es?.close();
+      const params = new URLSearchParams();
+      if (!screens) params.set("screens", "off");
+      // Our own cursor, because a freshly constructed EventSource has no
+      // Last-Event-ID of its own to send.
+      if (cursor) params.set("since", cursor);
+      const query = params.toString();
+      const next = new EventSource(query ? `/api/events?${query}` : "/api/events");
+      es = next;
+      // The hydrate decision belongs to the hello frame, not to onopen: the
+      // server replays what we missed when it can, and re-downloading every
+      // transcript on a reconnect it already covered is pure waste.
+      next.onopen = () => {
+        retries = 0;
+        lastFrameAt = Date.now();
+        rawDispatch({ type: "connected", value: true });
+      };
+      next.onerror = () => {
+        if (next !== es) return;
+        rawDispatch({ type: "connected", value: false });
+        // CONNECTING means the browser is already retrying by itself, and it
+        // resumes from its own Last-Event-ID — leave that alone. CLOSED is
+        // the case the spec gives up on, and the only one we must handle.
+        if (next.readyState === EventSource.CLOSED) void probeThenRetry();
+      };
+      next.onmessage = (raw) => onMessage(raw);
+    }
+
+    const reconnect = () => {
+      retries = 0;
+      connect();
+    };
+
+    // Coming back from a locked phone is what an EventSource handles worst:
+    // the socket is gone but the object can still read OPEN. The server's
+    // keepalive is a real frame rather than a comment precisely so silence
+    // can be measured — past two of its intervals the stream is dead.
+    const STALE_MS = 60_000;
+    const wake = () => {
+      if (!alive || document.visibilityState !== "visible") return;
+      if (es === null || es.readyState === EventSource.CLOSED || Date.now() - lastFrameAt > STALE_MS) reconnect();
+    };
+    document.addEventListener("visibilitychange", wake);
+    window.addEventListener("pageshow", wake);
+    window.addEventListener("online", reconnect);
+    reconnectRef.current = reconnect;
+    setScreensRef.current = (want: boolean) => {
+      if (screens === want) return;
+      screens = want;
+      reconnect();
+    };
     handleFrame = (frame) => {
       switch (frame.kind) {
         case "message": {
@@ -1445,29 +1585,57 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
       }
     };
-    es.onmessage = (raw) => {
+    // Defined after handleFrame and read only from inside connect(), which is
+    // first called at the bottom of this effect.
+    const onMessage = (raw: MessageEvent) => {
+      lastFrameAt = Date.now();
       let frame: any;
       try {
         frame = JSON.parse(raw.data);
       } catch {
         return;
       }
+      // The keepalive proves the stream is alive and carries nothing else.
+      if (frame.kind === "ping") return;
       // `hello` is the snapshot boundary. A false `resumed` means the server
       // could not fill the gap, so queue subsequent frames behind a hydrate.
       if (frame.kind === "hello") {
         clearTimeout(hydrationFallback);
+        if (typeof frame.cursor === "string") cursor = frame.cursor;
         if (!frame.resumed) hydrate();
         return;
+      }
+      // Track the cursor ourselves so a reconnect we initiate can resume.
+      // The stream id only ever arrives on hello; without one there is
+      // nothing safe to resume from and the next connect hydrates instead.
+      if (cursor !== null && typeof frame.seq === "number") {
+        cursor = `${cursor.slice(0, cursor.indexOf(":"))}:${frame.seq}`;
       }
       if (hydrated) handleFrame(frame);
       else pendingFrames.push(frame);
     };
+    connect();
+
     return () => {
       alive = false;
       clearTimeout(hydrationFallback);
-      es.close();
+      if (retryTimer !== null) clearTimeout(retryTimer);
+      document.removeEventListener("visibilitychange", wake);
+      window.removeEventListener("pageshow", wake);
+      window.removeEventListener("online", reconnect);
+      reconnectRef.current = null;
+      setScreensRef.current = null;
+      es?.close();
     };
   }, []);
+
+  // The computer panel is the only consumer of live desktop frames, so the
+  // stream asks for them only while it is open. Everywhere else — a phone on
+  // cellular above all — pays nothing for a bot that happens to be driving a
+  // computer.
+  useEffect(() => {
+    setScreensRef.current?.(state.computerOpen);
+  }, [state.computerOpen]);
 
   // Re-probe the engines on demand. A CLI installed while the app is running
   // is invisible until something asks again — the setup screens expose this
@@ -1497,7 +1665,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("focus", onFocus);
   }, [refreshInstances]);
 
-  const value = useMemo(() => ({ state, dispatch, refreshInstances }), [state, dispatch, refreshInstances]);
+  // A notification tapped while the app was closed carries its bot in the
+  // URL, because a page that does not exist yet cannot receive the service
+  // worker's postMessage (see public/sw.js). Consume it once the bots are
+  // known, then strip it so a later reload does not re-select it.
+  const deepLinkHandled = useRef(false);
+  useEffect(() => {
+    if (deepLinkHandled.current || state.bots.length === 0) return;
+    deepLinkHandled.current = true;
+    const wanted = new URLSearchParams(window.location.search).get("bot");
+    if (!wanted) return;
+    if (state.bots.some((bot) => bot.id === wanted)) dispatch({ type: "select", id: wanted });
+    window.history.replaceState(null, "", window.location.pathname);
+  }, [state.bots, dispatch]);
+
+  const reconnectStream = useCallback(() => reconnectRef.current?.(), []);
+
+  const value = useMemo(
+    () => ({ state, dispatch, refreshInstances, reconnectStream }),
+    [state, dispatch, refreshInstances, reconnectStream],
+  );
   return (
     <StoreContext.Provider value={value}>
       <StreamContext.Provider value={stream}>{children}</StreamContext.Provider>
