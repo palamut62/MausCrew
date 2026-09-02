@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Spin } from "./Spin";
-import { CheckCircle, Flask, Plus, Trash, WarningCircle } from "@phosphor-icons/react";
+import { CaretDown, CaretRight, CheckCircle, Flask, Plus, Trash, WarningCircle } from "@phosphor-icons/react";
 
 import { useStore, type ConfigStatus } from "@/state/store";
 
@@ -15,6 +15,10 @@ async function api(path: string, init?: RequestInit) {
 
 function parseArgs(value: string) {
   return value.split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean);
+}
+
+function parseToolList(value: string) {
+  return [...new Set(value.split(/[\s,]+/).map((entry) => entry.trim()).filter(Boolean))];
 }
 
 function parseEnv(value: string) {
@@ -41,6 +45,10 @@ export function McpServers() {
   const [allowedBots, setAllowedBots] = useState<string[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  // Per-server guidance is edited in place: it is written after the server
+  // already connected, usually right after seeing which tools it exposes.
+  const [openServer, setOpenServer] = useState<string | null>(null);
+  const [draft, setDraft] = useState<{ instructions: string; disabledTools: string }>({ instructions: "", disabledTools: "" });
 
   const descriptor = (id: string, values: Record<string, string>) => ({
     id,
@@ -89,6 +97,35 @@ export function McpServers() {
     }
   };
 
+  const openEditor = (server: Server) => {
+    if (openServer === server.id) return setOpenServer(null);
+    setOpenServer(server.id);
+    setDraft({
+      instructions: server.instructions ?? "",
+      disabledTools: (server.disabledTools ?? []).join("\n"),
+    });
+  };
+
+  const saveGuidance = async (server: Server) => {
+    setBusy(`edit:${server.id}`);
+    setMessage(null);
+    try {
+      const next = servers.map(({ configuredEnvNames: _configured, ...saved }) =>
+        saved.id === server.id
+          ? { ...saved, instructions: draft.instructions.trim(), disabledTools: parseToolList(draft.disabledTools) }
+          : saved,
+      );
+      const config = await api("/api/mcp-servers", { method: "PUT", body: JSON.stringify({ servers: next }) });
+      dispatch({ type: "configStatus", config });
+      setOpenServer(null);
+      setMessage({ ok: true, text: `Saved instructions for ${server.name}.` });
+    } catch (error) {
+      setMessage({ ok: false, text: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const remove = async (server: Server) => {
     if (!window.confirm(`Remove MCP server ${server.name}?`)) return;
     setBusy(`remove:${server.id}`);
@@ -113,18 +150,57 @@ export function McpServers() {
   return (
     <div className="space-y-3">
       {servers.map((server) => (
-        <div key={server.id} className="flex items-start gap-3 rounded-lg border border-hairline bg-inset px-3 py-2.5">
-          <div className="min-w-0 flex-1">
-            <div className="text-[13px] font-medium text-ink">{server.name}</div>
-            <div className="mt-0.5 truncate font-mono text-[10.5px] text-ink-secondary">{server.command} {server.args.join(" ")}</div>
-            <div className="mt-1 text-[10px] text-ink-secondary">
-              {server.allowedBots.length ? `${server.allowedBots.length} bot grant` : "All bots"}
-              {server.envNames.length ? ` · ${server.configuredEnvNames.length}/${server.envNames.length} encrypted env` : ""}
-            </div>
+        <div key={server.id} className="rounded-lg border border-hairline bg-inset px-3 py-2.5">
+          <div className="flex items-start gap-3">
+            <button onClick={() => openEditor(server)} className="min-w-0 flex-1 text-left" title="Server instructions and disabled tools">
+              <div className="flex items-center gap-1 text-[13px] font-medium text-ink">
+                {openServer === server.id ? <CaretDown size={12} /> : <CaretRight size={12} />}
+                {server.name}
+              </div>
+              <div className="mt-0.5 truncate font-mono text-[10.5px] text-ink-secondary">{server.command} {server.args.join(" ")}</div>
+              <div className="mt-1 text-[10px] text-ink-secondary">
+                {server.allowedBots.length ? `${server.allowedBots.length} bot grant` : "All bots"}
+                {server.envNames.length ? ` · ${server.configuredEnvNames.length}/${server.envNames.length} encrypted env` : ""}
+                {server.instructions ? " · custom instructions" : ""}
+                {server.disabledTools?.length ? ` · ${server.disabledTools.length} tool blocked` : ""}
+              </div>
+            </button>
+            <button onClick={() => void remove(server)} disabled={Boolean(busy)} className="rounded-md p-2 text-danger hover:bg-danger/10" title="Remove MCP server">
+              {busy === `remove:${server.id}` ? <Spin size={15} /> : <Trash size={15} />}
+            </button>
           </div>
-          <button onClick={() => void remove(server)} disabled={Boolean(busy)} className="rounded-md p-2 text-danger hover:bg-danger/10" title="Remove MCP server">
-            {busy === `remove:${server.id}` ? <Spin size={15} /> : <Trash size={15} />}
-          </button>
+          {openServer === server.id && (
+            <div className="mt-2.5 space-y-2 border-t border-hairline pt-2.5">
+              <div>
+                <div className="mb-1 text-[10.5px] text-ink-secondary">Instructions for this server — added to the prompt of every bot that mounts it</div>
+                <textarea
+                  value={draft.instructions}
+                  onChange={(event) => setDraft((current) => ({ ...current, instructions: event.target.value }))}
+                  rows={3}
+                  maxLength={2000}
+                  placeholder="Use this server only for the staging database. Never run migrations."
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <div className="mb-1 text-[10.5px] text-ink-secondary">Disabled tools, one per line — denied at the permission gate, not just discouraged</div>
+                <textarea
+                  value={draft.disabledTools}
+                  onChange={(event) => setDraft((current) => ({ ...current, disabledTools: event.target.value }))}
+                  rows={2}
+                  placeholder={"delete_file\nwrite_query"}
+                  className={inputClass}
+                />
+              </div>
+              <button
+                onClick={() => void saveGuidance(server)}
+                disabled={Boolean(busy)}
+                className="rounded-lg bg-accent px-3 py-1.5 text-[11.5px] font-semibold text-black disabled:opacity-40"
+              >
+                {busy === `edit:${server.id}` ? <Spin size={13} /> : "Save"}
+              </button>
+            </div>
+          )}
         </div>
       ))}
 

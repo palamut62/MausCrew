@@ -33,7 +33,7 @@ export function SidebarUpdateCard() {
   // out immediately; the incoming status clears the latch.
   const [pending, setPending] = useState<"download" | "install" | "check" | null>(null);
   const status = s?.status;
-  useEffect(() => setPending(null), [status]);
+  useEffect(() => queueMicrotask(() => setPending(null)), [status]);
 
   if (!s || s.status === "idle" || s.status === "checking") return null;
   const updater = window.mauscrew!.updater!;

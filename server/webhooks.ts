@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 import type { RoutineRunOn } from "./routines.ts";
+import { isWebhookProvider, verifySignature, type WebhookProvider, type SignedRequest } from "./webhook-signature.ts";
 
 export interface WebhookTrigger {
   id: string;
@@ -25,6 +26,13 @@ export interface WebhookTrigger {
   verificationSample?: WebhookVerificationSample;
   /** Optional event-name allowlist. Empty means every event type. */
   eventTypes?: string[];
+  /** GitHub and Slack sign their deliveries instead of sending a token. A
+   * hook with a provider is authenticated by that signature; the bearer and
+   * capability-URL paths are refused for it, so there is no weaker way in. */
+  provider?: WebhookProvider;
+  /** Whether a signing key has been saved. The key itself never leaves the
+   * harness — see StoredWebhookTrigger.signingSecret. */
+  signingSecretSet?: boolean;
 }
 
 export interface WebhookTriggerInput {
@@ -35,6 +43,7 @@ export interface WebhookTriggerInput {
   enabled?: boolean;
   verificationPending?: boolean;
   eventTypes?: string[];
+  provider?: string;
 }
 
 export interface WebhookVerificationSample {
@@ -61,6 +70,14 @@ export interface WebhookAttempt {
 
 interface StoredWebhookTrigger extends WebhookTrigger {
   secretHash: string;
+  /** The platform's own webhook/signing secret, in the clear.
+   *
+   * Unavoidable, and deliberately narrow: an HMAC is only verifiable with the
+   * same key that produced it, so a hash cannot stand in here the way it does
+   * for `secretHash`. It exists only for hooks the user pointed at GitHub or
+   * Slack, it is never echoed back by the API, and it lives in the same
+   * 0600 file as everything else in ~/.mauscrew. */
+  signingSecret?: string;
 }
 
 interface DeliveryReceipt {
@@ -154,6 +171,10 @@ function cleanInput(input: WebhookTriggerInput): Omit<WebhookTrigger, "id" | "en
       .filter(Boolean),
   )).slice(0, 20);
   const enabled = input.enabled !== false;
+  if (input.provider !== undefined && input.provider !== "" && !isWebhookProvider(input.provider)) {
+    fail(400, "Unknown webhook provider");
+  }
+  const provider = isWebhookProvider(input.provider) ? input.provider : undefined;
   return {
     name,
     prompt,
@@ -162,6 +183,7 @@ function cleanInput(input: WebhookTriggerInput): Omit<WebhookTrigger, "id" | "en
     enabled,
     verificationPending: enabled ? false : input.verificationPending === true,
     ...(eventTypes.length ? { eventTypes } : {}),
+    ...(provider ? { provider } : {}),
   };
 }
 
@@ -171,8 +193,8 @@ function withoutLegacyDuration(trigger: StoredWebhookTrigger & { durationMinutes
 }
 
 function publicTrigger(trigger: StoredWebhookTrigger): WebhookTrigger {
-  const { secretHash: _secretHash, ...safe } = trigger;
-  return { ...safe };
+  const { secretHash: _secretHash, signingSecret, ...safe } = trigger;
+  return { ...safe, ...(signingSecret ? { signingSecretSet: true } : {}) };
 }
 
 function serializePayload(payload: unknown): string {
@@ -294,10 +316,17 @@ export class WebhookManager {
       enabled: patch.enabled ?? trigger.enabled,
       verificationPending: patch.verificationPending ?? trigger.verificationPending,
       eventTypes: patch.eventTypes ?? trigger.eventTypes,
+      provider: patch.provider ?? trigger.provider,
     });
     if (this.options.botState(clean.botId) === "missing") fail(400, "That MAUS no longer exists");
     Object.assign(trigger, clean, { updatedAt: this.now() });
     if (!clean.eventTypes?.length) delete trigger.eventTypes;
+    if (!clean.provider) {
+      delete trigger.provider;
+      // A hook that stops being a provider hook must not keep a key it no
+      // longer uses sitting in the file.
+      delete trigger.signingSecret;
+    }
     if (patch.enabled === false) {
       this.options.cancelQueued?.(trigger.id, "The webhook was paused before this delivery started");
     }
@@ -343,14 +372,49 @@ export class WebhookManager {
     if (changed) this.save();
   }
 
+  /** Save (or clear, with "") the platform's signing key for a hook. */
+  setSigningSecret(id: string, secret: string): WebhookTrigger | null {
+    const trigger = this.webhooks.find((candidate) => candidate.id === id);
+    if (!trigger) return null;
+    if (!trigger.provider) fail(400, "Choose GitHub or Slack for this webhook first");
+    const value = secret.trim().slice(0, 500);
+    if (value) trigger.signingSecret = value;
+    else delete trigger.signingSecret;
+    trigger.updatedAt = this.now();
+    this.save();
+    this.emit(trigger);
+    return publicTrigger(trigger);
+  }
+
+  providerFor(endpointId: string): WebhookProvider | undefined {
+    return this.webhooks.find((candidate) => candidate.endpointId === endpointId)?.provider;
+  }
+
+  /** Verify a signed delivery. Returns the same shape as the signature module
+   * so the receiver has one thing to branch on. */
+  verifySigned(endpointId: string, request: SignedRequest): { ok: boolean; reason?: string } {
+    const trigger = this.webhooks.find((candidate) => candidate.endpointId === endpointId);
+    if (!trigger?.provider) return { ok: false, reason: "this webhook is not a signed provider hook" };
+    return verifySignature(trigger.provider, trigger.signingSecret ?? "", request);
+  }
+
   authorize(endpointId: string, secret: string): boolean {
     const trigger = this.webhooks.find((candidate) => candidate.endpointId === endpointId);
+    // A signed hook has exactly one way in. Leaving the bearer path open for
+    // it would mean the strongest authentication the user configured could be
+    // bypassed by the weaker one it replaced.
+    if (trigger?.provider) return false;
     return Boolean(trigger && secretMatches(secret, trigger.secretHash));
   }
 
-  receive(endpointId: string, secret: string, event: WebhookEvent): WebhookReceiveResult {
+  receive(endpointId: string, secret: string, event: WebhookEvent, options?: { signatureVerified?: boolean }): WebhookReceiveResult {
     const trigger = this.webhooks.find((candidate) => candidate.endpointId === endpointId);
-    if (!trigger || !secretMatches(secret, trigger.secretHash)) fail(401, "Invalid webhook URL or secret");
+    // Either the signature was checked by the receiver (provider hooks) or
+    // the shared secret matches (everything else). Never both, never neither.
+    const authenticated = trigger?.provider
+      ? options?.signatureVerified === true
+      : Boolean(trigger && secretMatches(secret, trigger.secretHash));
+    if (!trigger || !authenticated) fail(401, "Invalid webhook URL or secret");
     if (trigger.verificationPending && !trigger.enabled) return this.captureVerification(trigger, event);
     try {
       return this.dispatch(trigger, event);

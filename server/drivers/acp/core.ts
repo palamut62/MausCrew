@@ -109,6 +109,23 @@ export interface AcpSupport {
   }): Promise<void>;
 }
 
+/**
+ * Does this failure mean "sign in", rather than "try again"?
+ *
+ * Every CLI phrases it differently and none of them phrase it the way our own
+ * loginNote does — Kimi says "Authentication required", Droid says the same
+ * and then prints a device code, others return a bare 401. Matching the note
+ * verbatim recognised none of them, so a signed-out engine failed as an
+ * ordinary error: no setup affordance in the UI, and the picker went on
+ * calling it ready. Deliberately narrow: an unrelated failure wrongly called
+ * an auth failure would send the user off to log in for nothing.
+ */
+export function isAuthFailureMessage(message: string): boolean {
+  return /\b(?:authentication|authorization) (?:required|failed)\b|\bunauthorized\b|\b401\b|\bnot (?:signed|logged) in\b|\bplease (?:sign|log) in\b|\binvalid (?:api[- ]?key|credentials|token)\b/i.test(
+    message,
+  );
+}
+
 const INIT_TIMEOUT = 20_000;
 const SESSION_CONFIG_TIMEOUT = 20_000; // configureSession's per-request default
 const NEW_SESSION_TIMEOUT = 30_000;
@@ -624,13 +641,19 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             else settle(false, reason ?? "failed");
           } catch (e) {
             if (!state.settled) {
-              const message = e instanceof Error ? e.message : String(e);
+              const raw = e instanceof Error ? e.message : String(e);
               const code = support.classifyError?.(e);
               // Authentication setup is a user action, not a retry. The
               // classifier is preferred; loginNote remains a compatibility
               // fallback for existing ACP supports.
               const needsAuth = code === "invalid_credentials" || code === "inactive_subscription"
-                || message === support.loginNote;
+                || raw === support.loginNote || isAuthFailureMessage(raw);
+              // A CLI that refuses on its own terms says so in its own words —
+              // "Authentication required", a device code, a 401. Equality with
+              // loginNote never matched any of them, so the turn ended in a
+              // bare error with no way out of it: no setup affordance, and the
+              // one sentence that says what to run left unsaid.
+              const message = needsAuth && !raw.includes(support.loginNote) ? `${raw}\n\n${support.loginNote}` : raw;
               emit({
                 ...base(threadId, turnId),
                 type: "runtime.error",

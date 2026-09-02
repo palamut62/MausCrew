@@ -8,7 +8,7 @@
 //   - Composio Sessions (connected apps → tools) over streamable HTTP
 //   - the bot's cloud computer (box.ascii.dev) via server/computer-proxy.ts
 //     — screenshot/exec/open_url, the CUA-on-the-box bridge
-import { existsSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { join, dirname } from "node:path";
@@ -140,6 +140,23 @@ function modelRejection(text) {
         /(unknown|invalid|unsupported|no such) model/i.test(line);
     return rejected ? line.slice(0, 300) : null;
 }
+/**
+ * The refusal that is about the endpoint, not the model id.
+ *
+ * Claude Code declares MCP tools by reference and leaves their schemas out of
+ * `tools[]`, expecting the endpoint to resolve them on demand. An endpoint
+ * that speaks Anthropic's wire format without implementing that part refuses
+ * the whole turn with a 400 — and since every MausCrew bot mounts MCP tools,
+ * such a pairing can never run a single turn. It surfaced as a raw API error
+ * that reads like a MausCrew fault, and the model-id advice next door would
+ * have sent the user to correct a setting that was already right.
+ */
+function deferralRefusal(text) {
+    if (!/deferred custom tools/i.test(text))
+        return null;
+    const model = text.match(/Received ([^\s.]+)/i)?.[1];
+    return `this endpoint does not implement Claude Code's deferred tool calls${model ? ` for "${model}"` : ""}, and every bot here mounts tools that way.`;
+}
 /** Aggregators namespace their ids (`deepseek/deepseek-v4-pro`); a vendor's own
  * endpoint serves bare ones (`deepseek-v4-pro`). Pasting one convention into
  * the other is the most common way a correctly configured gateway rejects every
@@ -148,7 +165,7 @@ function modelRejection(text) {
 function namingHint(baseUrl, model) {
     if (!model)
         return "";
-    let host = "";
+    let host;
     try {
         host = new URL(baseUrl).hostname;
     }
@@ -173,6 +190,13 @@ function gatewayModelAdvice(config, engine, model, complaint) {
         return `${engine} rejected the model "${asked}": ${complaint}`;
     return `${engine} rejected the model "${asked}".${namingHint(config.baseUrl, asked)} Fix the id in Settings → Claude gateways — every bot on this engine uses that list. The endpoint said: ${complaint}`;
 }
+/** Same shape as the advice above, for the refusal that no model id can fix:
+ * the endpoint is the wrong kind, so the answer is a different model family
+ * or a different engine. */
+function gatewayCapabilityAdvice(engine, model, complaint) {
+    const asked = model ? `"${model}"` : "this model";
+    return `${engine} could not run ${asked}: ${complaint} Pick a model this endpoint serves in Anthropic's own format — on an aggregator that means an \`anthropic/…\` id — or run the bot on an engine that talks to the vendor directly.`;
+}
 // proxy entry files live next to this one as .ts in dev (node type
 // stripping) and .js in the compiled dist-server the packaged app ships
 const proxyPath = (basename) => {
@@ -185,6 +209,51 @@ const DWEB_PROXY_PATH = proxyPath("drivers/dweb-proxy");
 // in the packaged app process.execPath is the Electron binary — this env
 // makes it behave as plain node for the spawned MCP proxies (harmless in dev)
 const NODE_ENV_FLAG = { ELECTRON_RUN_AS_NODE: "1" };
+// Kept as a tiny standalone ESM program because Claude executes hook
+// commands out-of-process and sends the hook JSON over stdin. It deliberately
+// knows only the broker socket: policy classification and audit recording stay
+// in the harness, never in a provider-specific script.
+const PRE_TOOL_USE_HOOK = String.raw `import { connect } from "node:net";
+import { randomUUID } from "node:crypto";
+
+const socketPath = __SOCKET__;
+let input = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => (input += chunk));
+process.stdin.on("end", () => {
+  let payload = {};
+  try { payload = JSON.parse(input); } catch {}
+  const tool = String(payload.tool_name ?? "tool");
+  const toolInput = payload.tool_input && typeof payload.tool_input === "object" ? payload.tool_input : {};
+  const id = randomUUID();
+  let buffer = "";
+  let finished = false;
+  const finish = (decision, reason) => {
+    if (finished) return;
+    finished = true;
+    process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: decision, permissionDecisionReason: reason } }) + "\n");
+    process.exit(0);
+  };
+  const conn = connect(socketPath);
+  conn.setTimeout(900000, () => finish("deny", "MausCrew approval timed out"));
+  conn.on("error", () => finish("deny", "MausCrew permission broker unavailable"));
+  conn.on("data", (chunk) => {
+    buffer += chunk;
+    let nl;
+    while ((nl = buffer.indexOf("\n")) !== -1) {
+      const line = buffer.slice(0, nl); buffer = buffer.slice(nl + 1);
+      let answer;
+      try { answer = JSON.parse(line); } catch { continue; }
+      if (answer.t === "answer" && answer.id === id) {
+        finish(answer.behavior === "allow" ? "allow" : "deny", String(answer.message ?? "MausCrew approval required"));
+        conn.end();
+      }
+    }
+  });
+  conn.on("connect", () => {
+    conn.write(JSON.stringify({ t: "ask", id, tool, input: toolInput }) + "\n");
+  });
+});`;
 const DENY_TIMEOUT_NOTE = "MausCrew: nobody answered this permission request in time. Skip this action and finish what you can without it.";
 const QUESTION_TIMEOUT_NOTE = "MausCrew: nobody answered in time. Use your best judgment and continue.";
 /** One human-readable line for an ask — what the card subtitle shows. */
@@ -301,7 +370,7 @@ function createPermissionBroker(opts) {
 function decodeConfig(raw) {
     const o = (raw ?? {});
     const mode = o.permissionMode;
-    if (mode !== undefined && mode !== "acceptEdits" && mode !== "auto" && mode !== "bypassPermissions") {
+    if (mode !== undefined && mode !== "acceptEdits" && mode !== "auto" && mode !== "manual" && mode !== "bypassPermissions") {
         throw new Error(`claude: invalid permissionMode ${JSON.stringify(mode)}`);
     }
     // A malformed gateway URL must fail here rather than at spawn time: the CLI
@@ -330,7 +399,10 @@ function decodeConfig(raw) {
     const models = Array.isArray(o.models) ? o.models.filter((m) => typeof m === "string" && m !== "") : undefined;
     return {
         cli: typeof o.cli === "string" ? o.cli : "claude",
-        permissionMode: mode ?? "acceptEdits",
+        // Manual is Claude Code's permission-gated mode. Keeping it as the
+        // default makes the Security panel truthful: filesystem and shell asks
+        // reach MausCrew instead of being silently accepted by acceptEdits.
+        permissionMode: mode ?? "manual",
         baseUrl,
         authToken: typeof o.authToken === "string" && o.authToken !== "" ? o.authToken : undefined,
         models: models?.length ? models : undefined,
@@ -396,6 +468,12 @@ export const ClaudeDriver = {
                 // token-level streaming: content_block_delta events between the
                 // whole-message frames, so the bubble grows as the model writes
                 "--include-partial-messages",
+                // A bot must not inherit the user's connector registry or permissive
+                // ~/.claude/settings.json. Authentication is still owned by Claude's
+                // normal credential store, while settings and MCP servers are scoped
+                // to this invocation and the integrations we explicitly compose.
+                "--setting-sources", "project,local",
+                "--strict-mcp-config",
                 "--permission-mode", config.permissionMode === "auto" ? "acceptEdits" : config.permissionMode,
             ];
             if (sessionId)
@@ -511,6 +589,24 @@ export const ClaudeDriver = {
                 mcpServers.mauscrew = { command: process.execPath, args: [PERM_PROXY_PATH, socketPath], env: { ...NODE_ENV_FLAG } };
                 allowed.push("mcp__mauscrew");
             }
+            // Claude's acceptEdits/manual permission handler only covers what the
+            // CLI itself decides to ask about. A PreToolUse hook is the authoritative
+            // boundary for shell and file tools: it forwards every such call to the
+            // same MausCrew broker, so the policy/audit card cannot be bypassed by a
+            // provider-side auto-allow.
+            let hookDir = null;
+            if (config.permissionMode !== "bypassPermissions") {
+                hookDir = mkdtempSync(join(tmpdir(), "mauscrew-hooks-"));
+                const hookPath = join(hookDir, "pre-tool-use.mjs");
+                const settingsPath = join(hookDir, "settings.json");
+                writeFileSync(hookPath, PRE_TOOL_USE_HOOK.replace("__SOCKET__", JSON.stringify(permissionSocketPath(threadId, turnId))), { mode: 0o600 });
+                writeFileSync(settingsPath, JSON.stringify({
+                    hooks: {
+                        PreToolUse: [{ matcher: "Bash|Write|Edit|MultiEdit|NotebookEdit", hooks: [{ type: "command", command: `${JSON.stringify(process.execPath)} ${JSON.stringify(hookPath)}` }] }],
+                    },
+                }), { mode: 0o600 });
+                args.push("--settings", settingsPath);
+            }
             // The MCP config carries credentials — a Composio consumer key in a
             // header, the box token in the computer proxy's env, the comms token in
             // the agents proxy's env. On argv every one of those is world-readable
@@ -525,8 +621,10 @@ export const ClaudeDriver = {
                 args.push("--allowedTools", allowed.join(","));
             }
             const env = claudeEnvironment(config);
+            const cwd = turn.cwd ?? homedir();
+            mkdirSync(cwd, { recursive: true });
             const child = spawnCli(config.cli, args, {
-                cwd: turn.cwd ?? homedir(),
+                cwd,
                 env,
                 stdio: ["pipe", "pipe", "pipe"],
             });
@@ -546,6 +644,12 @@ export const ClaudeDriver = {
                 if (mcpConfigPath) {
                     try {
                         rmSync(dirname(mcpConfigPath), { recursive: true, force: true });
+                    }
+                    catch { }
+                }
+                if (hookDir) {
+                    try {
+                        rmSync(hookDir, { recursive: true, force: true });
                     }
                     catch { }
                 }
@@ -635,13 +739,30 @@ export const ClaudeDriver = {
                         // A model the endpoint does not serve comes back as one line of
                         // prose and nothing else: no code, no setup flag, nothing naming
                         // the setting that caused it. Say what to change, and where.
-                        const complaint = o.is_error === true ? modelRejection(typeof o.result === "string" ? o.result : lastAssistantText) : null;
-                        if (complaint) {
+                        const providerFailure = o.is_error === true
+                            ? (typeof o.result === "string" ? o.result : lastAssistantText).trim()
+                            : "";
+                        const complaint = providerFailure ? modelRejection(providerFailure) : null;
+                        const capability = providerFailure ? deferralRefusal(providerFailure) : null;
+                        if (complaint || capability) {
                             emit({
                                 ...base(threadId, turnId),
                                 type: "runtime.error",
                                 setup: true,
-                                message: gatewayModelAdvice(config, input.displayName ?? instanceId, turn.model, complaint),
+                                message: capability
+                                    ? gatewayCapabilityAdvice(input.displayName ?? instanceId, turn.model, capability)
+                                    : gatewayModelAdvice(config, input.displayName ?? instanceId, turn.model, complaint),
+                            });
+                        }
+                        else if (o.is_error === true) {
+                            // Claude Code reports provider throttling/billing failures as a
+                            // failed `result`, not stderr or a process failure. Without a
+                            // canonical error event the harness cannot classify the failure
+                            // and its configured engine fallback chain is unreachable.
+                            emit({
+                                ...base(threadId, turnId),
+                                type: "runtime.error",
+                                message: providerFailure || "Claude reported a failed turn without an error message",
                             });
                         }
                         settle(o.is_error !== true, o.stop_reason ?? o.terminal_reason ?? null, o.total_cost_usd ?? null);

@@ -18,7 +18,10 @@ function Root() {
   const [authorized, setAuthorized] = useState<boolean | null>(null);
   const pairingPath = window.location.pathname === "/pair";
   useEffect(() => {
-    if (pairingPath) return setAuthorized(false);
+    if (pairingPath) {
+      queueMicrotask(() => setAuthorized(false));
+      return;
+    }
     void fetch("/api/remote/session")
       .then((response) => setAuthorized(response.ok))
       .catch(() => setAuthorized(true));

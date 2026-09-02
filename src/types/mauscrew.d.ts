@@ -2,6 +2,9 @@
 export {};
 
 declare global {
+  /** Injected from package.json by Vite so the UI cannot drift from the packaged app. */
+  const __APP_VERSION__: string;
+
   type DesktopCapabilities = {
     host: {
       platform: "darwin" | "linux" | "win32" | "other";
@@ -76,6 +79,16 @@ declare global {
       openInstallTerminal?(command: string): Promise<boolean>;
       /** Native directory picker for a bot's coding workspace. */
       chooseWorkspace?(): Promise<string | null>;
+      /** Reveal a produced file in the OS file manager. Resolves false when
+       * the path was refused or the platform could not show it. */
+      revealPath?(target: string): Promise<boolean>;
+      /** Bots blocked on the user, for the tray menu and its badge. */
+      setTrayStatus?(waiting: Array<{ id: string; name: string; kind: "approval" | "question" }>): void;
+      /** A bot was chosen from the tray menu. */
+      onTraySelectBot?(cb: (botId: string) => void): () => void;
+      /** A mauscrew://bot/add?name=..&title=..&description=.. link was
+       * opened. Fires once per link, including one queued at cold launch. */
+      onDeepLinkBotAdd?(cb: (bot: { name: string; title: string; description: string }) => void): () => void;
       /** Start the packaged desktop app when the user signs in. */
       startup?: {
         get(): Promise<{ available: boolean; enabled: boolean }>;

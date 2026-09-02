@@ -80,7 +80,7 @@ describe("choosing where to go next", () => {
   });
 
   it("gives up rather than looping between two exhausted engines", () => {
-    let tried: string[] = [];
+    const tried: string[] = [];
     const chain = ["claude", "codex"];
     for (let i = 0; i < 5; i++) {
       const next = nextEngine({ chain, available, tried });

@@ -5,7 +5,9 @@ import { describe, expect, it } from "vitest";
 import { readCuaConnection } from "./local-computer.ts";
 
 describe("local computer descriptor", () => {
-  it("fails closed on Linux even when a valid-looking descriptor exists", () => {
+  it("ignores a macOS-shaped descriptor on Linux", () => {
+    // Linux has its own driver and its own descriptor (host-cua.ts). An
+    // embedded-looking file in Electron's userData is not evidence of it.
     const userData = join(process.env.HOME!, "linux-user-data");
     mkdirSync(userData, { recursive: true });
     writeFileSync(
@@ -19,6 +21,39 @@ describe("local computer descriptor", () => {
     );
 
     expect(readCuaConnection({ platform: "linux", userData })).toBeNull();
+  });
+
+  it("connects on Linux only when the host driver says it is serving", () => {
+    const dataDir = join(process.env.HOME!, "linux-data-dir");
+    const cuaDir = join(dataDir, "runtimes", "cua");
+    mkdirSync(cuaDir, { recursive: true });
+    const descriptor = join(cuaDir, "host-connection.json");
+    const previous = process.env.MAUSCREW_DATA_DIR;
+    process.env.MAUSCREW_DATA_DIR = dataDir;
+    try {
+      // Installed but not started, and mid-install, are both "no connection".
+      for (const mode of ["unavailable", "installing"]) {
+        writeFileSync(descriptor, JSON.stringify({ mode, mcpCommand: "/tmp/cua-driver", mcpArgs: ["mcp"] }));
+        expect(readCuaConnection({ platform: "linux" })).toBeNull();
+      }
+      writeFileSync(
+        descriptor,
+        JSON.stringify({
+          mode: "host",
+          mcpCommand: "/home/u/.mauscrew/runtimes/cua/0.20.0/cua-driver",
+          mcpArgs: ["mcp", "--socket", "/home/u/.mauscrew/runtimes/cua/cua-driver.sock"],
+          mcpEnv: { DISPLAY: ":0" },
+        }),
+      );
+      expect(readCuaConnection({ platform: "linux" })).toEqual({
+        command: "/home/u/.mauscrew/runtimes/cua/0.20.0/cua-driver",
+        args: ["mcp", "--socket", "/home/u/.mauscrew/runtimes/cua/cua-driver.sock"],
+        env: { DISPLAY: ":0" },
+      });
+    } finally {
+      if (previous === undefined) delete process.env.MAUSCREW_DATA_DIR;
+      else process.env.MAUSCREW_DATA_DIR = previous;
+    }
   });
 
   it("reads and validates an exact macOS userData descriptor", () => {

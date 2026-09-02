@@ -20,11 +20,41 @@ function linuxSession(platform, env) {
   return "headless";
 }
 
-function localComputerReady(platform, connection) {
-  return (
-    platform === "darwin" &&
-    (connection?.mode === "embedded" || connection?.mode === "standalone")
-  );
+/**
+ * Whether this machine can actually be driven by a bot.
+ *
+ * Three different implementations sit behind one flag, and each has its own
+ * proof of readiness rather than a platform check:
+ *
+ *  - macOS: the CUA daemon this app started (or an installed CuaDriver.app),
+ *    reported through the connection descriptor.
+ *  - Windows: the bundled Cua SDK bridge (server/host-computer-proxy.ts and
+ *    its native runtime). `hostDriver.staged` is the main process saying it
+ *    found that bridge on disk; without it the driver cannot load and the
+ *    honest answer is unsupported.
+ *  - Linux: the same pinned cua-driver the Local VM runs, installed on the
+ *    host and serving a socket. X11 only — under Wayland input injection and
+ *    capture both go through portals the driver does not speak, so the flag
+ *    stays false rather than producing a bot that clicks nothing.
+ */
+function localComputerReady(platform, connection, hostDriver = null, session = "unknown") {
+  if (platform === "darwin") {
+    return connection?.mode === "embedded" || connection?.mode === "standalone";
+  }
+  if (platform === "win32") return hostDriver?.staged === true;
+  if (platform === "linux") return session === "x11" && hostDriver?.staged === true;
+  return false;
+}
+
+function localComputerReason(platform, session, hostDriver) {
+  if (platform === "darwin") return "cua-driver-unavailable";
+  if (platform === "win32") return "cua-driver-unavailable";
+  if (platform === "linux") {
+    if (session === "wayland") return "wayland-session";
+    if (session !== "x11") return "no-display";
+    return hostDriver?.installing ? "cua-driver-installing" : "cua-driver-not-installed";
+  }
+  return "unsupported-platform";
 }
 
 function desktopCapabilities({
@@ -33,11 +63,18 @@ function desktopCapabilities({
   packaged = false,
   localConnection = null,
   credentialStoreUnreadable = false,
+  hostDriver = null,
 } = {}) {
   const hostPlatform = normalizedPlatform(platform);
   const isMac = hostPlatform === "darwin";
   const isWin = hostPlatform === "win32";
-  const localAvailable = localComputerReady(hostPlatform, localConnection);
+  const session = linuxSession(hostPlatform, env);
+  const localAvailable = localComputerReady(hostPlatform, localConnection, hostDriver, session);
+  // desktopCapturer reads the screen on macOS, Windows and X11 alike. Only
+  // Wayland routes it through a portal picker the user has to answer per
+  // capture, which is not a live preview — so it is reported as such rather
+  // than shown as a frame that never arrives.
+  const previewAvailable = isMac || isWin || (hostPlatform === "linux" && session === "x11");
 
   return {
     host: {
@@ -50,14 +87,16 @@ function desktopCapabilities({
             : hostPlatform === "win32"
               ? "Windows"
               : "Desktop",
-      session: linuxSession(hostPlatform, env),
+      session,
       packaged: Boolean(packaged),
     },
     windowChrome: isMac ? "mac-inset" : "native",
     screenPreview: {
-      available: isMac,
-      interaction: isMac ? "direct" : "none",
-      ...(!isMac ? { reasonCode: "unsupported-platform" } : {}),
+      available: previewAvailable,
+      interaction: previewAvailable ? "direct" : hostPlatform === "linux" && session === "wayland" ? "portal-picker" : "none",
+      ...(!previewAvailable
+        ? { reasonCode: hostPlatform === "linux" ? (session === "wayland" ? "wayland-session" : "no-display") : "unsupported-platform" }
+        : {}),
     },
     dictation: {
       // Windows runs the whisper.cpp recognizer (speech-win.mjs) — capture
@@ -76,12 +115,7 @@ function desktopCapabilities({
     localComputer: {
       available: localAvailable,
       support: localAvailable ? "supported" : "unsupported",
-      ...(!localAvailable
-        ? {
-            reasonCode:
-              hostPlatform === "darwin" ? "cua-driver-unavailable" : "unsupported-platform",
-          }
-        : {}),
+      ...(!localAvailable ? { reasonCode: localComputerReason(hostPlatform, session, hostDriver) } : {}),
     },
   };
 }

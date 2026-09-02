@@ -207,6 +207,21 @@ describe("Store", () => {
     expect(reloaded.bot(bot.id)?.resumeCursors).toEqual({ claude: "sess-abc", codex: "thread-xyz" });
   });
 
+  it("persists an automatic digest on the task that produced it", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const digest = {
+      text: "The user chose the isolated workspace.",
+      throughMessageId: "message-42",
+      messageCount: 18,
+      at: 1_788_180_000_000,
+    };
+    store.setTaskDigest(bot.id, bot.threadId, digest);
+
+    const reloaded = new Store(selection);
+    expect(reloaded.taskByThread(bot.id, bot.threadId)?.digest).toEqual(digest);
+  });
+
   it("seedIfEmpty creates exactly one starter bot, once", () => {
     const store = new Store(selection);
     store.seedIfEmpty();

@@ -24,11 +24,21 @@ function decodeDescriptor(value) {
     };
 }
 export function readCuaConnection({ platform = process.platform, userData = process.env.MAUSCREW_USER_DATA, home = homedir(), moduleDir = dirname(fileURLToPath(import.meta.url)), } = {}) {
-    // Linux local automation is deliberately outside the Ubuntu baseline.
-    // Ignore even a forged or stale descriptor until the CUA follow-up adds
-    // session-aware readiness and end-to-end evidence.
-    if (platform === "linux")
-        return null;
+    // Linux: the harness installs and serves the same pinned cua-driver the
+    // Local VM runs (server/host-cua.ts) and publishes a descriptor in the
+    // same shape macOS writes. Only a descriptor that says the daemon is
+    // actually serving counts — `installing` and `unavailable` are not
+    // connections, and a stale file must not become one.
+    if (platform === "linux") {
+        const dataDir = process.env.MAUSCREW_DATA_DIR || join(home, ".mauscrew");
+        try {
+            const parsed = JSON.parse(readFileSync(join(dataDir, "runtimes", "cua", "host-connection.json"), "utf8"));
+            return parsed?.mode === "host" ? decodeDescriptor({ ...parsed, mode: "host" }) : null;
+        }
+        catch {
+            return null;
+        }
+    }
     if (platform === "win32") {
         const here = moduleDir;
         const packagedProxy = join(here, "host-cua", "host-computer-proxy.mjs");

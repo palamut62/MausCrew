@@ -4,7 +4,8 @@
 //
 // The fake CLI is a shebang script Windows cannot exec directly;
 // spawnCli resolves it to `node <script>`, so these run everywhere.
-import { chmodSync } from "node:fs";
+import { chmodSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -12,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ensureDirs } from "../config.ts";
 import type { ProviderInstance } from "../contracts.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
-import { AntigravityDriver } from "./antigravity.ts";
+import { AntigravityDriver, meetsMinimumAgyVersion } from "./antigravity.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-agy-cli.ts");
 
@@ -141,5 +142,48 @@ describe("Antigravity snapshot", () => {
     const snap = await instance.snapshot();
     expect(snap.state).toBe("unavailable");
     await instance.dispose();
+  });
+});
+
+// agy 1.0.0 answers `--print --output-format stream-json` with its help text
+// and exit code 2. Installed is not usable, and the picker said "ready".
+describe("Antigravity version gate", () => {
+  it("accepts the version the driver was written against", () => {
+    expect(meetsMinimumAgyVersion("1.1.12")).toBe(true);
+    expect(meetsMinimumAgyVersion("1.1.0")).toBe(true);
+    expect(meetsMinimumAgyVersion("2.0.0")).toBe(true);
+    expect(meetsMinimumAgyVersion("1.2.3-beta.1")).toBe(true);
+  });
+
+  it("refuses the builds that cannot run a headless turn", () => {
+    expect(meetsMinimumAgyVersion("1.0.0")).toBe(false);
+    expect(meetsMinimumAgyVersion("1.0.99")).toBe(false);
+    expect(meetsMinimumAgyVersion("0.9.7")).toBe(false);
+  });
+
+  it("does not refuse a version string it failed to parse", () => {
+    // Refusing to run because the version could not be read would be the
+    // worse mistake: the CLI may well be new enough.
+    expect(meetsMinimumAgyVersion("agy (dev build)")).toBe(true);
+    expect(meetsMinimumAgyVersion("")).toBe(true);
+  });
+
+  it("reports an old CLI as unavailable, with the version it found", async () => {
+    const old = join(tmpdir(), `fake-agy-old-${process.pid}.mjs`);
+    writeFileSync(old, "#!/usr/bin/env node\nconsole.log('1.0.0');\n");
+    chmodSync(old, 0o755);
+    const instance = await AntigravityDriver.create({
+      instanceId: "agy-old",
+      displayName: undefined,
+      environment: {},
+      enabled: true,
+      config: { cli: old, fullAuto: false },
+    });
+    const snap = await instance.snapshot();
+    expect(snap.state).toBe("unavailable");
+    expect(snap.reason).toContain("1.0.0");
+    expect(snap.reason).toMatch(/1\.1\.0 or newer/);
+    await instance.dispose();
+    rmSync(old, { force: true });
   });
 });

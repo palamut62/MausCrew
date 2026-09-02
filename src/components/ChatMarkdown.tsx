@@ -30,7 +30,10 @@ function CodeBlock({ code, lang, streaming }: { code: string; lang: string; stre
     if (streaming) return;
     const key = `${lang}:${hash(code)}`;
     const cached = highlightCache.get(key);
-    if (cached) return setHtml(cached);
+    if (cached) {
+      queueMicrotask(() => setHtml(cached));
+      return;
+    }
     let alive = true;
     import("shiki")
       .then((shiki) =>

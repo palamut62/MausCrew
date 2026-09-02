@@ -1,6 +1,6 @@
 import { Component, memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Spin } from "./Spin";
-import { ArrowClockwise, ArrowDown, Brain, CaretDown, CaretLeft, CaretRight, Check, Copy, Crown, GitFork, Monitor, Pencil, Square, Warning, WebhooksLogo, X } from "@phosphor-icons/react";
+import { ArrowBendUpLeft, ArrowClockwise, ArrowDown, Brain, CaretDown, CaretLeft, CaretRight, Check, Copy, Crown, GitFork, Monitor, Pencil, Square, Warning, WebhooksLogo, X } from "@phosphor-icons/react";
 import {
   useStore,
   useStreaming,
@@ -241,6 +241,7 @@ function Bubble({
   onCancelEdit,
   onSubmitEdit,
   onRegenerate,
+  onReply,
 }: {
   bot: Bot;
   message: Message;
@@ -250,6 +251,7 @@ function Bubble({
   onCancelEdit: () => void;
   onSubmitEdit: (text: string) => void;
   onRegenerate?: () => void;
+  onReply: () => void;
 }) {
   const { dispatch } = useStore();
   const user = message.role === "user";
@@ -277,9 +279,38 @@ function Bubble({
 
   return (
     <div className={cn("group animate-msg-in flex w-full flex-col", user ? "items-end" : "items-start")}>
+      {message.replyTo && (
+        // The quote is frozen text, not a live view of the original: the
+        // message it points at can still be edited into another version, and
+        // a quote that changes afterwards is not a quote.
+        <button
+          onClick={() => document.getElementById(`message-${message.replyTo!.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" })}
+          className={cn(
+            "mb-1 flex max-w-[72%] items-start gap-1.5 rounded-lg border-l-2 border-accent/50 bg-inset/60 px-2 py-1 text-left text-[11.5px] text-ink-secondary hover:bg-inset",
+            user ? "self-end" : "self-start",
+          )}
+          title="Jump to the message this replies to"
+        >
+          <ArrowBendUpLeft size={12} className="mt-0.5 shrink-0" />
+          <span className="line-clamp-2">{message.replyTo.excerpt}</span>
+        </button>
+      )}
       <div className={cn("flex w-full items-center gap-1.5", user ? "justify-end" : "justify-start")}>
         {/* editing rewinds the thread, so it waits for the turn to end —
             same rule as the version switcher below */}
+        {message.kind === "text" && !webhookView && (
+          <button
+            onClick={onReply}
+            aria-label="Reply to this message"
+            title="Reply to this message"
+            className={cn(
+              "rounded-md p-1.5 text-ink-secondary opacity-0 pointer-coarse:opacity-100 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100",
+              user ? "" : "order-last",
+            )}
+          >
+            <ArrowBendUpLeft size={14} weight="bold" />
+          </button>
+        )}
         {user && message.kind === "text" && !webhookView && !bot.busy && (
           <button
             onClick={onStartEdit}
@@ -574,6 +605,7 @@ const MessagesList = memo(function MessagesList({
   onCancelEdit,
   onSubmitEdit,
   onRegenerate,
+  onReply,
 }: {
   bot: Bot;
   messages: Message[];
@@ -586,12 +618,13 @@ const MessagesList = memo(function MessagesList({
   onCancelEdit: () => void;
   onSubmitEdit: (id: string, text: string) => void;
   onRegenerate: () => void;
+  onReply: (message: Message) => void;
 }) {
   return (
     <>
       {messages.length === 0 && !bot.busy && (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 py-24 text-center">
-          <MausAvatar color={bot.color} name={bot.name} seed={bot.id} shape={bot.shape} size={64} />
+          <MausAvatar color={bot.color} name={bot.name} seed={bot.id} shape={bot.shape} image={bot.avatarImage} size={64} />
           <div className="text-[17px] font-semibold text-ink">{bot.name}</div>
           <div className="max-w-[360px] text-[14px] text-ink-secondary">
             {bot.description || "Send a message to start the conversation."}
@@ -637,13 +670,14 @@ const MessagesList = memo(function MessagesList({
                   onCancelEdit={onCancelEdit}
                   onSubmitEdit={(text) => onSubmitEdit(m.id, text)}
                   onRegenerate={onRegenerate}
+                  onReply={() => onReply(m)}
                 />
               );
           }
         })();
         if (!row) return null;
         return (
-          <div key={m.id} className="contents">
+          <div key={m.id} id={`message-${m.id}`} className="contents">
             {newDay && <DaySeparator at={m.at} />}
             {row}
           </div>
@@ -671,7 +705,11 @@ export function ChatView({ bot }: { bot: Bot }) {
 
   // one message at a time may be in edit mode
   const [editingId, setEditingId] = useState<string | null>(null);
-  useEffect(() => setEditingId(null), [bot.id]);
+  useEffect(() => queueMicrotask(() => setEditingId(null)), [bot.id]);
+  // The message the next send will quote. Cleared when the bot changes, and
+  // by the Composer once the message goes out.
+  const [replyTarget, setReplyTarget] = useState<Message | null>(null);
+  useEffect(() => queueMicrotask(() => setReplyTarget(null)), [bot.id]);
   // stable handler identities — MessagesList is memo'd on them
   const startEdit = useCallback((id: string) => setEditingId(id), []);
   const cancelEdit = useCallback(() => setEditingId(null), []);
@@ -702,7 +740,7 @@ export function ChatView({ bot }: { bot: Bot }) {
   const [follow, setFollow] = useState(true);
   const touchY = useRef(0);
 
-  useEffect(() => setFollow(true), [bot.id]);
+  useEffect(() => queueMicrotask(() => setFollow(true)), [bot.id]);
   useEffect(() => {
     if (follow) scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [bot.id, messages.length, streaming, reasoning, bot.busy, follow]);
@@ -752,7 +790,7 @@ export function ChatView({ bot }: { bot: Bot }) {
           title="Bot settings"
           style={noDrag}
         >
-          <MausAvatar color={bot.color} name={bot.name} seed={bot.id} shape={bot.shape} size={22} />
+          <MausAvatar color={bot.color} name={bot.name} seed={bot.id} shape={bot.shape} image={bot.avatarImage} size={22} />
           <span className="min-w-0 truncate text-[15px] font-semibold text-ink">{bot.name}</span>
           {/* The badge is a label, not a control, and it is the first thing
               worth dropping when a phone header runs out of room. */}
@@ -841,6 +879,7 @@ export function ChatView({ bot }: { bot: Bot }) {
             onCancelEdit={cancelEdit}
             onSubmitEdit={submitEdit}
             onRegenerate={regenerate}
+            onReply={setReplyTarget}
           />
           {provisioning && (
             <div className="flex justify-start">
@@ -890,6 +929,8 @@ export function ChatView({ bot }: { bot: Bot }) {
         key={bot.id}
         bot={bot}
         onEditLast={lastUserMessage && !bot.busy ? () => setEditingId(lastUserMessage.id) : undefined}
+        replyTo={replyTarget}
+        onClearReply={() => setReplyTarget(null)}
       />
 
     </main>

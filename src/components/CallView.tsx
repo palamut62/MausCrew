@@ -222,12 +222,7 @@ function Call({ bot }: { bot: Bot }) {
 
   // Everything already on screen when the call starts has been read or
   // ignored — a call must not open by reciting the backlog.
-  const spokenIds = useRef<Set<string>>(new Set());
-  const started = useRef(false);
-  if (!started.current) {
-    started.current = true;
-    for (const m of messages) spokenIds.current.add(m.id);
-  }
+  const spokenIds = useRef<Set<string>>(new Set(messages.map((message) => message.id)));
 
   // the approval we last asked about aloud, so a card that stays open
   // while the user thinks is not re-read every render
@@ -490,7 +485,7 @@ function Call({ bot }: { bot: Bot }) {
         <X size={18} weight="bold" />
       </button>
 
-      <MausAvatar color={bot.color} name={bot.name} seed={bot.id} shape={bot.shape} size={220} />
+      <MausAvatar color={bot.color} name={bot.name} seed={bot.id} shape={bot.shape} image={bot.avatarImage} size={220} />
 
       <div className="flex flex-col items-center gap-1.5 text-center">
         <div className="text-[20px] font-medium text-ink">{bot.name}</div>

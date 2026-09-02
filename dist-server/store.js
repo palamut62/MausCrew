@@ -141,8 +141,13 @@ export class Store {
         let botsMigrated = false;
         let chiefSeen = false;
         let groupsMigrated = false;
-        for (const b of this.bots)
+        for (const b of this.bots) {
             b.busy = false;
+            if (b.humanTakeover?.active) {
+                b.humanTakeover = undefined;
+                botsMigrated = true;
+            }
+        }
         for (const b of this.bots) {
             if (!b.chiefOfStaff)
                 continue;
@@ -429,6 +434,7 @@ export class Store {
             unread: false,
             modelSelection: profile.modelSelection ?? this.defaultSelection(),
             resumeCursors: {},
+            autoProfile: !(profile.name || profile.title || profile.description),
             createdAt: Date.now(),
         };
         bot.tasks = [{ threadId: bot.threadId, title: UNTITLED_TASK, createdAt: bot.createdAt, resumeCursors: {} }];
@@ -525,6 +531,13 @@ export class Store {
         if (!task || task.lastInstanceId === instanceId)
             return;
         task.lastInstanceId = instanceId;
+        this.saveBots();
+    }
+    setTaskDigest(botId, threadId, digest) {
+        const task = this.taskByThread(botId, threadId);
+        if (!task)
+            return;
+        task.digest = digest;
         this.saveBots();
     }
     // ── tasks ─────────────────────────────────────────────────────────────

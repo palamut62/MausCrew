@@ -74,16 +74,13 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
   const membersRef = useRef(members);
   const busyRef = useRef(Boolean(group.busyBotId));
   const defaultResponderRef = useRef(group.defaultResponder);
-  membersRef.current = members;
-  busyRef.current = Boolean(group.busyBotId);
-  defaultResponderRef.current = group.defaultResponder;
+  useEffect(() => {
+    membersRef.current = members;
+    busyRef.current = Boolean(group.busyBotId);
+    defaultResponderRef.current = group.defaultResponder;
+  }, [group.busyBotId, group.defaultResponder, members]);
 
-  const spokenIds = useRef<Set<string>>(new Set());
-  const started = useRef(false);
-  if (!started.current) {
-    started.current = true;
-    for (const message of messages) spokenIds.current.add(message.id);
-  }
+  const spokenIds = useRef<Set<string>>(new Set(messages.map((message) => message.id)));
 
   const askedApproval = useRef<{ requestId: string; member?: Bot } | null>(null);
   const askedQuestion = useRef<{ requestId: string; member?: Bot } | null>(null);
@@ -418,7 +415,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
                   focused ? "scale-105 border border-hairline bg-raised/70" : "opacity-75",
                 )}
               >
-                <MausAvatar color={member.color} name={member.name} seed={member.id} shape={member.shape} size={94} />
+                <MausAvatar color={member.color} name={member.name} seed={member.id} shape={member.shape} image={member.avatarImage} size={94} />
                 <span className={cn("text-[13px] font-medium", focused ? "text-ink" : "text-ink-secondary")}>
                   {member.name}
                 </span>

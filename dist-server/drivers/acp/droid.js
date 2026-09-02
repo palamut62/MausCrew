@@ -67,7 +67,7 @@ async function applySetting(request, method, params, what) {
     }
     catch (e) {
         throw new Error(`Droid rejected ${what} via ${method}: ${e.message}. ` +
-            `Check that \`droid\` is current (0.196.0+ supports it) and that this account can use that value.`);
+            `Check that \`droid\` is current (0.196.0+ supports it) and that this account can use that value.`, { cause: e });
     }
 }
 // Autonomy maps onto droid's session modes (session/new advertises

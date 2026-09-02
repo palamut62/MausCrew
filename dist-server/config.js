@@ -76,6 +76,7 @@ export function loadConfig() {
     cfg.opencodeGo = { apiKey: process.env.OPENCODE_API_KEY, ...cfg.opencodeGo };
     cfg.deepseekHarness = { apiKey: process.env.DEEPSEEK_API_KEY, ...cfg.deepseekHarness };
     cfg.tts = { key: process.env.MAUSCREW_TTS_KEY ?? process.env.OMB_TTS_KEY, ...cfg.tts };
+    cfg.telegram = { botToken: process.env.MAUSCREW_TELEGRAM_BOT_TOKEN, ...cfg.telegram };
     return cfg;
 }
 /** Merge a partial config into ~/.mauscrew/config.json (secrets never
@@ -97,9 +98,14 @@ export function saveConfig(patch) {
         "deepseekHarness",
         "claudeGateway",
         "tts",
+        "telegram",
         "profile",
         "remoteAccess",
         "analytics",
+        // Was missing, and the API happily accepted it: `Object.assign(cfg,
+        // loadConfig())` after the save read the file back, so switching PC
+        // Browser on returned "off" immediately and every restart forgot it.
+        "pcBrowser",
     ]) {
         if (patch[key] && typeof patch[key] === "object") {
             disk[key] = { ...disk[key], ...patch[key] };
@@ -117,6 +123,11 @@ export function saveConfig(patch) {
         disk.aguiAgents = patch.aguiAgents;
     if (patch.mcpServers)
         disk.mcpServers = patch.mcpServers;
+    // The order is user policy, not derived state. Omitting it here made the
+    // API accept a fallback chain and then clear it during its immediate
+    // loadConfig() refresh, so failover could never survive a save or restart.
+    if (patch.fallbackChain !== undefined)
+        disk.fallbackChain = patch.fallbackChain;
     if (patch.sharedWorkspacePath !== undefined) {
         const sharedWorkspacePath = patch.sharedWorkspacePath.trim();
         if (sharedWorkspacePath)

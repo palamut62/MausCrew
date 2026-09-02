@@ -31,7 +31,7 @@ export function BotMemory({ bot }: { bot: Bot }) {
   }, [bot.id]);
 
   useEffect(() => {
-    void load();
+    queueMicrotask(() => void load());
   }, [load]);
 
   const distil = async () => {

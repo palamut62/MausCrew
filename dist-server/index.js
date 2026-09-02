@@ -17,7 +17,7 @@ import { BoxComputerProvider } from "./computers/providers/box.js";
 import { LocalVmComputerProvider } from "./computers/providers/local.js";
 import { ComputerSupervisor } from "./computers/supervisor.js";
 import { containerComputerAction, containerComputerMcp, containerComputerScreenshot, containerComputerStatus, setupCommands, } from "./container-computer.js";
-import { analyticsEnabled, analyticsLocked, claudeGateways, ensureDirs, gatewayInstanceId, instanceConfigs, aguiAuthEnv, loadConfig, saveConfig, DATA_DIR, EVENTS_DIR, NATIVE_DIR, } from "./config.js";
+import { analyticsEnabled, analyticsLocked, claudeGateways, ensureDirs, gatewayInstanceId, instanceConfigs, aguiAuthEnv, loadConfig, saveConfig, EVENTS_DIR, NATIVE_DIR, } from "./config.js";
 import { checkAguiEndpoint } from "./drivers/agui/endpoint.js";
 import { testAguiConnection } from "./drivers/agui/connection-test.js";
 import { resetPathCache } from "./env-path.js";
@@ -26,11 +26,21 @@ import { normalizePermissionAction } from "./governance/action.js";
 import { GovernanceGateway } from "./governance/gateway.js";
 import { ensureDefaultPolicy, loadPolicy, savePolicy } from "./governance/policy-loader.js";
 import { buildNotification } from "./notify.js";
+import { discoverTelegramChat, enqueueTelegramNotification, sendTelegramNotification, validTelegramChatId, verifyTelegramBot, } from "./telegram.js";
+import { buildReplyQuote, replyQuotePrefix } from "./reply-quote.js";
+import { controlCommand, parseControlInput } from "./computer-control.js";
+import { hostCuaStatus, installHostCua, startHostCua, stopHostCua } from "./host-cua.js";
+import { discoverBrowserSessions, validBrowserEndpoint } from "./browser-sessions.js";
+import { browserProfileStatus, closeSignInWindow, forgetBrowserProfile, openSignInWindow, PROFILE_DIR, validSignInUrl } from "./browser-profile.js";
+import { ProjectManager } from "./projects.js";
+import { deliveryOutcome, ReviewQueue } from "./review-queue.js";
+import { canUpdateStep, WorkflowManager } from "./workflows.js";
+import { taskProfile } from "./task-profile.js";
 import { isEffortLevel } from "./contracts.js";
 import { CONTENT_SECURITY_POLICY } from "./csp.js";
 import { digestSystemBlock } from "./summarization/digest.js";
 import { memoryBlock } from "./memory/store.js";
-import { deterministicEntry, journalDate, planDistil, recordDistil, recordJournal } from "./memory/harvest.js";
+import { deterministicEntry, journalDate, planDistil, planHarvest, recordDistil, recordJournal } from "./memory/harvest.js";
 import { readJournal, readProfile } from "./memory/store.js";
 import { partitionThread } from "./summarization/partition.js";
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.js";
@@ -49,7 +59,7 @@ import { readCuaConnection } from "./local-computer.js";
 import { LocalVmIdleTimer } from "./local-vm-idle.js";
 import { LocalVmLease } from "./local-vm-lease.js";
 import { testMcpConnection } from "./mcp/connection-test.js";
-import { mcpMountsForBot, mcpSecretEnv, validateMcpServer } from "./mcp/registry.js";
+import { mcpDisabledTool, mcpInstructionsPrompt, mcpMountsForBot, mcpSecretEnv, validateMcpServer } from "./mcp/registry.js";
 import { RoutineManager } from "./routines.js";
 import { authenticateRemoteToken, claimPairing, cookieToken, createPairing, listRemoteDevices, revokeRemoteDevice, } from "./remote-access.js";
 import { createWorkspaceSkill, deleteWorkspaceSkill, listWorkspaceSkills, skillIndexPrompt, SkillStoreError, updateWorkspaceSkill, } from "./skills.js";
@@ -131,10 +141,11 @@ function pcBrowserIntegration() {
         args: [pcBrowserProxyPath],
         env: {
             ...AGENTS_NODE_FLAG,
-            MAUSCREW_PLAYWRIGHT_PROFILE: join(DATA_DIR, "pc-browser-profile"),
+            MAUSCREW_PLAYWRIGHT_PROFILE: PROFILE_DIR,
             // Visible by default: a browser acting on the user's own machine should
             // be something they can watch and take over, not a hidden process.
             MAUSCREW_PLAYWRIGHT_HEADLESS: cfg.pcBrowser?.headless ? "1" : "0",
+            ...(cfg.pcBrowser?.cdpEndpoint ? { MAUSCREW_PLAYWRIGHT_CDP: cfg.pcBrowser.cdpEndpoint } : {}),
         },
     };
 }
@@ -151,6 +162,9 @@ function agentsIntegration(botId, threadId, depth) {
             MAUSCREW_THREAD_ID: threadId,
             MAUSCREW_COMMS_TOKEN: COMMS_TOKEN,
             MAUSCREW_TURN_DEPTH: String(depth),
+            // the cap travels with the depth so the proxy decides what to advertise
+            // from the harness's number rather than a copy of it
+            MAUSCREW_COMMS_MAX_DEPTH: String(MAX_COMMS_DEPTH),
         },
     };
 }
@@ -245,6 +259,15 @@ let bootSelection = { instanceId: "", model: "" };
 const store = new Store(() => bootSelection);
 bootSelection = await defaultSelection();
 store.seedIfEmpty();
+const projects = new ProjectManager();
+const workflows = new WorkflowManager();
+const reviewQueue = new ReviewQueue();
+{
+    const stuck = reviewQueue.recoverStuckDeliveries();
+    if (stuck)
+        console.log(`review queue: ${stuck} delivery(s) left mid-send by a previous run marked failed`);
+}
+const reviewDeliveryByThread = new Map();
 /** A bot as a client may see it: no provider session cursors.
  *
  * `resumeCursors` is the harness's own bookkeeping — the native session id
@@ -263,6 +286,22 @@ const publicBot = (bot) => ({
     activeLeafId: store.activeLeaf(bot.threadId),
     tasks: store.tasks(bot.id).map(wireTask),
 });
+function projectWorkspace(value) {
+    if (value === undefined || value === null || value === "")
+        return undefined;
+    if (typeof value !== "string")
+        throw Object.assign(new Error("workspacePath must be a string"), { status: 400 });
+    const path = value.trim();
+    if (path.length > 4_096 || /[\0\r\n]/.test(path)) {
+        throw Object.assign(new Error("workspacePath contains invalid characters"), { status: 400 });
+    }
+    if (!isAbsolute(path))
+        throw Object.assign(new Error("workspacePath must be an absolute path"), { status: 400 });
+    if (resolve(path) === resolve(homedir())) {
+        throw Object.assign(new Error("workspacePath cannot be the home directory itself"), { status: 400 });
+    }
+    return path;
+}
 // ── message pages ──────────────────────────────────────────────────────
 // GET /api/bots hands back every bot with its entire transcript, which is
 // the right answer over loopback and the wrong one over a phone network:
@@ -417,13 +456,100 @@ function hasPendingRequest(requestId) {
 // the last settled assistant text per thread, so a "finished" notification
 // can carry what the bot actually said
 const lastReply = new Map();
+const workCardByThread = new Map();
+function beginWorkCard(bot, threadId, title) {
+    const message = store.appendMessage(threadId, {
+        role: "bot",
+        kind: "structured",
+        text: `${bot.name} is preparing the task`,
+        ui: {
+            component: "live-work",
+            props: { botId: bot.id, title: title.trim().slice(0, 160) || "Working", status: "preparing", startedAt: Date.now() },
+        },
+    });
+    workCardByThread.set(threadId, message.id);
+    broadcast({ kind: "message", threadId, message });
+}
+function updateWorkCard(threadId, patch) {
+    const messageId = workCardByThread.get(threadId);
+    if (!messageId)
+        return;
+    const existing = store.messagesFor(threadId).find((message) => message.id === messageId);
+    if (!existing?.ui || existing.ui.component !== "live-work")
+        return;
+    const message = store.patchMessage(threadId, messageId, {
+        text: patch.summary ?? existing.text,
+        ui: { component: "live-work", props: { ...existing.ui.props, ...patch, updatedAt: Date.now() } },
+    });
+    if (message)
+        broadcast({ kind: "message.patch", threadId, message });
+    if (patch.status === "done" || patch.status === "failed" || patch.status === "stopped") {
+        workCardByThread.delete(threadId);
+    }
+}
+function workflowUi(workflow) {
+    return {
+        component: "task-list",
+        props: {
+            workflowId: workflow.id,
+            title: workflow.title,
+            status: workflow.status,
+            items: workflow.steps.map((step) => ({
+                id: step.id,
+                label: step.title,
+                status: step.status,
+                assignee: step.assigneeBotId ? store.bot(step.assigneeBotId)?.name ?? step.assigneeBotId : undefined,
+                output: step.output,
+            })),
+        },
+    };
+}
+function publishWorkflow(workflow) {
+    const existing = store
+        .messagesFor(workflow.threadId)
+        .find((message) => message.ui?.props.workflowId === workflow.id);
+    if (existing) {
+        const message = store.patchMessage(workflow.threadId, existing.id, {
+            text: `${workflow.title}: ${workflow.status}`,
+            ui: workflowUi(workflow),
+        });
+        if (message)
+            broadcast({ kind: "message.patch", threadId: workflow.threadId, message });
+    }
+    else {
+        const message = store.appendMessage(workflow.threadId, {
+            role: "bot",
+            kind: "structured",
+            text: `${workflow.title}: ${workflow.status}`,
+            ui: workflowUi(workflow),
+        });
+        broadcast({ kind: "message", threadId: workflow.threadId, message });
+    }
+    broadcast({ kind: "workflow", workflow });
+}
+function publishReview(item) {
+    const existing = store
+        .messagesFor(item.sourceThreadId)
+        .find((message) => message.ui?.component === "review-item" && message.ui.props.id === item.id);
+    if (existing) {
+        const message = store.patchMessage(item.sourceThreadId, existing.id, {
+            text: `${item.title}: ${item.status}`,
+            ui: { component: "review-item", props: item },
+        });
+        if (message)
+            broadcast({ kind: "message.patch", threadId: item.sourceThreadId, message });
+    }
+    broadcast({ kind: "review", item });
+}
 /** Put a notification on the wire. Clients decide what to do with it — a
  * desktop notification now, a push to a paired phone later. */
 function notify(notification) {
     // nested rather than spread — the frame's own `kind` names the frame,
     // exactly like {kind:"message", message} and {kind:"bot", bot}
-    if (notification)
+    if (notification) {
         broadcast({ kind: "notify", notification });
+        enqueueTelegramNotification(cfg, notification);
+    }
 }
 // Group threads: the fold needs to know WHO is talking — the turn engine
 // records the active member here before dispatching its turn.
@@ -473,6 +599,9 @@ const localVmLease = new LocalVmLease(30 * 60_000);
 const localVmOwnerBusy = (botId) => store.bot(botId)?.busy === true;
 let localVmLifecycleBusy = false;
 let localVmActiveThread = null;
+/** Same idea for the host driver: one install or start at a time, so a
+ * double-click cannot run two downloads into the same path. */
+let hostCuaBusy = false;
 const LOCAL_VM_IDLE_MS = 8 * 60 * 60_000;
 const localVmIdle = new LocalVmIdleTimer(LOCAL_VM_IDLE_MS, () => localVmLifecycleBusy || localVmActiveThread !== null, async () => {
     // Fence lifecycle and turn dispatch before the first runtime inspection.
@@ -538,7 +667,8 @@ bus.subscribe((event) => {
         // Deterministic on purpose: this codebase holds that a turn the user pays
         // for must be visible, and a silent summarisation turn after every
         // conversation is exactly the invisible cost that rule prevents.
-        void noteSessionInMemory(event.threadId);
+        if (!digesting.has(event.threadId))
+            void noteSessionInMemory(event.threadId);
     }
     broadcast({ kind: "runtime", event });
     routines?.handleRuntimeEvent(event);
@@ -559,6 +689,10 @@ bus.subscribe((event) => {
             }
             break;
         case "item.completed":
+            if (event.itemType === "assistant_text" && digesting.has(event.threadId)) {
+                digesting.get(event.threadId).text = event.text.trim();
+                break;
+            }
             if (event.itemType === "assistant_text" && bot && distilling.has(bot.id)) {
                 distilling.delete(bot.id);
                 const brief = event.text.trim();
@@ -623,6 +757,7 @@ bus.subscribe((event) => {
             break;
         case "item.started":
             if (event.itemType === "tool") {
+                updateWorkCard(event.threadId, { status: "working", lastAction: event.title ?? "Using a tool" });
                 // ask_bot's raw tool chip is redundant — the internal endpoint
                 // appends a richer "Messaged @X" chip linking to the channel
                 if (event.title?.endsWith("__ask_bot"))
@@ -642,6 +777,10 @@ bus.subscribe((event) => {
             }
             break;
         case "request.opened": {
+            updateWorkCard(event.threadId, {
+                status: "action-needed",
+                lastAction: event.summary.slice(0, 240),
+            });
             const permission = event.requestType === "permission";
             const asker = bot ?? (speaker ? store.bot(speaker.botId) : undefined);
             if (permission && asker && event.requestId) {
@@ -658,7 +797,18 @@ bus.subscribe((event) => {
                     requestId,
                     raw: event.raw,
                 });
-                const policy = governance.decide(action);
+                // A tool the user switched off on its MCP server is not a policy
+                // question — it is not on the menu. Decided before the policy engine
+                // so no rule, Auto mode, or "always allow" grant can reach past it.
+                const disabledMcp = mcpDisabledTool(cfg, asker.id, event.tool);
+                const policy = disabledMcp
+                    ? {
+                        outcome: "deny",
+                        ruleId: "mcp.tool-disabled",
+                        reason: `${disabledMcp.tool} is disabled on the MCP server "${disabledMcp.server}".`,
+                        failClosed: false,
+                    }
+                    : governance.decide(action);
                 void (async () => {
                     try {
                         // The row must exist before an allow can reach a provider. An
@@ -719,21 +869,35 @@ bus.subscribe((event) => {
                         notify(buildNotification("approval", asker, event.threadId, event.summary));
                     }
                     catch (error) {
-                        // Governance/audit errors are never converted into an allow.
-                        try {
-                            await instance?.adapter.respondToRequest(event.threadId, requestId, {
-                                behavior: "deny",
-                                message: "MausCrew governance unavailable — action denied",
-                            });
-                        }
-                        catch {
-                            // The provider may already have exited; the visible failure is
-                            // still useful and no action was approved.
+                        const message = error instanceof Error ? error.message : String(error);
+                        // A turn that has already ended is not a governance failure. The
+                        // decision was made and recorded, the tool never ran, and there
+                        // is simply nobody left to tell — saying "governance error: no
+                        // active turn with a permission broker on this thread" describes
+                        // the plumbing rather than what happened to the user's request.
+                        const turnGone = /no active turn|no such pending request|provider unavailable/i.test(message);
+                        if (!turnGone) {
+                            // Governance/audit errors are never converted into an allow.
+                            try {
+                                await instance?.adapter.respondToRequest(event.threadId, requestId, {
+                                    behavior: "deny",
+                                    message: "MausCrew governance unavailable — action denied",
+                                });
+                            }
+                            catch {
+                                // The provider may already have exited; the visible failure is
+                                // still useful and no action was approved.
+                            }
                         }
                         pushMessage({
                             role: "bot",
                             kind: "activity",
-                            tool: { name: `governance error: ${error instanceof Error ? error.message : String(error)}`, ok: false },
+                            tool: {
+                                name: turnGone
+                                    ? `${event.tool} was not run — the turn ended before the approval was answered`
+                                    : `governance error: ${message}`,
+                                ok: false,
+                            },
                         });
                     }
                 })();
@@ -775,6 +939,7 @@ bus.subscribe((event) => {
             break;
         }
         case "request.resolved": {
+            updateWorkCard(event.threadId, { status: "working", lastAction: "User response received" });
             const messageId = event.requestId ? askMessageByRequest.get(`${event.threadId}:${event.requestId}`) : null;
             if (messageId) {
                 const existing = store.messagesFor(event.threadId).find((m) => m.id === messageId);
@@ -806,6 +971,12 @@ bus.subscribe((event) => {
             // the next one, and a red error for something the user never had to see
             // is worse than no error at all.
             const verdict = classifyFailure(event.message);
+            // A refusal to authenticate is the engine's own verdict on itself, and
+            // it outranks whatever its snapshot guessed from a file on disk. Held
+            // on the registry so the picker stops offering an engine that cannot
+            // run until a turn proves otherwise.
+            if (event.setup && bot)
+                registry.noteAuthFailure(bot.modelSelection.instanceId, event.message);
             if (bot && verdict.move && failoverCandidate(bot.id, event.threadId)) {
                 lastLimitFailure.set(event.threadId, { message: event.message, verdict });
                 break;
@@ -826,8 +997,46 @@ bus.subscribe((event) => {
             break;
         }
         case "turn.completed": {
+            // Whatever the last failure said about signing in, a completed turn is
+            // proof it no longer holds.
+            if (event.ok && bot)
+                registry.clearAuthFailure(bot.modelSelection.instanceId);
+            const digestJob = digesting.get(event.threadId);
+            if (digestJob) {
+                digesting.delete(event.threadId);
+                if (event.ok && digestJob.text.trim()) {
+                    const owner = bot ?? (speaker ? store.bot(speaker.botId) : undefined);
+                    if (owner) {
+                        store.setTaskDigest(owner.id, event.threadId, {
+                            text: digestJob.text.trim(),
+                            throughMessageId: digestJob.plan.throughMessageId,
+                            messageCount: digestJob.plan.foldedCount ?? 0,
+                            at: Date.now(),
+                        });
+                        pushMessage({
+                            role: "bot",
+                            kind: "activity",
+                            tool: { name: `memory: compacted ${digestJob.plan.foldedCount ?? 0} earlier messages`, ok: true },
+                        });
+                    }
+                }
+            }
             const reply = lastReply.get(event.threadId) ?? "";
             lastReply.delete(event.threadId);
+            const reviewId = reviewDeliveryByThread.get(event.threadId);
+            if (reviewId) {
+                reviewDeliveryByThread.delete(event.threadId);
+                const item = reviewQueue.update(reviewId, deliveryOutcome(reply, event.ok));
+                if (item)
+                    publishReview(item);
+            }
+            updateWorkCard(event.threadId, {
+                status: (bot ?? (speaker ? store.bot(speaker.botId) : undefined))?.humanTakeover?.active ? "human-control" : event.ok ? "done" : "failed",
+                takeover: (bot ?? (speaker ? store.bot(speaker.botId) : undefined))?.humanTakeover?.active,
+                summary: (bot ?? (speaker ? store.bot(speaker.botId) : undefined))?.humanTakeover?.active
+                    ? "Bot actions are paused while the user controls the computer."
+                    : reply.trim().slice(0, 1_200) || (event.ok ? "Task completed." : "Task did not complete."),
+            });
             // one lifetime usage tick per terminal turn; cost arrives only from
             // drivers that report it (claude today), others tally tokens alone.
             const owner = bot ?? (group?.busyBotId ? store.bot(group.busyBotId) : undefined);
@@ -852,6 +1061,8 @@ bus.subscribe((event) => {
                         }
                     });
                 }
+                if (event.ok && !digestJob)
+                    scheduleHarvest(event.threadId);
             }
             // A delegated turn's terminal state belongs in the A⇄B channel:
             // the request was mirrored there when the delegation drained, and a
@@ -1033,8 +1244,8 @@ function startScreenPoller(botId, boxId) {
                 try {
                     // boxId is resolved once per turn — re-resolving per frame cost a
                     // full LIST of the account's boxes
-                    const { png, format } = await box.screenshotBox(cfg, botId, boxId);
-                    const frame = { png, mime: format === "jpeg" ? "image/jpeg" : "image/png" };
+                    const { png, format, display } = await box.screenshotBox(cfg, botId, boxId);
+                    const frame = { png, mime: format === "jpeg" ? "image/jpeg" : "image/png", ...(display ? { display } : {}) };
                     entry.last = frame;
                     broadcast({ kind: "screen", botId, ...frame });
                 }
@@ -1083,7 +1294,7 @@ async function finalScreenFrame(botId) {
 }
 // ── turn dispatch (upstream ProviderCommandReactor, miniature) ──────────
 async function startTurn(botId, text, opts) {
-    const bot = store.bot(botId);
+    let bot = store.bot(botId);
     if (!bot)
         throw Object.assign(new Error("no such bot"), { status: 404 });
     if (bot.busy)
@@ -1099,6 +1310,12 @@ async function startTurn(botId, text, opts) {
     if (!task)
         throw Object.assign(new Error("no such task"), { status: 404 });
     const commsDepth = opts?.commsDepth ?? 0;
+    if (bot.autoProfile && text.trim()) {
+        const profile = taskProfile(text, store.bots.filter((candidate) => candidate.id !== botId).map((candidate) => candidate.name));
+        store.patchBot(bot.id, { ...profile, autoProfile: false });
+        bot = store.bot(bot.id);
+        broadcast({ kind: "bot", bot: wireBot(bot) });
+    }
     // a task takes its name from the first thing you asked it to do
     if (text.trim())
         store.titleTaskFromFirstMessage(bot.id, text, threadId);
@@ -1133,12 +1350,21 @@ async function startTurn(botId, text, opts) {
     if (effort && !instance.adapter.capabilities.effortLevels?.includes(effort)) {
         throw Object.assign(new Error(`effort "${effort}" is not offered by this bot's engine — choose another level in settings`), { status: 409 });
     }
+    // A reply quotes one earlier message in this same thread. Resolved against
+    // this thread's own messages rather than trusted from the client.
+    const quote = buildReplyQuote(store.messagesFor(threadId), opts?.replyToId);
     // an edit hands us its already-branched user message; a plain send appends
     let userMessage = opts?.userMessage;
     if (!userMessage) {
-        userMessage = store.appendMessage(threadId, { role: "user", kind: "text", text });
+        userMessage = store.appendMessage(threadId, {
+            role: "user",
+            kind: "text",
+            text,
+            ...(quote ? { replyTo: quote } : {}),
+        });
         broadcast({ kind: "message", threadId, message: userMessage });
     }
+    beginWorkCard(bot, threadId, task.title === "New task" ? text : task.title);
     // transcript for API-backed drivers: settled text turns on the ACTIVE
     // branch only — abandoned forks never reach the model.
     //
@@ -1174,12 +1400,14 @@ async function startTurn(botId, text, opts) {
     // the stale provider cursor. This keeps memory attached to the bot rather
     // than whichever CLI happened to answer last.
     const handedOver = Boolean(opts?.overrideInstanceId) || (Boolean(task.lastInstanceId) && task.lastInstanceId !== instanceId);
-    const needsHistoryInline = (rewound || handedOver) && instance.driverKind !== "grok" && transcript.length > 0;
-    const turnText = needsHistoryInline
+    const needsHistoryInline = (rewound || handedOver || instance.driverKind === "claudeAgent") && instance.driverKind !== "grokAgent" && transcript.length > 0;
+    const turnText = replyQuotePrefix(quote) + (needsHistoryInline
         ? [
             handedOver
                 ? "[This conversation continues from another engine that became unavailable. It has no memory of what follows, so here is the history so far:]"
-                : "[The user rewound this conversation (edited a message or switched to another version). Everything before this point was replaced by the following history:]",
+                : rewound
+                    ? "[The user rewound this conversation (edited a message or switched to another version). Everything before this point was replaced by the following history:]"
+                    : "[MausCrew starts each Claude turn in a fresh isolated provider session. Here is the persisted conversation history:]",
             "",
             ...transcript.map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.text}`),
             "",
@@ -1187,7 +1415,7 @@ async function startTurn(botId, text, opts) {
             "",
             text,
         ].join("\n")
-        : text;
+        : text);
     const persona = [
         `You are ${bot.name}, a personal bot in MausCrew.`,
         bot.title && `Role: ${bot.title}.`,
@@ -1261,8 +1489,15 @@ async function startTurn(botId, text, opts) {
                     throw new Error("this model engine cannot control this computer — choose Claude or an ACP engine, or select another destination");
                 }
                 const cua = readCuaConnection();
-                if (!cua)
-                    throw new Error("CUA Driver is not ready for this computer — check permissions and restart MausCrew");
+                // Each platform is unready for its own reason, and "check permissions
+                // and restart" is only the macOS one.
+                if (!cua) {
+                    throw new Error(process.platform === "linux"
+                        ? `the desktop driver is not serving this session — ${(await hostCuaStatus()).problem ?? "install it in App Settings → Local computer"}`
+                        : process.platform === "win32"
+                            ? "the desktop driver is not available in this build — reinstall MausCrew, or use a cloud computer"
+                            : "CUA Driver is not ready for this computer — check permissions and restart MausCrew");
+                }
                 integrations.localComputer = cua;
                 computerKind = "local";
             }
@@ -1355,11 +1590,16 @@ async function startTurn(botId, text, opts) {
             // integrations.agents gate below, the prompt hint) — a bot on a driver
             // without it must not be told about tools it cannot call. Any bot can
             // still be the TARGET of ask_bot regardless of its driver.
-            if (commsDepth < MAX_COMMS_DEPTH &&
-                instance.adapter.capabilities.agentsMcp === true &&
-                store.bots.filter((b) => b.id !== bot.id && !b.hidden).length > 0) {
+            const hasVisiblePeers = store.bots.some((candidate) => candidate.id !== bot.id && !candidate.hidden);
+            if (instance.adapter.capabilities.agentsMcp === true) {
+                // The proxy itself drops every calling tool at the cap, so a turn some
+                // other bot started still cannot start a third. What it keeps are the
+                // two reporting tools — a delegated teammate has to be able to mark
+                // the workflow step it was handed and to queue outbound text for
+                // approval, and mounting nothing at all left it doing neither.
                 integrations.agents = agentsIntegration(bot.id, threadId, commsDepth);
             }
+            const canReachPeers = commsDepth < MAX_COMMS_DEPTH;
             // self-scheduling: the bot puts its own recurring work on the
             // Automations calendar. Unlike comms this is NOT depth-gated — a
             // routine that wakes up needs the tools to reschedule or retire
@@ -1370,14 +1610,16 @@ async function startTurn(botId, text, opts) {
             // @mentions in the user's message (the composer's tagging UI) become
             // an explicit delegation nudge — the agent still does the ask_bot call
             // itself, so the harness stays the single owner of turns/permissions
-            const tagged = integrations.agents
+            const tagged = canReachPeers && integrations.agents
                 ? mentionedBots(text, store.bots.filter((b) => b.id !== bot.id))
                 : [];
             const coordinationPrompt = bot.chiefOfStaff
-                ? chiefOfStaffSystemPrompt(bot.id, store.bots, Boolean(integrations.agents))
-                : integrations.agents
+                ? chiefOfStaffSystemPrompt(bot.id, store.bots, canReachPeers && Boolean(integrations.agents))
+                : integrations.agents && canReachPeers && hasVisiblePeers
                     ? "You can work with the user's other bots through the agents tools — list_bots shows who's available, ask_bot sends one of them a message and returns their reply, and ask_bots puts independent questions to several of them at once instead of waiting out one peer before starting the next."
-                    : "";
+                    : integrations.agents && !canReachPeers
+                        ? "This turn was handed to you by another bot, so you cannot pass it on again. You can still report on the work: update_workflow_step marks a stage you were assigned, and queue_review puts outbound text in front of the user instead of sending it."
+                        : "";
             // The prompt above this line is an inventory: what the bot has. These
             // are conduct: how to use it. The second is what separates a capable
             // model from a good teammate, and it was missing entirely.
@@ -1385,10 +1627,10 @@ async function startTurn(botId, text, opts) {
                 CONDUCT_RULES +
                 " " +
                 coordinatorRules({
-                    hasPeers: Boolean(integrations.agents),
+                    hasPeers: canReachPeers && Boolean(integrations.agents) && hasVisiblePeers,
                     // Engines that run their own CLI can spawn their own workers; a
                     // gateway answering raw messages cannot.
-                    hasOwnSubagents: instance.driverKind === "claude" || instance.driverKind === "codex",
+                    hasOwnSubagents: instance.driverKind === "claudeAgent" || instance.driverKind === "codex",
                 });
             // Rules stated once lose against everything said since. Re-stated on a
             // cadence rather than every turn, so the reminder stays a reminder.
@@ -1414,9 +1656,17 @@ async function startTurn(botId, text, opts) {
                 // the active task's own session — another task's cursor would
                 // resume the wrong conversation and defeat the context bubble.
                 // A handover has no session on this engine at all.
-                resumeCursor: rewound || handedOver ? undefined : task.resumeCursors[instanceId],
+                // Claude sessions retain their original cwd and loaded parent
+                // instructions when resumed. Fresh sessions plus the persisted
+                // transcript keep context in MausCrew while honoring the private
+                // workspace boundary on every turn.
+                resumeCursor: rewound || handedOver || instance.driverKind === "claudeAgent" ? undefined : task.resumeCursors[instanceId],
                 transcript,
-                cwd: bot.workspacePath || cfg.sharedWorkspacePath || undefined,
+                // Claude's fallback cwd used to be the user's home directory. That
+                // made parent CLAUDE.md files and host project state part of an
+                // otherwise unconfigured bot. Give it the same private workspace as
+                // the Skill Center; explicit project/shared workspaces still win.
+                cwd: bot.workspacePath || cfg.sharedWorkspacePath || (instance.driverKind === "claudeAgent" ? skillsWorkspaceFor(bot) : undefined),
                 runtimeFeatures: { dynamicCordis: bot.dynamicCordis === true },
                 system: persona +
                     // what fell out of the transcript above, so it is knowledge the bot
@@ -1438,7 +1688,9 @@ async function startTurn(botId, text, opts) {
                         ? " At a sign-in, password, MFA, CAPTCHA, or other protected-input step, stop and ask the user to complete it on the visible computer. Never type their password or ask them to paste a password or one-time code into chat."
                         : "") +
                     (integrations.pcBrowser
-                        ? " You can drive a browser on the user's own computer with the pc_browser tools: pc_browser_open to go somewhere, pc_browser_snapshot for the elements on the page, then click/fill/select/press by ref, and pc_browser_read for the text. It runs in MausCrew's own browser profile, not the user's everyday one, so you are only signed into what you signed into. Prefer these over screenshots and coordinate clicks — they know when a page has finished loading and what an element actually is. At any sign-in, password, MFA or CAPTCHA step, stop and ask the user to do it themselves in that window."
+                        ? ` You can drive a browser on the user's own computer with the pc_browser tools: pc_browser_open to go somewhere, pc_browser_snapshot for the elements on the page, then click/fill/select/press by ref, and pc_browser_read for the text. ${cfg.pcBrowser?.cdpEndpoint
+                            ? "The user explicitly attached a remote-debug browser session, which may contain signed-in tabs. Stay within the task's relevant tabs, never inspect unrelated accounts, and ask the user to take control for protected input."
+                            : "It runs in MausCrew's own browser profile, so you are only signed into what you signed into."} Prefer these over screenshots and coordinate clicks — they know when a page has finished loading and what an element actually is. At any sign-in, password, MFA or CAPTCHA step, stop and ask the user to do it themselves in that window.`
                         : "") +
                     // gated on the integration, not the key: the hint only goes to a
                     // bot whose driver actually mounted the tools
@@ -1446,9 +1698,11 @@ async function startTurn(botId, text, opts) {
                         ? " The user's connected apps (Gmail, Calendar, Slack, Notion, and the rest) are reachable through the composio tools — find the right one with COMPOSIO_SEARCH_TOOLS, read its arguments with COMPOSIO_GET_TOOL_SCHEMAS, then run it with COMPOSIO_MULTI_EXECUTE_TOOL. Reach for them before telling the user you have no access to a service."
                         : "") +
                     (integrations.mcp?.length
-                        ? " User-configured MCP tools are available. Their calls are governed by the same ALLOW / ASK / DENY policy and audit trail as native tools."
+                        ? " User-configured MCP tools are available. Their calls are governed by the same ALLOW / ASK / DENY policy and audit trail as native tools." +
+                            mcpInstructionsPrompt(cfg, bot.id)
                         : "") +
-                    " When a compact visual result would be clearer, you may add one fenced mauscrew-ui JSON block using only metric-card, progress, table, task-list, timeline, status-grid, or agent-result. Never include JavaScript; always include normal prose too." +
+                    " When a compact visual result would be clearer, you may add one fenced mauscrew-ui JSON block using only metric-card, progress, table, task-list, timeline, status-grid, agent-result, or file-list. Never include JavaScript; always include normal prose too." +
+                    " When a turn produces files the user will want — a spreadsheet, a document, a report, an export — end it with a file-list block: {\"component\":\"file-list\",\"props\":{\"title\":\"…\",\"items\":[{\"name\":\"…\",\"path\":\"<absolute path>\",\"kind\":\"xlsx\",\"bytes\":12345,\"note\":\"what it contains\"}]}}. Absolute paths only; the user gets a copy and a reveal-in-folder button rather than having to hunt for what you wrote." +
                     // gated on the integration for the usual reason, and worded hard:
                     // without it a model reaches for the host CLI's own scheduler or a
                     // shell cron, tells the user it's set up, and nothing ever fires.
@@ -1484,12 +1738,14 @@ async function startTurn(botId, text, opts) {
             if (localVmActiveThread === threadId)
                 localVmActiveThread = null;
             if (e instanceof TurnInterruptedBeforeDispatch) {
+                updateWorkCard(threadId, { status: "stopped", summary: "Stopped before the bot began acting." });
                 store.patchBot(bot.id, { busy: false });
                 broadcast({ kind: "bot", bot: wireBot(store.bot(bot.id)) });
                 runNextSteer(threadId);
                 return;
             }
             const message = e instanceof Error ? e.message : String(e);
+            updateWorkCard(threadId, { status: "failed", summary: message.slice(0, 500) });
             const failure = store.appendMessage(threadId, {
                 role: "bot",
                 kind: "activity",
@@ -1584,6 +1840,14 @@ function broadcastGroup(groupId) {
     if (group)
         broadcast({ kind: "group", group });
 }
+/** Agent tools may originate from a bot's private task or from a Room where
+ * that bot is an explicit member. This keeps Project-room orchestration
+ * accountable without pretending the shared Room thread is a private task. */
+function botOwnsConversation(botId, threadId) {
+    if (store.taskByThread(botId, threadId))
+        return true;
+    return store.groupByThread(threadId)?.memberIds.includes(botId) === true;
+}
 // comms bus: passed into the visibility helpers in comms-visibility.ts so
 // they can mirror messages + chips without re-deriving SSE plumbing. Same
 // shape every comms entry point uses (ask_bot, delegate_bot).
@@ -1609,6 +1873,7 @@ spoken = new Set()) {
     const bot = store.bot(botId);
     if (!group || !bot)
         return;
+    const project = projects.get(group.projectId ?? "");
     spoken.add(botId);
     const instance = registry.get(bot.modelSelection.instanceId);
     const userName = cfg.profile?.name?.trim() || "User";
@@ -1622,9 +1887,22 @@ spoken = new Set()) {
         broadcast({ kind: "message", threadId: group.threadId, message: failure });
         return;
     }
+    // Private turns normalize and forward the selected model just before
+    // dispatch. Room turns used to skip both steps, so a bot configured for
+    // Claude Sonnet could silently run whatever model the host CLI happened to
+    // default to instead. Keep every conversation surface on the same choice.
+    const normalized = normalizeModelSelection(bot.modelSelection, instance);
+    if (normalized.changed && normalized.reason) {
+        store.patchBot(bot.id, { modelSelection: normalized.selection });
+        noteModelNormalized(group.threadId, normalized.reason);
+        const patched = store.bot(bot.id);
+        if (patched)
+            broadcast({ kind: "bot", bot: wireBot(patched) });
+    }
     store.patchGroup(group.id, { busyBotId: bot.id });
     broadcastGroup(group.id);
     groupSpeakers.set(group.threadId, { botId: bot.id, name: bot.name, color: bot.color });
+    beginWorkCard(bot, group.threadId, `${group.name}: ${bot.name}`);
     const roster = group.memberIds
         .map((id) => store.bot(id))
         .filter((b) => Boolean(b))
@@ -1636,6 +1914,15 @@ spoken = new Set()) {
         bot.description && `About: ${bot.description}`,
         `Room members: ${roster}, and ${userName} (the human).`,
         group.bulletin.trim() && `Room bulletin (shared instructions for everyone):\n${group.bulletin.trim()}`,
+        project && projects.systemBlock(project.id),
+        instance.adapter.capabilities.agentsMcp === true && bot.chiefOfStaff
+            ? chiefOfStaffSystemPrompt(bot.id, store.bots, true)
+            : instance.adapter.capabilities.agentsMcp === true
+                ? "You can coordinate with the user's other bots through list_bots, ask_bot, ask_bots, and delegate_bot. If a visible workflow assigns you a step, call update_workflow_step when you start and when you finish or block. Use queue_review for outbound drafts that need the user's approval."
+                : "",
+        project && instance.adapter.capabilities.agentsMcp === true
+            ? "This is a Project Room. Bring room teammates into project work with @mentions so their turn inherits this project's isolated transcript, shared workspace, instructions, and resources. Use ask_bot only for consultation that does not need the project workspace."
+            : "",
         `Reply as yourself, briefly and conversationally. To bring a teammate in, mention them like @Name — they'll see the conversation and respond.`,
     ]
         .filter(Boolean)
@@ -1663,8 +1950,20 @@ spoken = new Set()) {
                 finish();
         });
         const timer = setTimeout(finish, 5 * 60_000);
+        const integrations = {};
+        if (instance.adapter.capabilities.agentsMcp === true) {
+            integrations.agents = agentsIntegration(bot.id, group.threadId, 0);
+        }
         instance.adapter
-            .sendTurn({ threadId: group.threadId, text, system })
+            .sendTurn({
+            threadId: group.threadId,
+            text,
+            model: normalized.selection.model || instance.models.default,
+            effort: normalized.selection.effort,
+            system,
+            cwd: project?.workspacePath ?? bot.workspacePath ?? cfg.sharedWorkspacePath,
+            integrations,
+        })
             .catch((err) => {
             const failure = store.appendMessage(group.threadId, {
                 role: "bot",
@@ -1727,6 +2026,7 @@ function configStatus() {
         xai: { configured: Boolean(cfg.xai?.key) },
         composio: {
             configured: Boolean(cfg.composio?.apiKey),
+            recoveryRequired: Boolean(!cfg.composio?.apiKey && (cfg.composio?.userId || cfg.composio?.sessionId)),
         },
         box: { configured: Boolean(cfg.box?.token) },
         opencodeGo: { configured: Boolean(cfg.opencodeGo?.apiKey) },
@@ -1746,7 +2046,11 @@ function configStatus() {
         // at. instanceId is echoed too — it is what the picker routes by, and
         // deriving it a second time in the renderer is how the two drift apart.
         fallbackChain: cfg.fallbackChain ?? [],
-        pcBrowser: { enabled: cfg.pcBrowser?.enabled === true, headless: cfg.pcBrowser?.headless === true },
+        pcBrowser: {
+            enabled: cfg.pcBrowser?.enabled === true,
+            headless: cfg.pcBrowser?.headless === true,
+            cdpEndpoint: cfg.pcBrowser?.cdpEndpoint ?? "",
+        },
         claudeGateways: claudeGateways(cfg).map((gw) => ({
             id: gw.id,
             instanceId: gatewayInstanceId(gw.id),
@@ -1767,6 +2071,12 @@ function configStatus() {
         // the chosen voice is a setting, not a secret; the key is reported the
         // same configured-or-not way as every other credential
         tts: tts.describeVoice(cfg),
+        telegram: {
+            configured: Boolean(cfg.telegram?.botToken),
+            enabled: cfg.telegram?.enabled !== false,
+            chatId: cfg.telegram?.chatId ?? "",
+            botUsername: cfg.telegram?.botUsername ?? "",
+        },
         // not a secret — the sidebar shows it
         profile: { name: cfg.profile?.name ?? "", email: cfg.profile?.email ?? "" },
         // The renderer must not load PostHog before it has heard this, so the flag
@@ -2017,6 +2327,24 @@ function handOverTurn(threadId) {
  * recognised and filed as memory instead of being read as conversation.
  */
 const distilling = new Set();
+/** Conversation folds are explicit, model-written bookkeeping turns. They
+ * run only after the normal reply has settled, and their result is stored on
+ * the task instead of being mistaken for an answer to the user. */
+const digesting = new Map();
+function scheduleHarvest(threadId) {
+    const bot = store.botByThread(threadId);
+    const task = bot ? store.taskByThread(bot.id, threadId) : undefined;
+    if (!bot || !task || digesting.has(threadId) || bot.busy)
+        return;
+    const plan = planHarvest(store.activePath(threadId), task.digest);
+    if (!plan)
+        return;
+    digesting.set(threadId, { plan, text: "" });
+    void startTurn(bot.id, plan.prompt, { threadId, unattended: true }).catch((error) => {
+        digesting.delete(threadId);
+        console.error(`memory: conversation digest could not start for ${threadId}: ${String(error)}`);
+    });
+}
 /** One journal entry per bot per day, written after the day's last turn. */
 const journalled = new Map();
 function noteSessionInMemory(threadId) {
@@ -2150,10 +2478,17 @@ const server = createServer(async (req, res) => {
             return json(res, 201, { ...pairing, url: `${publicUrl.origin}/pair?code=${encodeURIComponent(pairing.code)}` });
         }
         m = path.match(/^\/api\/remote\/devices\/([\w-]+)$/);
-        if (m && method === "DELETE") {
+        const remoteDeviceId = m?.[1];
+        if (remoteDeviceId && method === "GET") {
             if (!localRequest)
                 return json(res, 403, { error: "desktop only" });
-            return revokeRemoteDevice(m[1])
+            const device = listRemoteDevices().find((candidate) => candidate.id === remoteDeviceId);
+            return device ? json(res, 200, { device }) : json(res, 404, { error: "no such device" });
+        }
+        if (remoteDeviceId && method === "DELETE") {
+            if (!localRequest)
+                return json(res, 403, { error: "desktop only" });
+            return revokeRemoteDevice(remoteDeviceId)
                 ? json(res, 200, { ok: true })
                 : json(res, 404, { error: "no such device" });
         }
@@ -2205,7 +2540,7 @@ const server = createServer(async (req, res) => {
                 if (!from)
                     return json(res, 403, { error: "unknown sender" });
                 const fromThreadId = String(body.fromThreadId ?? from.threadId);
-                if (!store.taskByThread(from.id, fromThreadId)) {
+                if (!botOwnsConversation(from.id, fromThreadId)) {
                     return json(res, 403, { error: "source thread does not belong to sender" });
                 }
                 let currentFrom = from;
@@ -2231,7 +2566,7 @@ const server = createServer(async (req, res) => {
                     const freshTarget = store.bot(toBotId);
                     if (!freshFrom || !freshTarget)
                         return json(res, 404, { error: "no such bot" });
-                    if (!store.taskByThread(freshFrom.id, fromThreadId)) {
+                    if (!botOwnsConversation(freshFrom.id, fromThreadId)) {
                         return json(res, 404, { error: "source task no longer exists" });
                     }
                     if (freshTarget.busy)
@@ -2262,7 +2597,7 @@ const server = createServer(async (req, res) => {
                 if (!from)
                     return json(res, 404, { error: "no such bot" });
                 const fromThreadId = String(body.fromThreadId ?? from.threadId);
-                if (!store.taskByThread(from.id, fromThreadId)) {
+                if (!botOwnsConversation(from.id, fromThreadId)) {
                     return json(res, 403, { error: "source thread does not belong to sender" });
                 }
                 const result = queueDelegation(commsBus, from, { toBotId, message, reason, depth }, MAX_COMMS_DEPTH, fromThreadId);
@@ -2331,7 +2666,7 @@ const server = createServer(async (req, res) => {
                 if (!from)
                     return json(res, 404, { error: "unknown sender" });
                 const sourceThreadId = String(body.fromThreadId ?? from.threadId);
-                if (!store.taskByThread(from.id, sourceThreadId))
+                if (!botOwnsConversation(from.id, sourceThreadId))
                     return json(res, 403, { error: "source thread does not belong to sender" });
                 if ((Number(body.depth ?? 0) || 0) !== 0)
                     return json(res, 403, { error: "delegated bots cannot create more bots" });
@@ -2361,6 +2696,94 @@ const server = createServer(async (req, res) => {
                 const bot = createApprovedBot(approvalBus, { name, title, description }, await defaultSelection());
                 broadcast({ kind: "bot", bot: publicBot(bot) });
                 return json(res, 201, { botId: bot.id, name: bot.name });
+            }
+            if (method === "POST" && path === "/api/internal/workflows") {
+                const body = await readBody(req);
+                const owner = store.bot(String(body.fromBotId ?? ""));
+                if (!owner?.chiefOfStaff)
+                    return json(res, 403, { error: "only the Chief of Staff can create a team workflow" });
+                const threadId = String(body.fromThreadId ?? owner.threadId);
+                if (!botOwnsConversation(owner.id, threadId))
+                    return json(res, 403, { error: "source thread does not belong to Chief of Staff" });
+                const projectId = typeof body.projectId === "string" && body.projectId ? body.projectId : undefined;
+                if (projectId && !projects.get(projectId))
+                    return json(res, 404, { error: "no such project" });
+                const rawSteps = Array.isArray(body.steps) ? body.steps : [];
+                for (const step of rawSteps) {
+                    const assignee = step && typeof step === "object" ? String(step.assigneeBotId ?? "") : "";
+                    if (assignee && !store.bot(assignee))
+                        return json(res, 400, { error: `unknown workflow assignee: ${assignee}` });
+                }
+                const workflow = workflows.create({
+                    title: String(body.title ?? ""),
+                    ownerBotId: owner.id,
+                    threadId,
+                    projectId,
+                    steps: rawSteps,
+                });
+                publishWorkflow(workflow);
+                return json(res, 201, { workflow });
+            }
+            if (method === "POST" && path === "/api/internal/workflows/step") {
+                const body = await readBody(req);
+                const actor = store.bot(String(body.fromBotId ?? ""));
+                if (!actor)
+                    return json(res, 403, { error: "unknown sender" });
+                const sourceThreadId = String(body.fromThreadId ?? actor.threadId);
+                if (!botOwnsConversation(actor.id, sourceThreadId))
+                    return json(res, 403, { error: "source thread does not belong to sender" });
+                const workflow = workflows.get(String(body.workflowId ?? ""));
+                if (!workflow)
+                    return json(res, 404, { error: "no such workflow" });
+                const stepId = String(body.stepId ?? "");
+                const step = workflow.steps.find((candidate) => candidate.id === stepId);
+                // The caller's claim to its own thread is checked above; whether the
+                // work is theirs to report on is canUpdateStep's call, and it turns on
+                // the assignment rather than on which thread the turn is running in.
+                if (!step || !canUpdateStep(workflow, step, actor)) {
+                    return json(res, 403, { error: "only the Chief of Staff or this step's assigned bot can update it" });
+                }
+                const status = String(body.status ?? "");
+                if (!["pending", "running", "blocked", "done", "failed"].includes(status)) {
+                    return json(res, 400, { error: "invalid workflow step status" });
+                }
+                const updated = workflows.updateStep(workflow.id, stepId, {
+                    status,
+                    output: typeof body.output === "string" ? body.output : undefined,
+                });
+                if (!updated)
+                    return json(res, 404, { error: "no such workflow step" });
+                publishWorkflow(updated);
+                return json(res, 200, { workflow: updated });
+            }
+            if (method === "POST" && path === "/api/internal/review-queue") {
+                const body = await readBody(req);
+                const source = store.bot(String(body.fromBotId ?? ""));
+                if (!source)
+                    return json(res, 403, { error: "unknown sender" });
+                const sourceThreadId = String(body.fromThreadId ?? source.threadId);
+                if (!botOwnsConversation(source.id, sourceThreadId))
+                    return json(res, 403, { error: "source thread does not belong to sender" });
+                const projectId = typeof body.projectId === "string" && body.projectId ? body.projectId : undefined;
+                if (projectId && !projects.get(projectId))
+                    return json(res, 404, { error: "no such project" });
+                const item = reviewQueue.create({
+                    title: String(body.title ?? ""),
+                    content: String(body.content ?? ""),
+                    target: String(body.target ?? ""),
+                    sourceBotId: source.id,
+                    sourceThreadId,
+                    projectId,
+                });
+                const message = store.appendMessage(sourceThreadId, {
+                    role: "bot",
+                    kind: "structured",
+                    text: `Queued for review: ${item.title}`,
+                    ui: { component: "review-item", props: item },
+                });
+                broadcast({ kind: "message", threadId: sourceThreadId, message });
+                broadcast({ kind: "review", item });
+                return json(res, 201, { item });
             }
             // ── the calling bot's own Automations calendar ──────────────────
             // Every route below re-derives the owner from the caller's botId query
@@ -2489,6 +2912,16 @@ const server = createServer(async (req, res) => {
                 credential: webhookCredential(ingress.baseUrl, rotated.webhook.endpointId, rotated.secret),
             });
         }
+        // The platform's own signing key, write-only like every other credential:
+        // the API reports whether one is set and never what it is.
+        webhookMatch = path.match(/^\/api\/webhooks\/([\w-]+)\/signing-secret$/);
+        if (webhookMatch && method === "PUT") {
+            const body = await readBody(req);
+            if (typeof body.secret !== "string")
+                return json(res, 400, { error: "secret must be a string" });
+            const webhook = webhooks.setSigningSecret(webhookMatch[1], body.secret);
+            return webhook ? json(res, 200, { webhook }) : json(res, 404, { error: "no such webhook" });
+        }
         webhookMatch = path.match(/^\/api\/webhooks\/([\w-]+)$/);
         if (webhookMatch && method === "PATCH") {
             const webhook = webhooks.update(webhookMatch[1], await readBody(req));
@@ -2560,7 +2993,194 @@ const server = createServer(async (req, res) => {
             return json(res, 200, {
                 bots: store.bots.map((bot) => ({ ...publicBot(bot), ...messagePage(bot.threadId, limit) })),
                 groups: store.groups.map((g) => ({ ...g, ...messagePage(g.threadId, limit) })),
+                projects: projects.list(),
+                workflows: workflows.list(),
+                reviews: reviewQueue.list(),
             });
+        }
+        if (method === "GET" && path === "/api/browser-sessions") {
+            if (!localRequest)
+                return json(res, 403, { error: "desktop only" });
+            return json(res, 200, { sessions: await discoverBrowserSessions() });
+        }
+        // ── the bot's own browser profile ──────────────────────────────────
+        // Signing in ahead of time, and seeing what that profile holds. Desktop
+        // only: it opens a real window on this machine, and the sessions it ends
+        // up carrying are the user's own.
+        if (method === "GET" && path === "/api/browser-profile") {
+            if (!localRequest)
+                return json(res, 403, { error: "desktop only" });
+            return json(res, 200, await browserProfileStatus());
+        }
+        m = path.match(/^\/api\/browser-profile\/(sign-in|cancel|forget)$/);
+        if (m && method === "POST") {
+            if (!localRequest)
+                return json(res, 403, { error: "desktop only" });
+            if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+                return json(res, 415, { error: "content-type must be application/json" });
+            }
+            if (m[1] === "cancel") {
+                closeSignInWindow();
+                return json(res, 200, await browserProfileStatus());
+            }
+            if (m[1] === "forget") {
+                const result = await forgetBrowserProfile();
+                if (!result.ok)
+                    return json(res, 409, { error: result.problem });
+                return json(res, 200, await browserProfileStatus());
+            }
+            const url = validSignInUrl((await readBody(req)).url);
+            if (!url)
+                return json(res, 400, { error: "give an http or https address to sign in to" });
+            const opened = openSignInWindow(url);
+            if (!opened.ok)
+                return json(res, 409, { error: opened.problem });
+            return json(res, 202, await browserProfileStatus());
+        }
+        if (path === "/api/projects" && method === "GET") {
+            return json(res, 200, { projects: projects.list() });
+        }
+        if (path === "/api/projects" && method === "POST") {
+            if (!localRequest)
+                return json(res, 403, { error: "desktop only" });
+            const body = await readBody(req);
+            const memberIds = (Array.isArray(body.memberIds) ? body.memberIds : []).filter((id) => typeof id === "string" && Boolean(store.bot(id)));
+            if (!memberIds.length)
+                return json(res, 400, { error: "a project needs at least one bot" });
+            const input = {
+                name: String(body.name ?? ""),
+                description: typeof body.description === "string" ? body.description : undefined,
+                workspacePath: projectWorkspace(body.workspacePath),
+                instructions: typeof body.instructions === "string" ? body.instructions : undefined,
+                resources: Array.isArray(body.resources) ? body.resources : undefined,
+            };
+            const project = projects.create(input);
+            const room = store.createGroup(project.name, memberIds);
+            store.patchGroup(room.id, { projectId: project.id });
+            const attached = projects.attachRoom(project.id, room.id);
+            broadcast({ kind: "project", project: attached });
+            broadcast({ kind: "group", group: store.group(room.id) });
+            return json(res, 201, { project: attached, group: { ...store.group(room.id), messages: [] } });
+        }
+        m = path.match(/^\/api\/projects\/([\w-]+)$/);
+        if (m && method === "PATCH") {
+            if (!localRequest)
+                return json(res, 403, { error: "desktop only" });
+            const body = await readBody(req);
+            const existing = projects.get(m[1]);
+            if (!existing)
+                return json(res, 404, { error: "no such project" });
+            const patch = {};
+            for (const key of ["name", "description", "instructions", "resources"]) {
+                if (body[key] !== undefined)
+                    patch[key] = body[key];
+            }
+            if (body.workspacePath !== undefined)
+                patch.workspacePath = projectWorkspace(body.workspacePath) ?? "";
+            const project = projects.update(m[1], patch);
+            if (!project)
+                return json(res, 404, { error: "no such project" });
+            broadcast({ kind: "project", project });
+            return json(res, 200, { project });
+        }
+        if (m && method === "DELETE") {
+            if (!localRequest)
+                return json(res, 403, { error: "desktop only" });
+            const project = projects.remove(m[1]);
+            if (!project)
+                return json(res, 404, { error: "no such project" });
+            for (const roomId of project.roomIds) {
+                const group = store.patchGroup(roomId, { projectId: undefined });
+                if (group)
+                    broadcast({ kind: "group", group });
+            }
+            broadcast({ kind: "project.deleted", projectId: project.id });
+            return json(res, 200, { ok: true });
+        }
+        if (path === "/api/workflows" && method === "GET") {
+            return json(res, 200, { workflows: workflows.list({ projectId: url.searchParams.get("projectId") ?? undefined }) });
+        }
+        if (path === "/api/review-queue" && method === "GET") {
+            return json(res, 200, { items: reviewQueue.list() });
+        }
+        m = path.match(/^\/api\/review-queue\/([\w-]+)\/(approve|dismiss)$/);
+        if (m && method === "POST") {
+            const item = reviewQueue.get(m[1]);
+            if (!item)
+                return json(res, 404, { error: "no such review item" });
+            if (m[2] === "dismiss") {
+                const updated = reviewQueue.update(item.id, { status: "dismissed" });
+                publishReview(updated);
+                return json(res, 200, { item: updated });
+            }
+            // A failed send is approvable again: the failure may have been a missing
+            // tool, an engine that never started, or a restart mid-delivery, and
+            // none of those are reasons to make the user re-draft the whole thing.
+            if (item.status !== "pending" && item.status !== "failed") {
+                return json(res, 409, { error: "this review item has already been handled" });
+            }
+            const bot = store.bot(item.sourceBotId);
+            if (!bot)
+                return json(res, 404, { error: "the source bot no longer exists" });
+            if (bot.busy)
+                return json(res, 409, { error: "the source bot is busy" });
+            const task = store.createTask(bot.id, `Send: ${item.title}`, false);
+            if (!task)
+                return json(res, 409, { error: "could not create a delivery task" });
+            const sending = reviewQueue.update(item.id, { status: "sending", deliveryThreadId: task.threadId });
+            reviewDeliveryByThread.set(task.threadId, item.id);
+            publishReview(sending);
+            const prompt = [
+                "[USER-APPROVED OUTBOUND DELIVERY]",
+                `Target: ${item.target}`,
+                `Title: ${item.title}`,
+                "Content:",
+                item.content,
+                "[/USER-APPROVED OUTBOUND DELIVERY]",
+                "Send exactly this approved content to the named target using the connected app tools. Do not materially rewrite it. Report the actual delivery result.",
+                // The harness reads this line, so it is a protocol and not a
+                // formatting preference: an unconfirmed turn is recorded as not sent.
+                'End your reply with one final line, exactly "DELIVERY: SENT" if the target actually received it, or "DELIVERY: NOT SENT - <reason>" if anything stopped it, including a missing tool or account.',
+            ].join("\n");
+            void startTurn(bot.id, prompt, {
+                threadId: task.threadId,
+                onDispatchError: (message) => {
+                    reviewDeliveryByThread.delete(task.threadId);
+                    const failed = reviewQueue.update(item.id, { status: "failed", result: message });
+                    if (failed)
+                        publishReview(failed);
+                },
+            }).catch((error) => {
+                reviewDeliveryByThread.delete(task.threadId);
+                const failed = reviewQueue.update(item.id, { status: "failed", result: error instanceof Error ? error.message : String(error) });
+                if (failed)
+                    publishReview(failed);
+            });
+            return json(res, 202, { item: sending });
+        }
+        m = path.match(/^\/api\/review-queue\/([\w-]+)$/);
+        if (m && method === "DELETE") {
+            const item = reviewQueue.get(m[1]);
+            if (!item)
+                return json(res, 404, { error: "no such review item" });
+            // Only settled history is the user's to clear. A pending item still has
+            // buttons on its chat card, and a sending one is the only place its
+            // delivery result has to land — dropping either leaves a card that acts
+            // on a record no longer there.
+            if (item.status === "pending" || item.status === "sending") {
+                return json(res, 409, { error: "settle this item before removing it" });
+            }
+            reviewQueue.remove(item.id);
+            broadcast({ kind: "review.deleted", itemId: item.id });
+            return json(res, 200, { ok: true });
+        }
+        m = path.match(/^\/api\/workflows\/([\w-]+)\/cancel$/);
+        if (m && method === "POST") {
+            const cancelled = workflows.cancel(m[1]);
+            if (!cancelled)
+                return json(res, 404, { error: "no such workflow" });
+            publishWorkflow(cancelled);
+            return json(res, 200, { workflow: cancelled });
         }
         // Public prompt catalog. Keep the third-party origin on the server side so
         // the renderer is not coupled to CORS policy, and forward only the small,
@@ -2647,8 +3267,20 @@ const server = createServer(async (req, res) => {
                 ? body.name.trim()
                 : `${store.bot(memberIds[0]).name} & co.`;
             const group = store.createGroup(name, memberIds);
-            broadcast({ kind: "group", group });
-            return json(res, 201, { group: { ...group, messages: [] } });
+            const projectId = typeof body.projectId === "string" ? body.projectId : "";
+            if (projectId) {
+                if (!projects.get(projectId)) {
+                    store.deleteGroup(group.id);
+                    return json(res, 404, { error: "no such project" });
+                }
+                store.patchGroup(group.id, { projectId });
+                const project = projects.attachRoom(projectId, group.id);
+                if (project)
+                    broadcast({ kind: "project", project });
+            }
+            const createdGroup = store.group(group.id);
+            broadcast({ kind: "group", group: createdGroup });
+            return json(res, 201, { group: { ...createdGroup, messages: [] } });
         }
         if (method === "POST" && path === "/api/teams/export") {
             const body = await readBody(req);
@@ -2772,6 +3404,9 @@ const server = createServer(async (req, res) => {
                 return json(res, 404, { error: "no such room" });
             lastReply.delete(group.threadId);
             store.deleteGroup(group.id);
+            for (const project of projects.detachRoom(group.id)) {
+                broadcast({ kind: "project", project });
+            }
             bus.discard(group.threadId);
             for (const dir of [EVENTS_DIR, NATIVE_DIR]) {
                 try {
@@ -2815,11 +3450,24 @@ const server = createServer(async (req, res) => {
             return json(res, 200, { message: patched });
         }
         if (method === "POST" && path === "/api/bots") {
-            const bot = store.createBot();
+            const body = await readBody(req);
+            const requestedName = body.name === undefined ? undefined : String(body.name).trim();
+            if (requestedName !== undefined && (!requestedName || requestedName.length > 64)) {
+                return json(res, 400, { error: "name must be 1-64 characters" });
+            }
+            if (requestedName && store.bots.some((candidate) => candidate.name.localeCompare(requestedName, undefined, { sensitivity: "accent" }) === 0)) {
+                return json(res, 409, { error: `a bot named ${requestedName} already exists` });
+            }
+            const bot = store.createBot(requestedName ? { name: requestedName } : undefined);
             store.patchBot(bot.id, { modelSelection: await defaultSelection() });
+            const created = store.bot(bot.id);
+            // Every other way a bot appears — import, a Chief's approved proposal —
+            // announces it. This one did not, so a second window or a paired phone
+            // kept a roster with a hole in it until something else forced a reload.
+            broadcast({ kind: "bot", bot: publicBot(created) });
             return json(res, 201, {
                 bot: {
-                    ...wireBot(store.bot(bot.id)),
+                    ...wireBot(created),
                     messages: store.messagesFor(bot.threadId),
                     activeLeafId: store.activeLeaf(bot.threadId),
                 },
@@ -3002,6 +3650,28 @@ const server = createServer(async (req, res) => {
             if (body.color !== undefined && !COLORS.includes(String(body.color))) {
                 return json(res, 400, { error: "unknown color" });
             }
+            // A chosen picture is stored inline, so the ceiling is what keeps the
+            // bot list a cheap read: this record is sent in full on every hydration
+            // and on every patch broadcast. The renderer downscales to 256px before
+            // sending; the limit here is the boundary, not the expectation.
+            let patchAvatarImage;
+            if (body.avatarImage !== undefined) {
+                if (body.avatarImage === null || body.avatarImage === "") {
+                    patchAvatarImage = "";
+                }
+                else if (typeof body.avatarImage !== "string") {
+                    return json(res, 400, { error: "avatarImage must be a data URL string" });
+                }
+                else if (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+=*$/.test(body.avatarImage)) {
+                    return json(res, 400, { error: "avatarImage must be a base64 png, jpeg, or webp data URL" });
+                }
+                else if (body.avatarImage.length > 200_000) {
+                    return json(res, 400, { error: "avatarImage is too large — use an image under 128 KB" });
+                }
+                else {
+                    patchAvatarImage = body.avatarImage;
+                }
+            }
             // Neither Codex (free-form string field) nor Grok (lazy, logs-only)
             // rejects an unknown effort level at their own boundary — this is the
             // only real gate, so it stays. But it fires only when the target
@@ -3014,6 +3684,19 @@ const server = createServer(async (req, res) => {
             // safe — startTurn refuses to run a turn on an unavailable instance
             // anyway, so an unverifiable level never reaches a CLI.
             const nextSelection = body.modelSelection;
+            // The picker sends a whole selection; this endpoint is also reachable by
+            // hand and by import. A non-string id would be stored as-is and only
+            // surface later as an engine that cannot be found.
+            if (nextSelection !== undefined) {
+                if (typeof nextSelection !== "object" || nextSelection === null || Array.isArray(nextSelection)) {
+                    return json(res, 400, { error: "modelSelection must be an object" });
+                }
+                for (const field of ["instanceId", "model"]) {
+                    if (nextSelection[field] !== undefined && typeof nextSelection[field] !== "string") {
+                        return json(res, 400, { error: `modelSelection.${field} must be a string` });
+                    }
+                }
+            }
             if (nextSelection?.effort !== undefined) {
                 if (!isEffortLevel(nextSelection.effort)) {
                     return json(res, 400, { error: `effort "${String(nextSelection.effort)}" is not recognized` });
@@ -3047,6 +3730,12 @@ const server = createServer(async (req, res) => {
                 if (body[key] !== undefined)
                     patch[key] = body[key];
             }
+            // "" is the removal, and it has to survive into the store as an
+            // explicit undefined rather than being skipped like an absent field.
+            if (patchAvatarImage !== undefined)
+                patch.avatarImage = patchAvatarImage || undefined;
+            if (body.name !== undefined || body.title !== undefined || body.description !== undefined)
+                patch.autoProfile = false;
             if (body.workspacePath !== undefined) {
                 if (typeof body.workspacePath !== "string") {
                     return json(res, 400, { error: "workspacePath must be a string" });
@@ -3172,7 +3861,8 @@ const server = createServer(async (req, res) => {
             const text = String(body.text ?? "").trim();
             if (!text)
                 return json(res, 400, { error: "text required" });
-            await startTurn(m[1], text);
+            const replyToId = typeof body.replyTo === "string" && /^[\w-]{1,100}$/.test(body.replyTo) ? body.replyTo : undefined;
+            await startTurn(m[1], text, replyToId ? { replyToId } : undefined);
             return json(res, 202, { ok: true });
         }
         m = path.match(/^\/api\/bots\/([\w-]+)\/steer$/);
@@ -3334,6 +4024,108 @@ const server = createServer(async (req, res) => {
             await instance?.adapter.interruptTurn(bot.threadId);
             return json(res, 200, { ok: true });
         }
+        // Driving the bot's cloud computer by hand. Gated on an active takeover
+        // rather than merely on the panel being open: the bot is paused there, so
+        // the two are not competing for the same pointer.
+        m = path.match(/^\/api\/bots\/([\w-]+)\/computer\/input$/);
+        if (m && method === "POST") {
+            const bot = store.bot(m[1]);
+            if (!bot)
+                return json(res, 404, { error: "no such bot" });
+            if (!bot.humanTakeover?.active) {
+                return json(res, 409, { error: "take control first — the bot is still driving this computer" });
+            }
+            // Only the cloud box. Controlling the user's own desktop from a paired
+            // phone is a different risk class and stays out of this route entirely.
+            if (bot.computer === "local" || bot.computer === "vm") {
+                return json(res, 409, { error: "manual input is available on the cloud computer only" });
+            }
+            let input;
+            try {
+                // Shape first: a malformed request is the client's bug whether or not
+                // a computer happens to be configured, and saying so is more useful
+                // than reporting the missing box.
+                input = parseControlInput(await readBody(req));
+                const command = controlCommand(input);
+                if (!box.boxConfigured(cfg))
+                    return json(res, 409, { error: "no cloud computer is configured" });
+                const result = await box.execOnBox(cfg, bot.id, command);
+                if (result.exitCode !== 0) {
+                    return json(res, 502, { error: result.stderr.slice(0, 200) || "the computer refused that input" });
+                }
+            }
+            catch (error) {
+                const status = Number(error?.status) || 500;
+                return json(res, status, { error: error instanceof Error ? error.message : String(error) });
+            }
+            // The screen changed because of this input; grab the new frame now
+            // rather than waiting out the poll interval.
+            pokeScreenPoller(bot.id);
+            return json(res, 202, { ok: true, kind: input.kind });
+        }
+        m = path.match(/^\/api\/bots\/([\w-]+)\/takeover$/);
+        if (m && method === "POST") {
+            // Taking over the *cloud* computer is a chat-level action a paired
+            // phone may perform — it is how a sign-in or CAPTCHA gets finished.
+            // Anything that reaches this machine stays desktop-only.
+            if (!localRequest && (store.bot(m[1])?.computer === "local" || store.bot(m[1])?.computer === "vm")) {
+                return json(res, 403, { error: "this computer can only be taken over on the desktop" });
+            }
+            const bot = store.bot(m[1]);
+            if (!bot)
+                return json(res, 404, { error: "no such bot" });
+            const body = await readBody(req);
+            if (typeof body.active !== "boolean")
+                return json(res, 400, { error: "active must be true or false" });
+            if (body.active) {
+                const activeGroup = store.groups.find((group) => group.busyBotId === bot.id);
+                const activeThreadId = activeGroup?.threadId ?? bot.threadId;
+                interruptPendingTurn(activeThreadId);
+                await registry.get(bot.modelSelection.instanceId)?.adapter.interruptTurn(activeThreadId).catch(() => { });
+                store.patchBot(bot.id, {
+                    humanTakeover: { active: true, since: Date.now(), threadId: activeThreadId, groupId: activeGroup?.id },
+                });
+                beginWorkCard(bot, activeThreadId, "Human control");
+                updateWorkCard(activeThreadId, {
+                    status: "human-control",
+                    takeover: true,
+                    lastAction: "The user is controlling the computer",
+                    summary: "Bot actions are paused until control is returned.",
+                });
+            }
+            else {
+                const takeover = bot.humanTakeover;
+                const takeoverGroup = takeover?.groupId ? store.group(takeover.groupId) : undefined;
+                if (body.resume === true && takeoverGroup?.busyBotId) {
+                    return json(res, 409, { error: "the previous room turn is still stopping — try Resume again" });
+                }
+                if (body.resume === true && !takeoverGroup && bot.busy) {
+                    return json(res, 409, { error: "the previous turn is still stopping — try Resume again" });
+                }
+                store.patchBot(bot.id, { humanTakeover: undefined });
+                updateWorkCard(takeover?.threadId ?? bot.threadId, {
+                    status: "stopped",
+                    takeover: false,
+                    summary: "Manual control returned to the bot.",
+                });
+                if (body.resume === true) {
+                    const current = store.bot(bot.id);
+                    const resumePrompt = "The user completed the manual browser or computer step and returned control. Inspect the current state, continue from where you stopped, and finish the task.";
+                    if (takeover?.groupId) {
+                        const group = takeoverGroup;
+                        if (!group)
+                            return json(res, 404, { error: "the project room no longer exists" });
+                        startGroupTurn(group.id, `@${current.name} ${resumePrompt}`);
+                    }
+                    else {
+                        await startTurn(bot.id, resumePrompt, { threadId: takeover?.threadId });
+                    }
+                }
+            }
+            const patched = store.bot(bot.id);
+            broadcast({ kind: "bot", bot: wireBot(patched) });
+            return json(res, 200, { bot: wireBot(patched) });
+        }
         // ── tasks: a bot's separate contexts ────────────────────────────────
         // The bot record answers with its messages because switching tasks
         // changes which transcript is live, and a partial patch would leave
@@ -3432,6 +4224,51 @@ const server = createServer(async (req, res) => {
         if (method === "POST" && path === "/api/local-computer/screenshot") {
             localVmIdle.touch();
             return json(res, 200, { image: await containerComputerScreenshot() });
+        }
+        // ── this machine's own desktop (Linux) ─────────────────────────────
+        // Installing downloads a pinned ~40 MB driver, and starting it hands a
+        // bot the user's real desktop. Both are explicit, desktop-only actions
+        // with a status the UI can show, not something a turn does quietly.
+        if (method === "GET" && path === "/api/host-computer") {
+            return json(res, 200, await hostCuaStatus());
+        }
+        m = path.match(/^\/api\/host-computer\/(install|start|stop)$/);
+        if (m && method === "POST") {
+            if (!localRequest)
+                return json(res, 403, { error: "this setting can only be changed on the desktop" });
+            if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+                return json(res, 415, { error: "content-type must be application/json" });
+            }
+            if (process.platform !== "linux") {
+                return json(res, 409, { error: "this computer already has its own desktop driver" });
+            }
+            if (m[1] === "stop") {
+                await stopHostCua();
+                return json(res, 200, await hostCuaStatus());
+            }
+            if (hostCuaBusy)
+                return json(res, 409, { error: "another desktop-driver action is still running" });
+            hostCuaBusy = true;
+            try {
+                if (m[1] === "install") {
+                    const result = await installHostCua();
+                    if (!result.ok)
+                        return json(res, 502, { error: result.problem ?? "the driver could not be installed" });
+                    // Installing without starting leaves a driver nobody can use; the
+                    // one button in Settings means "make this work".
+                    const started = await startHostCua();
+                    if (!started.ok)
+                        return json(res, 200, { ...(await hostCuaStatus()), problem: started.problem });
+                    return json(res, 200, await hostCuaStatus());
+                }
+                const started = await startHostCua();
+                if (!started.ok)
+                    return json(res, 409, { error: started.problem ?? "the driver could not be started" });
+                return json(res, 200, await hostCuaStatus());
+            }
+            finally {
+                hostCuaBusy = false;
+            }
         }
         // ── full-size frame handoff ────────────────────────────────────────
         // The panel preview is a thumbnail, and a desktop screenshot is exactly
@@ -3800,6 +4637,26 @@ const server = createServer(async (req, res) => {
                     rawRemote.publicUrl = remoteUrl.origin;
                 }
             }
+            const rawTelegram = body.telegram;
+            if (rawTelegram !== undefined
+                && (rawTelegram === null || typeof rawTelegram !== "object" || Array.isArray(rawTelegram))) {
+                return json(res, 400, { error: "telegram must be an object" });
+            }
+            if (rawTelegram) {
+                for (const field of ["botToken", "chatId"]) {
+                    if (Object.prototype.hasOwnProperty.call(rawTelegram, field)
+                        && typeof rawTelegram[field] !== "string") {
+                        return json(res, 400, { error: `telegram.${field} must be a string` });
+                    }
+                }
+                if (Object.prototype.hasOwnProperty.call(rawTelegram, "enabled")
+                    && typeof rawTelegram.enabled !== "boolean") {
+                    return json(res, 400, { error: "telegram.enabled must be true or false" });
+                }
+                if (typeof rawTelegram.chatId === "string" && rawTelegram.chatId.trim() && !validTelegramChatId(rawTelegram.chatId)) {
+                    return json(res, 400, { error: "telegram.chatId must be a numeric chat id or @channel username" });
+                }
+            }
             // The whole list arrives at once, because removing a gateway is
             // expressed by its absence. Tokens are the exception: the form never
             // receives them, so an entry that sends no token keeps the stored one
@@ -3902,7 +4759,16 @@ const server = createServer(async (req, res) => {
                     .filter((id) => typeof id === "string" && known.has(id))
                     .slice(0, 8);
             }
-            for (const key of ["xai", "composio", "box", "opencodeGo", "deepseekHarness", "tts", "profile", "remoteAccess", "analytics", "pcBrowser"]) {
+            if (body.pcBrowser && typeof body.pcBrowser === "object") {
+                const browser = body.pcBrowser;
+                if (browser.cdpEndpoint !== undefined && browser.cdpEndpoint !== "") {
+                    const endpoint = validBrowserEndpoint(browser.cdpEndpoint);
+                    if (!endpoint)
+                        return json(res, 400, { error: "browser endpoint must be an explicit localhost CDP address" });
+                    browser.cdpEndpoint = endpoint;
+                }
+            }
+            for (const key of ["xai", "composio", "box", "opencodeGo", "deepseekHarness", "tts", "telegram", "profile", "remoteAccess", "analytics", "pcBrowser"]) {
                 if (body[key] && typeof body[key] === "object")
                     patch[key] = body[key];
             }
@@ -3944,6 +4810,23 @@ const server = createServer(async (req, res) => {
                 if (!check.ok)
                     return json(res, 400, { error: check.message });
             }
+            const newTelegram = patch.telegram;
+            if (typeof newTelegram?.botToken === "string") {
+                if (newTelegram.botToken.trim()) {
+                    try {
+                        const identity = await verifyTelegramBot(newTelegram.botToken);
+                        newTelegram.botToken = newTelegram.botToken.trim();
+                        newTelegram.botUsername = identity.username;
+                    }
+                    catch (error) {
+                        return json(res, 400, { error: error instanceof Error ? error.message : String(error) });
+                    }
+                }
+                else {
+                    newTelegram.botToken = "";
+                    newTelegram.botUsername = "";
+                }
+            }
             const externalSecretStorage = url.searchParams.get("secretStorage") === "external";
             if (externalSecretStorage && patch.composio) {
                 // Electron stores the project key with OS-backed encryption. Persist
@@ -3965,12 +4848,51 @@ const server = createServer(async (req, res) => {
             // either, and picking a voice mid-turn should be free
             // no driver reads profile, voice, the remote address or the analytics
             // flag — reloading the fleet for them would kill in-flight turns for free
-            const NO_RELOAD = new Set(["profile", "tts", "remoteAccess", "analytics"]);
+            const NO_RELOAD = new Set(["profile", "tts", "telegram", "remoteAccess", "analytics"]);
             if (Object.keys(patch).some((k) => !NO_RELOAD.has(k)))
                 await reloadProviders();
             const status = configStatus();
             broadcast({ kind: "config", ...status });
             return json(res, 200, status);
+        }
+        if (method === "POST" && path === "/api/telegram/test") {
+            if (!localRequest)
+                return json(res, 403, { error: "this test can only be sent from the desktop" });
+            if (!cfg.telegram?.botToken || !cfg.telegram?.chatId) {
+                return json(res, 409, { error: "save a Telegram bot token and chat id first" });
+            }
+            try {
+                const sent = await sendTelegramNotification(cfg, {
+                    kind: "done",
+                    botId: "mauscrew",
+                    botName: "MausCrew",
+                    botTitle: "Connection test",
+                    botColor: "green",
+                    threadId: "telegram-test",
+                    title: "Telegram connected",
+                    detail: "Telegram bağlantısı hazır. MausCrew botlarının tamamlanan görev raporları, soruları ve onay istekleri bu sohbete tam içerikleriyle gelecek.",
+                    body: "Telegram bağlantısı hazır. MausCrew bot sonuçları bu sohbete gelecek.",
+                });
+                return json(res, 200, { ok: sent });
+            }
+            catch (error) {
+                return json(res, 502, { error: error instanceof Error ? error.message : String(error) });
+            }
+        }
+        if (method === "POST" && path === "/api/telegram/discover-chat") {
+            if (!localRequest)
+                return json(res, 403, { error: "chat discovery is desktop only" });
+            try {
+                const chat = await discoverTelegramChat(cfg);
+                cfg.telegram = { ...cfg.telegram, chatId: chat.id };
+                saveConfig({ telegram: { chatId: chat.id } });
+                const status = configStatus();
+                broadcast({ kind: "config", ...status });
+                return json(res, 200, { chat, config: status });
+            }
+            catch (error) {
+                return json(res, 502, { error: error instanceof Error ? error.message : String(error) });
+            }
         }
         // ── voice ─────────────────────────────────────────────────────────
         // Splitting text into utterances lives HERE, not in the renderer, for
@@ -4190,6 +5112,10 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
         localVmIdle.cancel();
         routines?.stop();
         webhookIngress?.server.close();
+        // The host desktop driver dies with the harness that started it. Leaving
+        // it serving a socket after the app closed would mean a daemon that can
+        // drive the user's screen with nothing left to authorize it.
+        void stopHostCua().catch(() => { });
         bus.flush();
         // A wedged child process must not hold the exit hostage: dispose
         // best-effort, then force the exit either way.

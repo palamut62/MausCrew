@@ -27,6 +27,9 @@ const BOT_ID = process.env.MAUSCREW_BOT_ID ?? "";
 const THREAD_ID = process.env.MAUSCREW_THREAD_ID ?? "";
 const TOKEN = process.env.MAUSCREW_COMMS_TOKEN ?? "";
 const DEPTH = Number(process.env.MAUSCREW_TURN_DEPTH ?? "0") || 0;
+/** The harness's own recursion cap, passed in rather than duplicated here so
+ * the two can never drift apart. */
+const COMMS_CAP = Number(process.env.MAUSCREW_COMMS_MAX_DEPTH ?? "1") || 1;
 
 const TOOLS = [
   {
@@ -119,7 +122,80 @@ const TOOLS = [
       required: ["name", "title", "description"],
     },
   },
+  {
+    name: "create_workflow",
+    description:
+      "Chief of Staff only: create a persistent multi-stage team workflow before coordinating substantial work. Dependencies form a DAG and are enforced by the harness. Use the returned real step IDs with update_workflow_step.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        project_id: { type: "string", description: "Optional MausCrew project id." },
+        steps: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "string", description: "Temporary alias used by depends_on entries." },
+              title: { type: "string" },
+              bot_id: { type: "string" },
+              depends_on: { type: "array", items: { type: "string" } },
+            },
+            required: ["id", "title"],
+          },
+        },
+      },
+      required: ["title", "steps"],
+    },
+  },
+  {
+    name: "update_workflow_step",
+    description:
+      "Update a persistent workflow step as it starts, blocks, completes, or fails. The Chief may update the whole workflow; an assigned teammate may update only its own step. Dependencies must be done before a step can run or complete.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        workflow_id: { type: "string" },
+        step_id: { type: "string" },
+        status: { type: "string", enum: ["pending", "running", "blocked", "done", "failed"] },
+        output: { type: "string", description: "Concise handoff or failure detail." },
+      },
+      required: ["workflow_id", "step_id", "status"],
+    },
+  },
+  {
+    name: "queue_review",
+    description:
+      "Put outbound content into the user's persistent review queue instead of sending it. Use for email, posts, messages, releases, or any other external communication that should be selectively approved first.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        content: { type: "string" },
+        target: { type: "string", description: "Destination such as Gmail to Ada or Slack #releases." },
+        project_id: { type: "string" },
+      },
+      required: ["title", "content", "target"],
+    },
+  },
 ];
+
+/** Reporting tools: they say something about work this bot was already given,
+ * and none of them can start another bot's turn. */
+const REPORTING_TOOLS = new Set(["update_workflow_step", "queue_review"]);
+
+/**
+ * What this turn may see.
+ *
+ * A turn at the recursion cap is a turn some other bot started, and it must
+ * not be able to start a third — that is the whole point of the cap. It was
+ * enforced by mounting nothing at all, which also took away the two tools
+ * that only ever report on work already assigned: a delegated teammate could
+ * not mark its own workflow step, though the Chief's brief tells it to, and
+ * could not queue outbound text for the user's approval, which left sending
+ * it directly as the only way to act. Dropping the calling tools is enough.
+ */
+const visibleTools = () => (DEPTH >= COMMS_CAP ? TOOLS.filter((tool) => REPORTING_TOOLS.has(tool.name)) : TOOLS);
 
 type Json = Record<string, unknown>;
 const send = (msg: Json) => process.stdout.write(JSON.stringify(msg) + "\n");
@@ -280,6 +356,62 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
     if (r.error) return { text: `Couldn't create the bot: ${r.error}`, isError: true };
     return { text: `Created @${r.name ?? botName} as a durable teammate [id: ${r.botId ?? "unknown"}].` };
   }
+  if (name === "create_workflow") {
+    const title = String(args.title ?? "").trim();
+    const rawSteps = Array.isArray(args.steps) ? args.steps : [];
+    if (!title || !rawSteps.length) return { text: "create_workflow needs a title and steps.", isError: true };
+    const steps = rawSteps.map((raw) => {
+      const step = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+      return {
+        id: String(step.id ?? "").trim(),
+        title: String(step.title ?? "").trim(),
+        assigneeBotId: String(step.bot_id ?? "").trim() || undefined,
+        dependsOn: Array.isArray(step.depends_on) ? step.depends_on.map(String) : [],
+      };
+    });
+    const r = await api("/api/internal/workflows", {
+      method: "POST",
+      body: JSON.stringify({
+        fromBotId: BOT_ID,
+        fromThreadId: THREAD_ID,
+        title,
+        projectId: String(args.project_id ?? "").trim() || undefined,
+        steps,
+      }),
+    });
+    if (r.error) return { text: `Couldn't create the workflow: ${r.error}`, isError: true };
+    return { text: `Workflow created:\n${JSON.stringify(r.workflow)}` };
+  }
+  if (name === "update_workflow_step") {
+    const r = await api("/api/internal/workflows/step", {
+      method: "POST",
+      body: JSON.stringify({
+        fromBotId: BOT_ID,
+        fromThreadId: THREAD_ID,
+        workflowId: String(args.workflow_id ?? "").trim(),
+        stepId: String(args.step_id ?? "").trim(),
+        status: String(args.status ?? "").trim(),
+        output: typeof args.output === "string" ? args.output : undefined,
+      }),
+    });
+    if (r.error) return { text: `Couldn't update the workflow: ${r.error}`, isError: true };
+    return { text: `Workflow step updated. Overall status: ${(r.workflow as Json | undefined)?.status ?? "active"}.` };
+  }
+  if (name === "queue_review") {
+    const r = await api("/api/internal/review-queue", {
+      method: "POST",
+      body: JSON.stringify({
+        fromBotId: BOT_ID,
+        fromThreadId: THREAD_ID,
+        title: String(args.title ?? "").trim(),
+        content: String(args.content ?? "").trim(),
+        target: String(args.target ?? "").trim(),
+        projectId: String(args.project_id ?? "").trim() || undefined,
+      }),
+    });
+    if (r.error) return { text: `Couldn't queue the review: ${r.error}`, isError: true };
+    return { text: `Queued for user review [id: ${(r.item as Json | undefined)?.id ?? "unknown"}]. It has not been sent.` };
+  }
   return { text: `Unknown tool: ${name}`, isError: true };
 }
 
@@ -303,11 +435,14 @@ async function handle(msg: Json) {
       ok(id, {});
       return;
     case "tools/list":
-      ok(id, { tools: TOOLS });
+      ok(id, { tools: visibleTools() });
       return;
     case "tools/call": {
       const name = params.name as string;
-      if (!TOOLS.some((t) => t.name === name)) return rpcErr(id, -32602, `Unknown tool: ${name}`);
+      // Checked against what this turn may see, not the whole catalogue: a
+      // model that remembers ask_bot from an earlier turn must not be able to
+      // call it past the cap just because the name exists.
+      if (!visibleTools().some((t) => t.name === name)) return rpcErr(id, -32602, `Unknown tool: ${name}`);
       try {
         const { text, isError } = await callTool(name, (params.arguments ?? {}) as Json);
         textResult(id, text, isError);

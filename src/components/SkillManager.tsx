@@ -167,7 +167,7 @@ export function SkillManager({ bot, onClose }: { bot: Bot; onClose: () => void }
   }, [bot.id]);
 
   useEffect(() => {
-    void load();
+    queueMicrotask(() => void load());
   }, [load]);
 
   useEffect(() => {

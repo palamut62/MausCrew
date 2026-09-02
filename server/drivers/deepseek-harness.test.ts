@@ -734,7 +734,7 @@ describe.skipIf(!LIVE)("DeepSeekHarnessDriver against the real SDK", () => {
       }
     };
 
-    let first = await create();
+    const first = await create();
     try {
       await run(first, `Remember this exact phrase for the next turn: ${phrase}. Reply only: stored`);
     } finally {

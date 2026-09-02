@@ -191,7 +191,7 @@ function parseCmdShim(shim) {
 /** `#!/usr/bin/env node` → `node <script>`. Only node: nothing else has a
  * meaningful Windows equivalent worth guessing at. */
 function parseNodeShebang(file) {
-    let head = "";
+    let head;
     let fd = null;
     try {
         fd = openSync(file, "r");

@@ -71,6 +71,25 @@ contextBridge.exposeInMainWorld("mauscrew", {
   openInstallTerminal: (command) => ipcRenderer.invoke("engine:open-terminal", command),
   /** Choose one absolute host directory for a bot's coding workspace. */
   chooseWorkspace: () => ipcRenderer.invoke("workspace:choose"),
+  /** Show a file the bot produced in the OS file manager. Reveals only —
+   * never opens the file, because the path came from model output. */
+  revealPath: (target) => ipcRenderer.invoke("shell:reveal", target),
+  /** Which bots are blocked on the user right now, so the tray can say so
+   * while the window is hidden. `[{id, name, kind}]`, newest first. */
+  setTrayStatus: (waiting) => ipcRenderer.send("tray:status", waiting),
+  /** A tray menu entry was chosen: open the app on that bot. */
+  onTraySelectBot: (cb) => {
+    const handler = (_event, botId) => cb(botId);
+    ipcRenderer.on("tray:select-bot", handler);
+    return () => ipcRenderer.removeListener("tray:select-bot", handler);
+  },
+  /** A mauscrew://bot/add?name=..&title=..&description=.. link was opened
+   * (from a browser, or by the OS at cold launch). Fires once per link. */
+  onDeepLinkBotAdd: (cb) => {
+    const handler = (_event, bot) => cb(bot);
+    ipcRenderer.on("deeplink:bot-add", handler);
+    return () => ipcRenderer.removeListener("deeplink:bot-add", handler);
+  },
   /** User-controlled OS login startup. Packaged Windows/macOS only. */
   startup: {
     get: () => ipcRenderer.invoke("startup:get"),

@@ -134,8 +134,72 @@ Bring your own ElevenLabs key — paste it once in App Settings, pick a voice, a
 Give a bot its own voice and a room stops sounding like one person.
 
 **Also in the box:** streaming replies with tool-run activity chips · on-device dictation from the
-composer mic (Apple speech on macOS, whisper.cpp on Windows — desktop app) · per-bot accent colours and
-monogram avatars · screenshots of the bot's work folded into the transcript.
+composer mic (Apple speech on macOS, whisper.cpp on Windows — desktop app) · per-bot accent colours, drawn
+characters, or a picture of your own · screenshots of the bot's work folded into the transcript ·
+notifications grouped per bot and wearing that bot's icon, with a tray menu that lists whoever is waiting
+on you while the window is hidden.
+
+### 🗂 Projects keep context in its lane
+
+A Project is a real boundary, not just a sidebar folder. It owns one or more Rooms, a workspace path,
+shared instructions, and named resources. The same specialist can join several projects while each Room
+keeps a separate transcript and each project injects only its own workspace and context.
+
+### 👑 Chief MAUS coordinates the whole crew
+
+Mark one bot as Chief of Staff and give it a substantial goal. Chief MAUS can create a persistent,
+dependency-checked workflow, assign stages to specialist bots, track every step in a live task card, and
+return one consolidated result. The workflow survives an app restart; dependent work cannot start before
+its prerequisites complete.
+
+### ✋ Watch, take over, and return control
+
+Every running turn gets one persistent live-work card instead of a stream of disposable status messages.
+It shows the current action, waiting state, and terminal summary. **Take control** pauses the bot for a
+manual browser/computer step; **Return control and resume** continues the same task or Project Room.
+
+While you hold control of a **cloud** computer, the Computer panel stops being a mirror: click, right-click,
+double-click, scroll and type straight onto the screen, from the desktop app or a paired phone. Clicks are
+mapped back through the display geometry the capture reports, so they land where you aimed on the real
+screen rather than on the downscaled preview. Taking over *this computer* or the Local VM stays desktop-only.
+
+MausCrew's PC Browser still defaults to an isolated profile. From Settings you can also discover and attach
+an explicit localhost Chromium remote-debug session, see its open tab titles before attaching, and detach it
+without MausCrew closing the user's browser.
+
+That isolated profile is also **signable-in ahead of time**: open it as an ordinary window from Settings with
+nothing driving it, log into whatever the bot will need, and close it. Settings then lists which sites the
+profile holds a session for — domains only, never a cookie — so "the bot has its own logins" is something you
+can check rather than take on faith. One button signs it out of everything.
+
+### 🗺 The crew as a structure, not a list
+
+An **Org chart** view draws who reports to whom — derived from the workflow stages a Chief of Staff actually
+assigned, never configured by hand. Bots no live workflow touches keep their place in a roster strip below,
+and every card opens that bot's chat.
+
+Ready-made **crews** (shipping, research desk, inbox, solo operator) create several bots and the room they
+work in at one click; each arrives as an ordinary team you can edit, export, and re-share. Any bot's profile
+can be handed to someone else with **Copy share link** — a `mauscrew://` link the receiving app shows for
+review before it creates anything, carrying the profile and nothing else.
+
+### 📎 Replies, artifacts, and per-server MCP rules
+
+Reply to any message and the quote rides with the turn, so the bot answers the thing you pointed at rather
+than the last thing said. A finished turn can hand over the files it produced as a **file list** — name,
+size, note, copy-the-path, and reveal-in-folder — instead of naming paths in prose.
+
+Every MCP server takes its own instructions (injected into the prompt of the bots that mount it) and its own
+disabled-tool list, which is enforced at the permission gate rather than merely discouraged. The same
+Settings page lets you write your own approval rules: a tool pattern, a category, and ALLOW / ASK / DENY,
+placed so your stopping rules always outrank your allow rules and the built-in safety rules outrank both.
+
+Chief MAUS can place an email, post, message, or release note into the persistent Review Queue. The draft is
+shown both in chat and in the queue; dismiss it or approve that exact content. Approval creates a separate
+delivery task and records sent/failed history instead of silently treating a draft as delivered.
+
+New blank bots also derive a one-time role, name, description, colour, and avatar shape from their first real
+task. Editing the profile switches that bot to an explicit user-owned identity and disables automatic naming.
 
 ## How it works
 
@@ -146,10 +210,11 @@ protocol into one canonical runtime event stream (logged per-thread as NDJSON).
 ```mermaid
 flowchart LR
     subgraph app ["App — React + Tailwind (5199)"]
-        UI[Chat UI · model picker · computer panel]
+        UI[Chat UI · Projects · live work · review queue]
     end
     subgraph server ["Harness server (127.0.0.1:8799)"]
         REG[Driver registry] --> BUS[Event bus → SSE]
+        ORCH[Chief workflows · review queue · projects]
         BROKER[Permission broker]
     end
     subgraph agents ["Agents on your computer"]
@@ -160,6 +225,7 @@ flowchart LR
     end
     UI -- "HTTP commands" --> server
     BUS -- "one SSE stream" --> UI
+    ORCH --> BUS
     REG --> CL & CX & GR & DS
     CL & CX & GR & DS -- "permission requests" --> BROKER
     server -- "Box API" --> BOX[("Cloud computer<br/>box.ascii.dev")]
@@ -252,16 +318,22 @@ pnpm package:linux    # Ubuntu x64: .deb + AppImage; no Swift required
 
 ### Desktop capability status
 
-| Capability | macOS | Ubuntu 24.04 Xorg | Ubuntu 24.04 Wayland |
-|---|---|---|---|
-| Packaged app, embedded harness, local agent CLIs | Supported | Beta | Beta |
-| Composio and Box/cloud computers | Supported | Beta | Beta |
-| Local screen preview and computer control | Supported | Planned | Planned after compositor validation |
-| Native on-device dictation | Supported | Planned | Planned |
+| Capability | macOS | Windows | Ubuntu 24.04 Xorg | Ubuntu 24.04 Wayland |
+|---|---|---|---|---|
+| Packaged app, embedded harness, local agent CLIs | Supported | Supported | Beta | Beta |
+| Composio and Box/cloud computers | Supported | Supported | Beta | Beta |
+| Local screen preview | Supported | Supported | Supported | Not supported (portal picker) |
+| Local computer control | Supported | Supported | Supported (installs the driver on first use) | Not supported |
+| Native on-device dictation | Supported | Supported | Planned | Planned |
 
-Unavailable native features fail closed on Ubuntu without blocking chat or cloud features. Linux local computer
-control, Wayland capture/automation, dictation, and ARM64 remain follow-up work and are not claimed by the
-baseline package.
+Each platform reaches "this computer" its own way, and each proves it is ready rather than being assumed:
+macOS starts an embedded Cua daemon with the app, Windows ships the Cua SDK bridge inside the package, and
+Linux installs the same SHA-256-pinned `cua-driver` the Local VM runs and serves it against your X11 session
+(**App Settings → Local VM → This computer**). Wayland is refused outright rather than half-supported: input
+injection and capture both go through portals the driver does not speak, so a bot there would click nothing.
+
+Unavailable native features fail closed without blocking chat or cloud features, and say which reason applies
+— Wayland session, no display, driver not installed — instead of a flat "unavailable".
 
 These credentials are optional — local chat works without them. Paste a key once in **App Settings** (gear
 in the sidebar footer) when you want to enable its integration:
@@ -311,7 +383,11 @@ and asked for the delta; a run that finds nothing is kept as a receipt but stays
 "Only tell me when it changes" in the schedule editor, or let the bot call `create_watch`.
 
 Webhook triggers are independent from schedules but reuse the same queued task executor and calendar
-receipts.
+receipts. A trigger can also be marked as coming from **GitHub** or **Slack**, which authenticates it the way
+those platforms actually sign — `X-Hub-Signature-256` over the raw body, or Slack's `v0` signature inside a
+five-minute replay window, with Slack's URL handshake answered without spending a turn. A signed trigger
+accepts nothing else: its bearer token and capability URL stop working, so the stronger check cannot be
+walked around by the weaker one.
 
 MausCrew starts a webhook-only receiver on `127.0.0.1:8800` by default (or one port above `MAUSCREW_PORT`).
 Set `MAUSCREW_WEBHOOK_PORT` to choose another port. A webhook secret is shown once when the trigger is created

@@ -41,6 +41,10 @@ export type MausAvatarProps = {
   shape?: string;
   /** Hold the pose — for decorative or off-screen avatars. */
   paused?: boolean;
+  /** A picture the user chose for this bot. Replaces the drawn character
+   * while it is set; clearing it brings the character back rather than
+   * leaving an empty tile. */
+  image?: string;
 };
 
 function MausAvatarComponent({
@@ -51,8 +55,22 @@ function MausAvatarComponent({
   state,
   seed,
   paused,
+  image,
 }: MausAvatarProps) {
   const title = label ?? name ?? undefined;
+  if (image) {
+    return (
+      <img
+        src={image}
+        alt={title ?? ""}
+        title={title}
+        width={size}
+        height={size}
+        className="shrink-0 rounded-lg object-cover"
+        style={{ width: size, height: size }}
+      />
+    );
+  }
   return (
     <MausMascot
       color={color}

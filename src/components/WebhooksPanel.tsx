@@ -70,6 +70,10 @@ function WebhookEditor({ webhook, bots, onClose, onCredential }: { webhook?: Web
   const [prompt, setPrompt] = useState(webhook?.prompt ?? "");
   const [runOn, setRunOn] = useState<RoutineRunOn>(webhook?.runOn ?? "maus");
   const [eventTypes, setEventTypes] = useState((webhook?.eventTypes ?? []).join(", "));
+  const [provider, setProvider] = useState<"" | "github" | "slack">(webhook?.provider ?? "");
+  // Typed once and sent write-only; the API only ever reports whether one is
+  // saved, so an existing key is shown as a placeholder rather than a value.
+  const [signingSecret, setSigningSecret] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const cloudInstance = state.instances.find((instance) => instance.driverKind === "boxAgent");
@@ -77,12 +81,22 @@ function WebhookEditor({ webhook, bots, onClose, onCredential }: { webhook?: Web
 
   const save = async () => {
     const bot = bots.find((candidate) => candidate.id === botId);
-    const input: WebhookTriggerInput = { name: name.trim() || suggestedName(prompt, bot), prompt: prompt.trim(), botId, runOn, ...webhookActivationDefaults(webhook), eventTypes: eventTypes.split(",").map((value) => value.trim()).filter(Boolean) };
+    const input: WebhookTriggerInput = { name: name.trim() || suggestedName(prompt, bot), prompt: prompt.trim(), botId, runOn, ...webhookActivationDefaults(webhook), eventTypes: eventTypes.split(",").map((value) => value.trim()).filter(Boolean), provider };
     setSaving(true);
     setError("");
     try {
       const response = await api(webhook ? `/api/webhooks/${webhook.id}` : "/api/webhooks", { method: webhook ? "PATCH" : "POST", body: JSON.stringify(input) });
-      dispatch({ type: "webhookPatched", webhook: response.webhook });
+      let saved = response.webhook;
+      // The key goes in its own request: it is a credential, and the create
+      // response is the one place the bearer secret is shown.
+      if (provider && signingSecret.trim()) {
+        const stored = await api(`/api/webhooks/${saved.id}/signing-secret`, {
+          method: "PUT",
+          body: JSON.stringify({ secret: signingSecret.trim() }),
+        });
+        saved = stored.webhook;
+      }
+      dispatch({ type: "webhookPatched", webhook: saved });
       onClose();
       if (response.credential) onCredential(response.credential, response.webhook.id);
     } catch (cause) {
@@ -97,7 +111,7 @@ function WebhookEditor({ webhook, bots, onClose, onCredential }: { webhook?: Web
       <div className="flex max-h-[90vh] w-full max-w-[590px] flex-col overflow-hidden rounded-xl border border-hairline bg-panel">
         <div className="flex items-start justify-between border-b border-hairline px-5 py-4"><div><div className="text-[17px] font-semibold text-ink">{webhook ? "Edit webhook" : "New local webhook"}</div><div className="mt-1 text-[12px] text-ink-secondary">Each request starts a new task in the MAUS chat.</div></div><button onClick={onClose} className="rounded-lg p-2 text-ink-secondary hover:bg-raised hover:text-ink"><X size={18} weight="bold" /></button></div>
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-5">
-          <div><div className="mb-2 text-[12px] font-medium text-ink-secondary">Who receives the tasks?</div><div className="grid grid-cols-2 gap-2 sm:grid-cols-3">{bots.map((bot) => <button key={bot.id} type="button" onClick={() => setBotId(bot.id)} className={cn("flex min-w-0 items-center gap-2 rounded-xl border px-3 py-2 text-left", botId === bot.id ? "border-accent/70 bg-accent/10" : "border-hairline bg-inset hover:bg-raised/60")}><MausAvatar color={bot.color} name={bot.name} seed={bot.id} shape={bot.shape} size={38} /><span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">{bot.name}</span></button>)}</div></div>
+          <div><div className="mb-2 text-[12px] font-medium text-ink-secondary">Who receives the tasks?</div><div className="grid grid-cols-2 gap-2 sm:grid-cols-3">{bots.map((bot) => <button key={bot.id} type="button" onClick={() => setBotId(bot.id)} className={cn("flex min-w-0 items-center gap-2 rounded-xl border px-3 py-2 text-left", botId === bot.id ? "border-accent/70 bg-accent/10" : "border-hairline bg-inset hover:bg-raised/60")}><MausAvatar color={bot.color} name={bot.name} seed={bot.id} shape={bot.shape} image={bot.avatarImage} size={38} /><span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">{bot.name}</span></button>)}</div></div>
           <div className="rounded-xl border border-accent/20 bg-accent/5 px-3.5 py-3 text-[11.5px] leading-relaxed text-ink-secondary">Send the task in the request: <code className="text-ink">{`{"task":"Check the failed build"}`}</code>. The MAUS keeps its model, tools, permissions, and computer setup.</div>
           <details className="group rounded-xl border border-hairline bg-inset/45 px-4 py-3" open={Boolean(webhook)}>
             <summary className="cursor-pointer text-[12.5px] font-medium text-ink">Advanced options</summary>
@@ -105,6 +119,48 @@ function WebhookEditor({ webhook, bots, onClose, onCredential }: { webhook?: Web
               <label className="block"><span className="mb-1.5 block text-[11.5px] font-medium text-ink-secondary">Name <span className="font-normal">· optional</span></span><input value={name} onChange={(event) => setName(event.target.value)} placeholder={suggestedName(prompt, bots.find((bot) => bot.id === botId))} className="w-full rounded-xl border border-hairline bg-panel px-3.5 py-2.5 text-[13px] text-ink outline-none placeholder:text-ink-secondary/60 focus:border-accent/70" /></label>
               <label className="block"><span className="mb-1.5 block text-[11.5px] font-medium text-ink-secondary">Default instructions <span className="font-normal">· optional</span></span><textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={3} placeholder="For every event, summarize what happened and suggest the next step…" className="w-full resize-y rounded-xl border border-hairline bg-panel px-3.5 py-3 text-[13px] leading-relaxed text-ink outline-none placeholder:text-ink-secondary/60 focus:border-accent/70" /><span className="mt-1.5 block text-[10.5px] leading-relaxed text-ink-secondary">Use this only when every event needs the same handling rule. Otherwise the request’s task is used.</span></label>
               <div><div className="mb-2 text-[11.5px] font-medium text-ink-secondary">Run on</div><div className="grid grid-cols-2 gap-2"><button type="button" onClick={() => setRunOn("maus")} className={cn("rounded-xl border p-3 text-left", runOn === "maus" ? "border-accent/70 bg-accent/10" : "border-hairline bg-panel hover:bg-raised/60")}><div className="flex items-center gap-2 text-[12.5px] font-medium text-ink"><Laptop size={14} weight={runOn === "maus" ? "fill" : "bold"} />This computer</div></button><button type="button" disabled={!cloudReady && runOn !== "cloud"} onClick={() => setRunOn("cloud")} className={cn("rounded-xl border p-3 text-left disabled:cursor-not-allowed disabled:opacity-45", runOn === "cloud" ? "border-accent/70 bg-accent/10" : "border-hairline bg-panel hover:bg-raised/60")}><div className="flex items-center gap-2 text-[12.5px] font-medium text-ink"><Cloud size={14} weight={runOn === "cloud" ? "fill" : "bold"} />Cloud VM</div></button></div></div>
+              <div>
+                <div className="mb-2 text-[11.5px] font-medium text-ink-secondary">Sender</div>
+                <div className="grid grid-cols-3 gap-2">
+                  {([
+                    ["", "Any sender", "Authenticated with the secret MausCrew generates."],
+                    ["github", "GitHub", "Verified with X-Hub-Signature-256 over the raw body."],
+                    ["slack", "Slack", "Verified with the v0 signature and a five-minute replay window."],
+                  ] as const).map(([value, label, hint]) => (
+                    <button
+                      key={value || "any"}
+                      type="button"
+                      title={hint}
+                      onClick={() => setProvider(value)}
+                      className={cn(
+                        "rounded-xl border p-3 text-left text-[12.5px] font-medium text-ink",
+                        provider === value ? "border-accent/70 bg-accent/10" : "border-hairline bg-panel hover:bg-raised/60",
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {provider && (
+                  <label className="mt-2 block">
+                    <span className="mb-1.5 block text-[11.5px] font-medium text-ink-secondary">
+                      {provider === "github" ? "GitHub webhook secret" : "Slack signing secret"}
+                      {webhook?.signingSecretSet ? <span className="font-normal"> · saved</span> : ""}
+                    </span>
+                    <input
+                      type="password"
+                      value={signingSecret}
+                      onChange={(event) => setSigningSecret(event.target.value)}
+                      placeholder={webhook?.signingSecretSet ? "Saved — type to replace" : "Paste it from the app's settings"}
+                      className="w-full rounded-xl border border-hairline bg-panel px-3.5 py-2.5 text-[13px] text-ink outline-none placeholder:text-ink-secondary/60 focus:border-accent/70"
+                    />
+                    <span className="mt-1.5 block text-[10.5px] leading-relaxed text-ink-secondary">
+                      Paste MausCrew's endpoint URL (without the secret in the path) into {provider === "github" ? "GitHub" : "Slack"},
+                      and its secret here. Signed hooks accept nothing else — the bearer token and capability URL stop working for them.
+                    </span>
+                  </label>
+                )}
+              </div>
               <label className="block"><span className="mb-1.5 block text-[11.5px] font-medium text-ink-secondary">Only accept event types <span className="font-normal">· optional</span></span><input value={eventTypes} onChange={(event) => setEventTypes(event.target.value)} placeholder="push, workflow_run" className="w-full rounded-xl border border-hairline bg-panel px-3.5 py-2.5 text-[13px] text-ink outline-none placeholder:text-ink-secondary/60 focus:border-accent/70" /><span className="mt-1.5 block text-[10.5px] text-ink-secondary">Comma-separated values from the sender’s event-type header.</span></label>
             </div>
           </details>
@@ -263,7 +319,7 @@ export function WebhooksPanel({ bots }: { bots: Bot[] }) {
                   const status = statusFor(webhook);
                   return (
                     <button key={webhook.id} onClick={() => { setSelectedId(webhook.id); setTab("setup"); setError(""); }} className={cn("flex min-w-[210px] items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-left transition-colors md:w-full md:min-w-0", webhook.id === selected.id ? "bg-raised text-ink shadow-sm" : "text-ink-secondary hover:bg-raised/55 hover:text-ink")}>
-                      {bot ? <MausAvatar color={bot.color} name={bot.name} seed={bot.id} shape={bot.shape} size={36} label={bot.name} /> : <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-raised text-ink-secondary"><WebhooksLogo size={16} weight="bold" /></div>}
+                      {bot ? <MausAvatar color={bot.color} name={bot.name} seed={bot.id} shape={bot.shape} image={bot.avatarImage} size={36} label={bot.name} /> : <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-raised text-ink-secondary"><WebhooksLogo size={16} weight="bold" /></div>}
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-[12.5px] font-medium">{webhook.name}</span>
                         <span className="mt-0.5 flex items-center gap-1.5 text-[10px]"><span className={cn("size-1.5 rounded-full", status.dot)} /><span className={status.tone}>{status.label}</span></span>
@@ -277,7 +333,7 @@ export function WebhooksPanel({ bots }: { bots: Bot[] }) {
             <section className="min-w-0">
               <div className="flex flex-wrap items-start justify-between gap-3 px-5 pt-5 md:px-7 md:pt-6">
                 <div className="flex min-w-0 items-center gap-3">
-                  {selectedBot ? <MausAvatar color={selectedBot.color} name={selectedBot.name} seed={selectedBot.id} shape={selectedBot.shape} size={44} label={selectedBot.name} /> : <div className="flex size-11 items-center justify-center rounded-xl bg-raised text-ink-secondary"><WebhooksLogo size={18} weight="bold" /></div>}
+                  {selectedBot ? <MausAvatar color={selectedBot.color} name={selectedBot.name} seed={selectedBot.id} shape={selectedBot.shape} image={selectedBot.avatarImage} size={44} label={selectedBot.name} /> : <div className="flex size-11 items-center justify-center rounded-xl bg-raised text-ink-secondary"><WebhooksLogo size={18} weight="bold" /></div>}
                   <div className="min-w-0">
                     <h3 className="truncate text-[17px] font-semibold text-ink">{selected.name}</h3>
                     <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10.5px] text-ink-secondary"><span>{selectedBot?.name ?? "Deleted MAUS"}</span><span>·</span><span>{selected.runOn === "cloud" ? "Cloud VM" : "This computer"}</span></div>

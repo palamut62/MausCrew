@@ -1,6 +1,6 @@
 // The bot's computer, in the right-side slot. Where it runs decides the
 // whole flow: cloud → provision the box on open (idempotent) and preview
-// via SSE frames or a ~4s screenshot poll; local ("This Mac") → frames
+// via SSE frames or a ~4s screenshot poll; local ("this computer") → frames
 // come from the Electron main process (desktopCapturer over the preload
 // bridge — box endpoints are never touched); off → parked. Auto (unset)
 // prefers a ready Local VM, then an existing cloud box, then this computer.
@@ -12,6 +12,8 @@ import type { Routine } from "@/lib/routines";
 import { ApiKeyRow } from "./ApiKeys";
 import { cn } from "@/lib/cn";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
+import { screenPoint } from "@/lib/screen-coords";
+import { keysymFor } from "@/lib/keysym";
 import { RoutineEditor } from "./RoutinesPage";
 
 async function api(path: string, init?: RequestInit): Promise<any> {
@@ -326,6 +328,68 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
         ? cloudFrame && `data:${cloudFrame.mime};base64,${cloudFrame.png}`
         : null;
 
+  // ── manual control ────────────────────────────────────────────────────
+  // Only while the user has explicitly taken over: the server refuses input
+  // otherwise, and a click that silently fought a working bot would be worse
+  // than one that is simply not offered.
+  const controlling = Boolean(bot.humanTakeover?.active);
+  const [keystrokes, setKeystrokes] = useState("");
+  const [controlHint, setControlHint] = useState<string | null>(null);
+  const frameRef = useRef<HTMLImageElement>(null);
+  const display = live?.display;
+
+  const sendInput = async (body: Record<string, unknown>) => {
+    try {
+      await api(`/api/bots/${bot.id}/computer/input`, { method: "POST", body: JSON.stringify(body) });
+      setControlHint(null);
+    } catch (cause) {
+      setControlHint(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
+
+  /** Where on the real screen a pointer event landed, or null when it missed
+   * the image (the letterbox) or the box never reported its geometry. */
+  const pointOf = (event: { clientX: number; clientY: number }) => {
+    const image = frameRef.current;
+    if (!image) return null;
+    if (!display) {
+      setControlHint("This computer did not report its screen size, so clicks cannot be placed.");
+      return null;
+    }
+    const bounds = image.getBoundingClientRect();
+    return screenPoint(
+      { offsetX: event.clientX - bounds.left, offsetY: event.clientY - bounds.top },
+      { width: bounds.width, height: bounds.height },
+      { width: image.naturalWidth, height: image.naturalHeight },
+      display,
+    );
+  };
+
+  const sendPointer = async (
+    event: React.MouseEvent<HTMLElement>,
+    double: boolean,
+    button: "left" | "right" = "left",
+  ) => {
+    const point = pointOf(event);
+    if (!point) return;
+    await sendInput({ kind: "click", ...point, button, ...(double ? { double: true } : {}) });
+  };
+
+  const sendScroll = async (event: React.WheelEvent<HTMLElement>) => {
+    const point = pointOf(event);
+    if (!point) return;
+    await sendInput({ kind: "scroll", ...point, direction: event.deltaY > 0 ? "down" : "up" });
+  };
+
+  const sendTyping = async (text: string, thenEnter: boolean) => {
+    const value = text.trim();
+    if (value) await sendInput({ kind: "type", text: value });
+    if (thenEnter) await sendInput({ kind: "key", key: "Return" });
+    setKeystrokes("");
+  };
+
+  const sendKey = (key: string) => sendInput({ kind: "key", key });
+
   const run = (kind: "join" | "sleep") => {
     setPending(kind);
     setError(null);
@@ -370,12 +434,21 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
     checking: "Checking…",
     starting: "Starting your bot's computer…",
     unconfigured: "No cloud computer configured",
+    // Each platform fails for its own reason, and the reason is what the
+    // user needs — "unavailable" alone sends people to a settings pane that
+    // cannot fix it.
     "local-unavailable":
-      capabilities.host.platform === "linux"
-        ? "Local computer control isn't available on Linux yet. Use a cloud box instead."
-        : capabilities.host.label === "Browser"
-          ? "Local computer control requires the desktop app."
-          : "CUA Driver isn't ready for local computer control.",
+      capabilities.localComputer.reasonCode === "wayland-session"
+        ? "This is a Wayland session. Desktop control needs X11 — log in with an Xorg session, or use a cloud box."
+        : capabilities.localComputer.reasonCode === "no-display"
+          ? "No graphical session was found on this machine, so there is nothing to drive."
+          : capabilities.localComputer.reasonCode === "cua-driver-installing"
+            ? "The desktop driver is still installing. This finishes on its own."
+            : capabilities.localComputer.reasonCode === "cua-driver-not-installed"
+              ? "The desktop driver is not installed yet. Open App Settings → Local computer to install it."
+              : capabilities.host.label === "Browser"
+                ? "Local computer control requires the desktop app."
+                : "The desktop driver isn't ready for local computer control.",
     "vm-unavailable": "The Local VM isn't available for this bot",
     off: "This bot's computer is off",
     error: "Couldn't reach the computer",
@@ -421,8 +494,56 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
             {phase === "local" && <span className="font-mono text-[11px] tracking-tight">this computer</span>}
             {phase === "vm" && <span className="font-mono text-[11px] tracking-tight">Local VM</span>}
         </div>
+        {phase === "ready" && (
+          <div className="mb-1.5 flex items-center justify-between gap-2 rounded-lg border border-hairline bg-inset px-2.5 py-1.5">
+            <span className="min-w-0 text-[11.5px] text-ink-secondary">
+              {controlling
+                ? controlHint ?? "You are driving. Click the screen, or type below."
+                : "Take control to finish a sign-in, a CAPTCHA, or anything the bot must not answer."}
+            </span>
+            <button
+              onClick={() => dispatch({ type: "setTakeover", botId: bot.id, active: !controlling, resume: controlling })}
+              className={cn(
+                "shrink-0 rounded-md px-2 py-1 text-[11.5px] font-medium",
+                controlling ? "bg-accent text-app" : "border border-hairline text-ink hover:bg-raised",
+              )}
+            >
+              {controlling ? "Return control" : "Take control"}
+            </button>
+          </div>
+        )}
         <div className="flex aspect-[16/10] w-full items-center justify-center overflow-hidden rounded-xl bg-card">
-          {frameSrc ? (
+          {frameSrc && controlling && phase === "ready" ? (
+            // Driving the box by hand. The frame is a downscale of a bigger
+            // screen, so the click is mapped back through the geometry the
+            // capture reported rather than sent in image pixels.
+            //
+            // A button rather than a clickable image: this is a control, it
+            // has to be reachable by keyboard, and once focused the keys go
+            // to the screen instead of to the page.
+            <button
+              type="button"
+              aria-label={`${bot.name}'s screen — click to act on it, or type while focused`}
+              className="h-full w-full cursor-crosshair"
+              onClick={(event) => void sendPointer(event, false)}
+              onDoubleClick={(event) => void sendPointer(event, true)}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                void sendPointer(event, false, "right");
+              }}
+              onWheel={(event) => void sendScroll(event)}
+              onKeyDown={(event) => {
+                const key = keysymFor(event);
+                if (!key) return;
+                // Space and the arrows scroll the panel, Tab leaves the
+                // control — none of that is what a focused screen means.
+                event.preventDefault();
+                void sendInput(key);
+              }}
+            >
+              <img ref={frameRef} src={frameSrc} alt="" className="h-full w-full object-contain" />
+            </button>
+          ) : frameSrc ? (
             // The preview is thumbnail-sized and a desktop screenshot is the
             // one thing you need to read closely, so clicking opens the frame
             // at full size in the browser. It goes through the server rather
@@ -453,11 +574,13 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
                     ? "Capturing the Local VM screen…"
                   : phase === "local"
                     ? localMisses >= 3
-                      ? "No frames yet — the preview needs Screen Recording permission. After granting, relaunch the app."
+                      ? capabilities.host.platform === "darwin"
+                        ? "No frames yet — the preview needs Screen Recording permission. After granting, relaunch the app."
+                        : "No frames yet — the screen could not be captured on this session."
                       : "Capturing this computer's screen…"
                     : emptyState[phase]}
               </span>
-              {phase === "local" && localMisses >= 3 && (
+              {phase === "local" && localMisses >= 3 && capabilities.host.platform === "darwin" && (
                 <button
                   onClick={() => window.mauscrew?.permOpenSettings?.("screen")}
                   className="mt-1 rounded-lg bg-raised px-3 py-1.5 text-[12px] text-ink hover:bg-raised-hover"
@@ -476,6 +599,32 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
             </div>
           )}
         </div>
+
+        {controlling && phase === "ready" && (
+          <div className="mt-1.5 flex gap-1.5">
+            <input
+              value={keystrokes}
+              onChange={(event) => setKeystrokes(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter") return;
+                event.preventDefault();
+                void sendTyping(keystrokes, true);
+              }}
+              placeholder="Type into the screen, Enter to send"
+              className="min-w-0 flex-1 rounded-lg border border-hairline bg-inset px-2.5 py-1.5 text-[12px] text-ink outline-none"
+            />
+            {/* The keys a sign-in actually needs and a text box cannot send. */}
+            {(["Tab", "Escape", "BackSpace"] as const).map((key) => (
+              <button
+                key={key}
+                onClick={() => void sendKey(key)}
+                className="shrink-0 rounded-lg border border-hairline px-2 py-1.5 font-mono text-[10.5px] text-ink-secondary hover:bg-raised hover:text-ink"
+              >
+                {key === "BackSpace" ? "⌫" : key}
+              </button>
+            ))}
+          </div>
+        )}
 
         {error && (
           <div className="mt-2 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[12px] text-danger">

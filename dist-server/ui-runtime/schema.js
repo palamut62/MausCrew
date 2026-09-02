@@ -1,4 +1,4 @@
-export const structuredComponents = ["metric-card", "progress", "table", "task-list", "timeline", "status-grid", "agent-result"];
+export const structuredComponents = ["metric-card", "progress", "table", "task-list", "timeline", "status-grid", "agent-result", "file-list"];
 const text = (value, max = 300) => typeof value === "string" ? value.trim().slice(0, max) : "";
 const primitive = (value) => typeof value === "string" || typeof value === "number" || typeof value === "boolean" || value === null;
 export function validateStructuredUi(value) {
@@ -56,6 +56,31 @@ export function validateStructuredUi(value) {
                 return { label: text(record.label, 100), value: text(record.value, 120), status };
             }).filter((item) => item.label && item.value) : [];
             return { component: "status-grid", props: { items } };
+        }
+        // What the turn actually produced, as things rather than as a sentence.
+        // A bot that writes three files currently has no way to hand them over
+        // except by naming them in prose, which leaves the user to hunt for a
+        // path they cannot click.
+        case "file-list": {
+            const items = Array.isArray(props.items) ? props.items.slice(0, 20).map((item) => {
+                const entry = item && typeof item === "object" && !Array.isArray(item) ? item : {};
+                // The path is shown verbatim and never opened by the app — the only
+                // action offered is revealing it in the file manager, so a hostile
+                // value is a wrong folder rather than an execution.
+                const path = text(entry.path, 4000);
+                const name = text(entry.name, 200) || path.split(/[\\/]/).pop() || "";
+                const bytes = Number(entry.bytes);
+                return {
+                    name,
+                    ...(path ? { path } : {}),
+                    ...(text(entry.kind, 40) ? { kind: text(entry.kind, 40) } : {}),
+                    ...(Number.isFinite(bytes) && bytes >= 0 ? { bytes: Math.floor(bytes) } : {}),
+                    ...(text(entry.note, 300) ? { note: text(entry.note, 300) } : {}),
+                };
+            }).filter((item) => item.name) : [];
+            if (!items.length)
+                throw new Error("file-list needs at least one named item");
+            return { component: "file-list", props: { ...(text(props.title, 100) ? { title: text(props.title, 100) } : {}), items } };
         }
         case "agent-result": {
             const title = text(props.title, 120);

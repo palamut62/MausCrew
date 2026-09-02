@@ -1,9 +1,17 @@
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
+const APP_VERSION = JSON.parse(
+  readFileSync(fileURLToPath(new URL("./package.json", import.meta.url)), "utf8"),
+).version as string;
+
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(APP_VERSION),
+  },
   plugins: [react(), tailwindcss()],
   test: {
     environment: "node",
@@ -18,6 +26,20 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
+    },
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          react: ["react", "react-dom"],
+          icons: ["@phosphor-icons/react"],
+          markdown: ["react-markdown", "remark-gfm", "shiki"],
+          analytics: ["posthog-js"],
+          qrcode: ["qrcode.react"],
+          styling: ["clsx", "tailwind-merge"],
+        },
+      },
     },
   },
   server: {

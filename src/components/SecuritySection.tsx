@@ -1,15 +1,20 @@
 import { useCallback, useEffect, useState } from "react";
-import { ArrowClockwise, Check, FloppyDisk, ShieldCheck, WarningCircle } from "@phosphor-icons/react";
+import { ArrowClockwise, Check, FloppyDisk, Plus, ShieldCheck, Trash, WarningCircle } from "@phosphor-icons/react";
 
 import { Card } from "./SettingsPrimitives";
 import { cn } from "@/lib/cn";
+import { insertRule, isBuiltInRule, removeRule, ruleId, type PolicyRule } from "@/lib/policy-rules";
 
 type Outcome = "allow" | "ask" | "deny";
 type Policy = {
   version: 1;
   defaults: Record<string, Outcome>;
-  rules: Array<{ id: string; description?: string; decision: Outcome }>;
+  rules: PolicyRule[];
 };
+
+/** Categories the engine knows. Kept in step with actionCategories on the
+ * server; an unknown one is refused there, which is the real gate. */
+const CATEGORIES = ["shell", "filesystem", "browser", "computer", "mcp", "composio", "network", "agent", "other"] as const;
 type AuditRecord = {
   id: string;
   timestamp: string;
@@ -43,6 +48,9 @@ export function SecuritySection() {
   const [records, setRecords] = useState<AuditRecord[]>([]);
   const [toolFilter, setToolFilter] = useState("");
   const [decisionFilter, setDecisionFilter] = useState("");
+  const [draftTool, setDraftTool] = useState("");
+  const [draftCategory, setDraftCategory] = useState("");
+  const [draftDecision, setDraftDecision] = useState<Outcome>("ask");
   const [status, setStatus] = useState<"idle" | "loading" | "saving" | "saved" | "error">("loading");
   const [error, setError] = useState<string | null>(null);
 
@@ -145,17 +153,108 @@ export function SecuritySection() {
             </button>
           </Card>
 
-          <Card title="Safety rules" subtitle="Rules run before category defaults and cannot be bypassed by Auto mode.">
+          <Card title="Safety rules" subtitle="Rules run before category defaults and cannot be bypassed by Auto mode. The first match wins, so order is precedence: built-in rules stay in front, and your Require approval / Deny rules sit ahead of your Always allow rules.">
             <div className="space-y-2">
               {policy?.rules.map((rule) => (
                 <div key={rule.id} className="flex items-start justify-between gap-3 rounded-lg border border-hairline px-3 py-2">
                   <div className="min-w-0">
                     <div className="truncate font-mono text-[11.5px] text-ink">{rule.id}</div>
-                    <div className="mt-0.5 text-[11px] text-ink-secondary">{rule.description}</div>
+                    <div className="mt-0.5 text-[11px] text-ink-secondary">
+                      {rule.description ?? [
+                        rule.when?.tools?.length ? `tools: ${rule.when.tools.join(", ")}` : "",
+                        rule.when?.categories?.length ? `categories: ${rule.when.categories.join(", ")}` : "",
+                      ].filter(Boolean).join(" · ")}
+                    </div>
                   </div>
-                  <span className={cn("text-[10.5px] font-semibold uppercase", outcomeClass[rule.decision])}>{rule.decision}</span>
+                  <div className="flex shrink-0 items-center gap-2">
+                    {/* Built-in rules can be re-decided but not removed. A
+                        rule that only ever denies, with no way to say "ask me
+                        instead", is a dead end: the action is refused and the
+                        app offers nowhere to approve it. */}
+                    <select
+                      value={rule.decision}
+                      onChange={(event) => policy && setPolicy({
+                        ...policy,
+                        rules: policy.rules.map((candidate) =>
+                          candidate.id === rule.id ? { ...candidate, decision: event.target.value as Outcome } : candidate,
+                        ),
+                      })}
+                      className={cn(
+                        "rounded-md border border-hairline bg-panel px-1.5 py-0.5 text-[10.5px] font-semibold uppercase outline-none",
+                        outcomeClass[rule.decision],
+                      )}
+                      aria-label={`Decision for ${rule.id}`}
+                    >
+                      <option value="allow">ALLOW</option>
+                      <option value="ask">ASK</option>
+                      <option value="deny">DENY</option>
+                    </select>
+                    {policy && !isBuiltInRule(rule) && (
+                      <button
+                        onClick={() => setPolicy({ ...policy, rules: removeRule(policy.rules, rule.id) })}
+                        className="rounded-md p-1 text-danger hover:bg-danger/10"
+                        aria-label={`Remove rule ${rule.id}`}
+                      >
+                        <Trash size={13} />
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
+            </div>
+
+            <div className="mt-3 space-y-2 rounded-lg border border-dashed border-hairline p-3">
+              <div className="text-[11px] text-ink-secondary">
+                Add your own rule. A tool pattern may use <span className="font-mono">*</span> — <span className="font-mono">mcp__custom_*</span>, <span className="font-mono">Bash</span>, <span className="font-mono">browser_*</span>.
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <input
+                  value={draftTool}
+                  onChange={(event) => setDraftTool(event.target.value)}
+                  placeholder="Tool pattern"
+                  className="min-w-0 flex-1 rounded-lg border border-hairline bg-inset px-3 py-2 text-[12px] text-ink outline-none"
+                />
+                <select
+                  value={draftCategory}
+                  onChange={(event) => setDraftCategory(event.target.value)}
+                  className="rounded-lg border border-hairline bg-inset px-2 py-2 text-[12px] text-ink outline-none"
+                >
+                  <option value="">Any category</option>
+                  {CATEGORIES.map((category) => <option key={category} value={category}>{category}</option>)}
+                </select>
+                <select
+                  value={draftDecision}
+                  onChange={(event) => setDraftDecision(event.target.value as Outcome)}
+                  className={cn("rounded-lg border border-hairline bg-inset px-2 py-2 text-[11px] font-semibold uppercase outline-none", outcomeClass[draftDecision])}
+                >
+                  <option value="ask">ASK</option>
+                  <option value="deny">DENY</option>
+                  <option value="allow">ALLOW</option>
+                </select>
+                <button
+                  onClick={() => {
+                    if (!policy || (!draftTool.trim() && !draftCategory)) return;
+                    const pattern = draftTool.trim();
+                    const rule: PolicyRule = {
+                      id: ruleId(policy.rules, pattern || draftCategory, draftDecision),
+                      description: `You added this: ${draftDecision} ${pattern || "any tool"}${draftCategory ? ` in ${draftCategory}` : ""}.`,
+                      when: {
+                        ...(pattern ? { tools: [pattern] } : {}),
+                        ...(draftCategory ? { categories: [draftCategory] } : {}),
+                      },
+                      decision: draftDecision,
+                    };
+                    setPolicy({ ...policy, rules: insertRule(policy.rules, rule) });
+                    setDraftTool("");
+                    setDraftCategory("");
+                  }}
+                  disabled={!policy || (!draftTool.trim() && !draftCategory)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-hairline px-3 py-2 text-[12px] text-ink hover:bg-raised disabled:opacity-40"
+                >
+                  <Plus size={13} weight="bold" /> Add
+                </button>
+              </div>
+              <div className="text-[11px] text-ink-secondary">Rules are staged here; press Save policy above to apply them.</div>
             </div>
           </Card>
         </>

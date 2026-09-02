@@ -37,6 +37,8 @@ describe("bundled sandbox composition", () => {
     expect(base).toContain("name: '@deepseek-ai/dsh-bash-local'");
     expect(base).toContain("@deepseek-ai/dsh-fs-sandbox");
     expect(base).toContain("@deepseek-ai/dsh-tool-str-replace-editor");
+    expect(base).toContain("@deepseek-ai/dsh-user-questions");
+    expect(base).toContain("@deepseek-ai/dsh-tool-ask-user");
     expect(base).toContain("DSH_SANDBOX_MODE === 'danger-full-access'");
     expect(base).not.toContain("@deepseek-ai/dsh-fs-local");
   });

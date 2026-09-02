@@ -13,10 +13,10 @@
 //
 // Two deliberate limits.
 //
-// It runs in its own profile under the app's data directory, not the user's
-// day-to-day Chrome. Attaching to that would hand a bot every session the user
-// has open — mail, bank, everything — as a side effect of asking it to check a
-// price. The bot signs in to what it needs, and the user can see what that is.
+// It normally runs in its own profile under the app's data directory, not the
+// user's day-to-day Chrome. The only exception is an explicit localhost CDP
+// session the user deliberately attached in Settings. That boundary is visible
+// in the UI, reversible, and the proxy never closes the attached browser.
 //
 // Playwright is optional. It is a large dependency and most bots never touch a
 // browser, so it is loaded only when used, and its absence is reported as a
@@ -27,6 +27,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 const PROFILE_DIR = process.env.MAUSCREW_PLAYWRIGHT_PROFILE ?? "";
 const HEADLESS = process.env.MAUSCREW_PLAYWRIGHT_HEADLESS === "1";
+const CDP_ENDPOINT = process.env.MAUSCREW_PLAYWRIGHT_CDP ?? "";
 /** A page that has not settled in this long is not going to. */
 const NAV_TIMEOUT_MS = 30_000;
 const ACTION_TIMEOUT_MS = 15_000;
@@ -36,6 +37,7 @@ const MAX_ELEMENTS = 200;
 const send = (obj) => process.stdout.write(JSON.stringify(obj) + "\n");
 let context = null;
 let starting = null;
+let attachedToUserBrowser = false;
 /** The message a missing dependency should produce: a next step, not a stack. */
 const NOT_INSTALLED = "Playwright is not installed, so browser control on this computer is unavailable. Install it with: npm install -g playwright && npx playwright install chromium";
 async function browser() {
@@ -50,6 +52,15 @@ async function browser() {
         }
         catch {
             throw new Error(NOT_INSTALLED);
+        }
+        if (CDP_ENDPOINT) {
+            const attached = await chromium.connectOverCDP(CDP_ENDPOINT);
+            const existing = attached.contexts()[0];
+            if (!existing)
+                throw new Error("The selected browser has no attachable context");
+            attachedToUserBrowser = true;
+            context = existing;
+            return existing;
         }
         const dir = PROFILE_DIR || join(process.cwd(), ".mauscrew-browser");
         mkdirSync(dir, { recursive: true });
@@ -114,7 +125,9 @@ function selectorFor(ref) {
 const TOOLS = [
     {
         name: "pc_browser_open",
-        description: "Open a URL in a browser running on the user's own computer, in MausCrew's own profile (not their everyday Chrome). Waits for the page to settle and returns what is on it.",
+        description: CDP_ENDPOINT
+            ? "Open a URL in the browser session the user explicitly attached to MausCrew. Waits for the page to settle and returns what is on it."
+            : "Open a URL in a browser running on the user's own computer, in MausCrew's own isolated profile. Waits for the page to settle and returns what is on it.",
         inputSchema: { type: "object", properties: { url: { type: "string" } }, required: ["url"] },
     },
     {
@@ -312,7 +325,10 @@ async function shutdown() {
     while (inFlight > 0 && Date.now() < deadline) {
         await new Promise((resolve) => setTimeout(resolve, 100));
     }
-    await context?.close().catch(() => { });
+    // Never close a browser session the user explicitly attached. Doing so
+    // would close their tabs merely because an agent turn ended.
+    if (!attachedToUserBrowser)
+        await context?.close().catch(() => { });
     process.exit(0);
 }
 // stdin closing means the driver that spawned this is gone. Without it the

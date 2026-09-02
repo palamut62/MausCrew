@@ -380,6 +380,21 @@ describe("harness HTTP API", () => {
     expect(cleared.status).toBe(200);
     expect(cleared.body.bot.workspacePath).toBeUndefined();
 
+    // A chosen avatar is stored inline, so the shape and the ceiling are both
+    // enforced here rather than trusted from the renderer.
+    const png = `data:image/png;base64,${Buffer.from("fake-png").toString("base64")}`;
+    const withAvatar = await api("PATCH", `/api/bots/${bot.id}`, { avatarImage: png });
+    expect(withAvatar.status).toBe(200);
+    expect(withAvatar.body.bot.avatarImage).toBe(png);
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { avatarImage: "https://example.com/a.png" })).status).toBe(400);
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { avatarImage: "data:image/svg+xml;base64,PHN2Zz4=" })).status).toBe(400);
+    expect((await api("PATCH", `/api/bots/${bot.id}`, {
+      avatarImage: `data:image/png;base64,${"A".repeat(200_001)}`,
+    })).status).toBe(400);
+    const clearedAvatar = await api("PATCH", `/api/bots/${bot.id}`, { avatarImage: "" });
+    expect(clearedAvatar.status).toBe(200);
+    expect(clearedAvatar.body.bot.avatarImage).toBeUndefined();
+
     const missing = await api("PATCH", "/api/bots/does-not-exist", { name: "x" });
     expect(missing.status).toBe(404);
 
@@ -442,6 +457,66 @@ describe("harness HTTP API", () => {
     expect((await api("DELETE", `/api/bots/${bot.id}/skills/review-change`)).status).toBe(200);
     expect((await api("GET", `/api/bots/${bot.id}/skills`)).body.skills).toEqual([]);
     await api("DELETE", `/api/bots/${bot.id}`);
+  });
+
+  it("keeps project rooms, context resources, and manual takeover server-backed", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    const workspacePath = join(home, "project-workspace");
+    mkdirSync(workspacePath, { recursive: true });
+    const created = await api("POST", "/api/projects", {
+      name: "Launch Project",
+      description: "Isolated launch context",
+      workspacePath,
+      instructions: "Never mix this launch with another project.",
+      resources: [{ label: "Brief", value: "docs/brief.md" }],
+      memberIds: [bot.id],
+    });
+    expect(created.status).toBe(201);
+    expect(created.body.group.projectId).toBe(created.body.project.id);
+    expect(created.body.project.resources).toMatchObject([{ label: "Brief", value: "docs/brief.md" }]);
+
+    const secondRoom = await api("POST", "/api/groups", {
+      name: "Release Room",
+      memberIds: [bot.id],
+      projectId: created.body.project.id,
+    });
+    expect(secondRoom.status).toBe(201);
+    expect(secondRoom.body.group.projectId).toBe(created.body.project.id);
+    expect((await api("GET", "/api/projects")).body.projects[0].roomIds).toEqual(
+      expect.arrayContaining([created.body.group.id, secondRoom.body.group.id]),
+    );
+
+    expect((await api("DELETE", `/api/groups/${secondRoom.body.group.id}`)).status).toBe(200);
+    expect((await api("GET", "/api/projects")).body.projects[0].roomIds).not.toContain(secondRoom.body.group.id);
+
+    // Manual input is refused while the bot still holds the pointer, so a
+    // stray click cannot land in the middle of a turn.
+    const beforeTakeover = await api("POST", `/api/bots/${bot.id}/computer/input`, { kind: "click", x: 10, y: 10 });
+    expect(beforeTakeover.status).toBe(409);
+    expect(beforeTakeover.body.error).toContain("take control first");
+
+    const takeover = await api("POST", `/api/bots/${bot.id}/takeover`, { active: true });
+    expect(takeover.status).toBe(200);
+    expect(takeover.body.bot.humanTakeover.active).toBe(true);
+
+    // Under control, but this test fleet has no cloud computer configured —
+    // the route must say so rather than pretending the click landed.
+    const withoutBox = await api("POST", `/api/bots/${bot.id}/computer/input`, { kind: "click", x: 10, y: 10 });
+    expect(withoutBox.status).toBe(409);
+    expect(withoutBox.body.error).toContain("cloud computer");
+    const badInput = await api("POST", `/api/bots/${bot.id}/computer/input`, { kind: "drag" });
+    expect(badInput.status).toBe(400);
+
+    const returned = await api("POST", `/api/bots/${bot.id}/takeover`, { active: false });
+    expect(returned.status).toBe(200);
+    expect(returned.body.bot.humanTakeover).toBeUndefined();
+
+    expect((await api("DELETE", `/api/projects/${created.body.project.id}`)).status).toBe(200);
+    const hydrated = await api("GET", "/api/bots");
+    expect(hydrated.body.projects).toEqual([]);
+    expect(hydrated.body.groups.find((group: { id: string }) => group.id === created.body.group.id).projectId).toBeUndefined();
+    expect((await api("DELETE", `/api/groups/${created.body.group.id}`)).status).toBe(200);
+    expect((await api("DELETE", `/api/bots/${bot.id}`)).status).toBe(200);
   });
 
   it("exports selected bots without a room and imports the team with fresh IDs", async () => {
@@ -624,6 +699,58 @@ describe("harness HTTP API", () => {
     expect(send.body.error).toContain("unavailable");
   });
 
+  it("remembers that PC Browser was switched on", async () => {
+    // Regression: pcBrowser was accepted by the API and dropped by
+    // saveConfig, so the toggle read back off the moment it was set and the
+    // setting never survived a restart.
+    const saved = await api("PATCH", "/api/config", {
+      pcBrowser: { enabled: true, headless: false, cdpEndpoint: "" },
+    });
+    expect(saved.status).toBe(200);
+    expect(saved.body.pcBrowser).toMatchObject({ enabled: true, headless: false });
+    expect((await api("GET", "/api/config")).body.pcBrowser).toMatchObject({ enabled: true });
+    await api("PATCH", "/api/config", { pcBrowser: { enabled: false, headless: false, cdpEndpoint: "" } });
+  });
+
+  it("accepts a requested bot name and refuses case-insensitive duplicates", async () => {
+    const first = await api("POST", "/api/bots", { name: "Named bot" });
+    expect(first.status).toBe(201);
+    expect(first.body.bot.name).toBe("Named bot");
+    const duplicate = await api("POST", "/api/bots", { name: "named BOT" });
+    expect(duplicate.status).toBe(409);
+    expect((await api("DELETE", `/api/bots/${first.body.bot.id}`)).status).toBe(200);
+  });
+
+  it("persists the fallback chain even when stale entries are filtered out", async () => {
+    const saved = await api("PATCH", "/api/config", { fallbackChain: ["removed-engine"] });
+    expect(saved.status).toBe(200);
+    expect(saved.body.fallbackChain).toEqual([]);
+    const disk = JSON.parse(readFileSync(join(home, ".mauscrew", "config.json"), "utf8"));
+    expect(disk).toHaveProperty("fallbackChain", []);
+  });
+
+  it("guards the browser profile and host driver endpoints", async () => {
+    const profile = await api("GET", "/api/browser-profile");
+    expect(profile.status).toBe(200);
+    expect(profile.body).toMatchObject({ signingIn: false, lastSeen: null });
+    expect(profile.body.profilePath).toContain("pc-browser-profile");
+
+    // The sign-in URL becomes a navigation in a window carrying this
+    // profile's sessions, so the scheme is checked at the boundary.
+    for (const url of ["file:///etc/passwd", "javascript:alert(1)", "", "not a url"]) {
+      expect((await api("POST", "/api/browser-profile/sign-in", { url })).status).toBe(400);
+    }
+
+    // The host driver is the Linux path; everywhere else says so rather than
+    // pretending to install something.
+    const host = await api("GET", "/api/host-computer");
+    expect(host.status).toBe(200);
+    expect(typeof host.body.supported).toBe("boolean");
+    if (process.platform !== "linux") {
+      expect((await api("POST", "/api/host-computer/install", {})).status).toBe(409);
+    }
+  });
+
   it("validates direct turn redirects at the HTTP boundary", async () => {
     const bot = (await api("POST", "/api/bots")).body.bot;
     expect((await api("POST", `/api/bots/${bot.id}/steer`, { text: "" })).status).toBe(400);
@@ -707,7 +834,7 @@ describe("harness HTTP API", () => {
 
     const saved = await api("PUT", "/api/config?secretStorage=external", { composio: { apiKey: "ak_good" } });
     expect(saved.status).toBe(200);
-    expect(saved.body.composio).toEqual({ configured: true });
+    expect(saved.body.composio).toEqual({ configured: true, recoveryRequired: false });
     expect(JSON.stringify(saved.body)).not.toContain("ak_good");
 
     const disk = JSON.parse(readFileSync(join(home, ".mauscrew", "config.json"), "utf8"));
@@ -717,7 +844,7 @@ describe("harness HTTP API", () => {
     // A later ordinary setting save reloads config; the in-process secure-env
     // override must keep Composio configured until the next app launch.
     expect((await api("PUT", "/api/config", { profile: { name: "Grace" } })).status).toBe(200);
-    expect((await api("GET", "/api/config")).body.composio).toEqual({ configured: true });
+    expect((await api("GET", "/api/config")).body.composio).toEqual({ configured: true, recoveryRequired: false });
   });
 
   it.skipIf(process.platform === "win32")("stores the credentials file with owner-only permissions", () => {

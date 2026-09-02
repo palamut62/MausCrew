@@ -18,6 +18,7 @@ import { RemoteAccessSection } from "./RemoteAccessSection";
 import { SecuritySection } from "./SecuritySection";
 import { AguiAgents } from "./AguiAgents";
 import { McpServers } from "./McpServers";
+import { TelegramSettings } from "./TelegramSettings";
 
 const SECTIONS: Array<{ id: AppSettingsSection; label: string; icon: typeof User }> = [
   { id: "general", label: "General", icon: User },
@@ -34,8 +35,10 @@ function ProfileFields() {
   const [name, setName] = useState(state.config?.profile?.name ?? "");
   const [email, setEmail] = useState(state.config?.profile?.email ?? "");
   useEffect(() => {
-    setName(state.config?.profile?.name ?? "");
-    setEmail(state.config?.profile?.email ?? "");
+    queueMicrotask(() => {
+      setName(state.config?.profile?.name ?? "");
+      setEmail(state.config?.profile?.email ?? "");
+    });
   }, [state.config?.profile?.name, state.config?.profile?.email]);
 
   const save = () => {
@@ -125,10 +128,11 @@ function AnalyticsRow() {
 
 function UpdatesRow() {
   const s = useUpdaterState();
-  if (!window.mauscrew?.updater) return null;
-  const updater = window.mauscrew.updater;
+  const updater = window.mauscrew?.updater;
   const label =
-    s?.status === "checking"
+    !updater
+      ? "Update checks are available in the desktop app."
+      : s?.status === "checking"
       ? "Checking…"
       : s?.status === "available"
         ? `${s.version} available`
@@ -141,21 +145,33 @@ function UpdatesRow() {
               : "You're on the latest version we know of.";
   return (
     <Card title="Updates" subtitle={label}>
-      <button
-        onClick={() => {
-          if (s?.status === "available") return void updater.download();
-          if (s?.status === "downloaded") return void updater.install();
-          void updater.check();
-        }}
-        disabled={s?.status === "checking" || s?.status === "downloading"}
-        className="rounded-lg border border-hairline px-3 py-1.5 text-[13px] text-ink hover:bg-raised disabled:opacity-40"
-      >
-        {s?.status === "available"
-          ? "Download"
-          : s?.status === "downloaded"
-            ? "Restart and install"
-            : "Check for updates"}
-      </button>
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0">
+          <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
+            Installed version
+          </div>
+          <div className="mt-0.5 font-mono text-[14px] font-medium tabular-nums text-ink">
+            MausCrew v{__APP_VERSION__}
+          </div>
+        </div>
+        {updater && (
+          <button
+            onClick={() => {
+              if (s?.status === "available") return void updater.download();
+              if (s?.status === "downloaded") return void updater.install();
+              void updater.check();
+            }}
+            disabled={s?.status === "checking" || s?.status === "downloading"}
+            className="shrink-0 rounded-lg border border-hairline px-3 py-1.5 text-[13px] text-ink hover:bg-raised disabled:opacity-40"
+          >
+            {s?.status === "available"
+              ? "Download"
+              : s?.status === "downloaded"
+                ? "Restart and install"
+                : "Check for updates"}
+          </button>
+        )}
+      </div>
     </Card>
   );
 }
@@ -443,6 +459,15 @@ export function SettingsModal() {
                 <SharedWorkspaceRow />
                 <UpdatesRow />
               </>
+            )}
+
+            {section === "connections" && (
+              <Card
+                title="Telegram bot"
+                subtitle="Send every MausCrew bot's results and action-needed alerts to one Telegram chat, labelled with that bot's profile."
+              >
+                <TelegramSettings />
+              </Card>
             )}
 
             {section === "connections" && (

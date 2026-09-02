@@ -121,6 +121,13 @@ const MAX_INTERVAL_MINUTES = 24 * 60;
 const CATCH_UP_MS = 12 * 60 * 60_000;
 const MAX_RUNS = 2_000;
 
+/** A rejected routine is a rejected input, and the HTTP layer reads `status`
+ * off the error to say so. Without it every "Time must use HH:MM" reached the
+ * client as a 500 — the same code the app uses for a harness that broke. */
+function invalid(message: string): Error {
+  return Object.assign(new Error(message), { status: 400 });
+}
+
 function cleanDays(days: unknown): number[] {
   if (!Array.isArray(days)) return ALL_DAYS;
   const out = [...new Set(days.filter((d): d is number => Number.isInteger(d) && d >= 0 && d <= 6))].sort();
@@ -130,22 +137,22 @@ function cleanDays(days: unknown): number[] {
 function cleanSchedule(schedule: RoutineSchedule): RoutineSchedule {
   if (schedule?.type === "once") {
     const at = Number(schedule.at);
-    if (!Number.isFinite(at)) throw new Error("Choose a valid date and time");
+    if (!Number.isFinite(at)) throw invalid("Choose a valid date and time");
     return { type: "once", at };
   }
   if (schedule?.type === "daily") {
     const time = String(schedule.time ?? "");
-    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw new Error("Time must use HH:MM");
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw invalid("Time must use HH:MM");
     return { type: "daily", time, weekdays: cleanDays(schedule.weekdays) };
   }
   if (schedule?.type === "interval") {
     const everyMinutes = Math.round(Number(schedule.everyMinutes));
     if (!Number.isFinite(everyMinutes) || everyMinutes < MIN_INTERVAL_MINUTES || everyMinutes > MAX_INTERVAL_MINUTES) {
-      throw new Error(`Repeat every ${MIN_INTERVAL_MINUTES} to ${MAX_INTERVAL_MINUTES} minutes`);
+      throw invalid(`Repeat every ${MIN_INTERVAL_MINUTES} to ${MAX_INTERVAL_MINUTES} minutes`);
     }
     return { type: "interval", everyMinutes };
   }
-  throw new Error("Choose a supported schedule");
+  throw invalid("Choose a supported schedule");
 }
 
 /** Next wall-clock occurrence in this computer's timezone, strictly after `after`. */
@@ -170,11 +177,11 @@ function sanitizeInput(input: RoutineInput): Omit<Routine, "id" | "createdAt" | 
   const name = String(input.name ?? "").trim().slice(0, 80);
   const prompt = String(input.prompt ?? "").trim().slice(0, 20_000);
   const botId = String(input.botId ?? "").trim();
-  if (!name) throw new Error("Give the routine a name");
-  if (!prompt) throw new Error("Tell the bot what to do");
-  if (!botId) throw new Error("Choose a bot");
+  if (!name) throw invalid("Give the routine a name");
+  if (!prompt) throw invalid("Tell the bot what to do");
+  if (!botId) throw invalid("Choose a bot");
   const runOn = input.runOn ?? "maus";
-  if (runOn !== "maus" && runOn !== "cloud") throw new Error("Choose where this routine runs");
+  if (runOn !== "maus" && runOn !== "cloud") throw invalid("Choose where this routine runs");
   return {
     name,
     prompt,
@@ -251,7 +258,7 @@ export class RoutineManager {
 
   create(input: RoutineInput): Routine {
     const clean = sanitizeInput(input);
-    if (this.options.botState(clean.botId) === "missing") throw new Error("That bot no longer exists");
+    if (this.options.botState(clean.botId) === "missing") throw invalid("That bot no longer exists");
     const at = this.now();
     const routine: Routine = {
       id: randomUUID(),
@@ -279,7 +286,7 @@ export class RoutineManager {
       durationMinutes: patch.durationMinutes ?? routine.durationMinutes,
       watch: patch.watch ?? routine.watch,
     });
-    if (this.options.botState(clean.botId) === "missing") throw new Error("That bot no longer exists");
+    if (this.options.botState(clean.botId) === "missing") throw invalid("That bot no longer exists");
     Object.assign(routine, clean, {
       nextRunAt: clean.enabled ? this.initialOccurrence(clean.schedule, this.now()) : null,
       updatedAt: this.now(),

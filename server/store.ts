@@ -95,6 +95,10 @@ export interface Message {
   from?: { botId: string; name: string; color: string };
   /** emoji reactions; by = "user" or a member botId. */
   reactions?: Array<{ emoji: string; by: string }>;
+  /** The message this one is a reply to. The excerpt is copied at send time
+   * on purpose: a quote has to keep saying what it said, and the original can
+   * still be edited into another version afterwards. */
+  replyTo?: { id: string; role: "bot" | "user"; excerpt: string };
   /** comm chips: "Messaged @X" in the caller's chat, linking to the
    * bot⇄bot channel where the exchange is mirrored. */
   comm?: { groupId: string; withBotId: string; withName: string; withColor: string };
@@ -118,6 +122,10 @@ export interface GroupRecord {
   bulletin: string;
   unread: boolean;
   createdAt: number;
+  /** Optional first-class project owning this room. Project context and cwd
+   * are resolved at turn time so the same bot can work in several projects
+   * without changing its global profile. */
+  projectId?: string;
   /** true for auto-created bot⇄bot channels (ask_bot exchanges live here;
    * the user can open the channel and chip in) */
   dm?: boolean;
@@ -191,6 +199,11 @@ export interface BotRecord {
    * one call site that passed a name instead of the id drew the same bot with
    * a different body in the sidebar and the header. */
   shape?: MausShape;
+  /** A picture the user chose for this bot, as a self-contained data URL.
+   * Kept beside the colour rather than replacing it: the colour still drives
+   * the accent everywhere else, and removing the picture must fall back to
+   * the drawn character rather than to nothing. Bounded at the API. */
+  avatarImage?: string;
   unread: boolean;
   modelSelection: ModelSelection;
   /** Absolute host folder used as this bot's coding workspace. Unset lets
@@ -230,10 +243,18 @@ export interface BotRecord {
   /** The single workspace-wide coordinator. The store enforces that at
    * most one bot owns this role, even if an older/corrupt file says more. */
   chiefOfStaff?: boolean;
+  /** A fresh bot derives its durable identity from the first real task unless
+   * the user edits its profile first. */
+  autoProfile?: boolean;
   /** Pause for human approval before this bot talks to a peer (ask_bot,
    * delegate_bot). Off by default: a chief-of-staff-style bot is most
    * useful when it can coordinate without nagging. */
   approvePeerComms?: boolean;
+  /** The user has taken manual control of this bot's visible computer. The
+   * active provider turn is interrupted before this flips on, so no agent can
+   * race the user's clicks. Cleared on process start because turns do not
+   * survive a restart. */
+  humanTakeover?: { active: boolean; since: number; threadId: string; groupId?: string };
   busy?: boolean;
   usage?: UsageStats;
   createdAt: number;
@@ -377,7 +398,13 @@ export class Store {
     let botsMigrated = false;
     let chiefSeen = false;
     let groupsMigrated = false;
-    for (const b of this.bots) b.busy = false;
+    for (const b of this.bots) {
+      b.busy = false;
+      if (b.humanTakeover?.active) {
+        b.humanTakeover = undefined;
+        botsMigrated = true;
+      }
+    }
     for (const b of this.bots) {
       if (!b.chiefOfStaff) continue;
       if (!chiefSeen) {
@@ -489,7 +516,7 @@ export class Store {
     );
   }
 
-  patchGroup(id: string, patch: Partial<Pick<GroupRecord, "name" | "memberIds" | "defaultResponder" | "bulletin" | "unread" | "busyBotId">>): GroupRecord | null {
+  patchGroup(id: string, patch: Partial<Pick<GroupRecord, "name" | "memberIds" | "defaultResponder" | "bulletin" | "unread" | "busyBotId" | "projectId">>): GroupRecord | null {
     const group = this.group(id);
     if (!group) return null;
     Object.assign(group, patch);
@@ -676,6 +703,7 @@ export class Store {
       unread: false,
       modelSelection: profile.modelSelection ?? this.defaultSelection(),
       resumeCursors: {},
+      autoProfile: !(profile.name || profile.title || profile.description),
       createdAt: Date.now(),
     };
     bot.tasks = [{ threadId: bot.threadId, title: UNTITLED_TASK, createdAt: bot.createdAt, resumeCursors: {} }];
@@ -768,6 +796,13 @@ export class Store {
     const task = this.taskByThread(botId, threadId);
     if (!task || task.lastInstanceId === instanceId) return;
     task.lastInstanceId = instanceId;
+    this.saveBots();
+  }
+
+  setTaskDigest(botId: string, threadId: string, digest: NonNullable<TaskRecord["digest"]>): void {
+    const task = this.taskByThread(botId, threadId);
+    if (!task) return;
+    task.digest = digest;
     this.saveBots();
   }
 

@@ -164,7 +164,10 @@ export function ApiKeyRow({
   // reads as "never entered" everywhere else in the UI. Say what actually
   // happened instead, next to the field that fixes it.
   const { capabilities } = useDesktopCapabilities();
-  const storeLost = capabilities?.credentialStore?.readable === false && !configured;
+  const storeLost =
+    section === "composio"
+    && !configured
+    && (capabilities?.credentialStore?.readable === false || state.config?.composio.recoveryRequired === true);
 
   const save = () => {
     if (saving || (!value.trim() && !configured)) return;
@@ -393,4 +396,3 @@ export function DeepSeekOptions() {
     </div>
   );
 }
-

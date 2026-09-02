@@ -104,3 +104,45 @@ describe("ProviderRegistry", () => {
     expect(registry.get("a")).toBeNull();
   });
 });
+
+// A driver decides "signed in" from a file on disk; the turn decides it from
+// the CLI's answer. When they disagree the turn is right, and the picker has
+// to hear about it — otherwise an engine holding an expired token keeps
+// presenting itself as ready and every turn on it dies the same way.
+describe("ProviderRegistry auth failures", () => {
+  /** describe() also returns shadow snapshots, which carry no auth field. */
+  const authOf = (snapshot: unknown) => (snapshot as { authenticated?: boolean }).authenticated;
+
+  it("marks an instance signed-out after a turn refused to authenticate", async () => {
+    const registry = new ProviderRegistry([makeFakeDriver().driver]);
+    await registry.load({ a: { driver: "fake" } });
+
+    const [before] = await registry.describe();
+    expect(authOf(before.snapshot)).toBeUndefined();
+
+    registry.noteAuthFailure("a", "Authentication required\nRun `kimi login` in a terminal");
+    const [after] = await registry.describe();
+    expect(after.snapshot.state).toBe("available");
+    expect(authOf(after.snapshot)).toBe(false);
+    // the actionable line, not the bare complaint above it
+    expect(after.snapshot.reason).toContain("kimi login");
+  });
+
+  it("forgets the failure once a turn completes", async () => {
+    const registry = new ProviderRegistry([makeFakeDriver().driver]);
+    await registry.load({ a: { driver: "fake" } });
+    registry.noteAuthFailure("a", "Authentication required");
+    registry.clearAuthFailure("a");
+    const [described] = await registry.describe();
+    expect(authOf(described.snapshot)).toBeUndefined();
+  });
+
+  it("ignores a failure for an instance it does not have", async () => {
+    const registry = new ProviderRegistry([makeFakeDriver().driver]);
+    await registry.load({ a: { driver: "fake" } });
+    registry.noteAuthFailure("ghost", "Authentication required");
+    const described = await registry.describe();
+    expect(described).toHaveLength(1);
+    expect(authOf(described[0].snapshot)).toBeUndefined();
+  });
+});

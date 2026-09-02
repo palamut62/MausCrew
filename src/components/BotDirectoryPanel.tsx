@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Spin } from "./Spin";
 import { ArrowLeft, ArrowRight, ArrowSquareOut, Check, MagnifyingGlass, Plus, Robot, X } from "@phosphor-icons/react";
-import { api, useStore, type Bot } from "@/state/store";
+import { api, useStore, type Bot, type Group } from "@/state/store";
 import { cn } from "@/lib/cn";
+import { CREW_TEMPLATES, crewManifest, type CrewTemplate } from "@/lib/crew-templates";
+import { track } from "@/lib/analytics";
 
 interface DirectorySource {
   kind: string;
@@ -51,8 +53,11 @@ export function BotDirectoryPanel({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     const controller = new AbortController();
     let active = true;
-    setLoading(true);
-    setError(null);
+    queueMicrotask(() => {
+      if (!active) return;
+      setLoading(true);
+      setError(null);
+    });
     const params = new URLSearchParams({ page: String(page), limit: "24", sort: "name" });
     if (submittedQuery) params.set("q", submittedQuery);
     api(`/api/bot-directory?${params}`, { signal: controller.signal })
@@ -81,6 +86,29 @@ export function BotDirectoryPanel({ onClose }: { onClose: () => void }) {
       previous?.focus();
     };
   }, [onClose]);
+
+  /** A whole crew at once: several bots, plus the room they work in. Goes in
+   * through the same import endpoint a shared team file uses, so what lands
+   * is editable and re-exportable rather than a special built-in. */
+  const importCrew = async (template: CrewTemplate) => {
+    setImporting(`crew:${template.id}`);
+    setError(null);
+    try {
+      const response = (await api("/api/teams/import", {
+        method: "POST",
+        body: JSON.stringify(crewManifest(template)),
+      })) as { bots: Bot[]; group: Group };
+      for (const bot of response.bots) dispatch({ type: "botAdded", bot });
+      dispatch({ type: "groupPatched", group: response.group });
+      track("team_imported", { members: response.bots.length });
+      dispatch({ type: "select", id: response.group.id });
+      onClose();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setImporting(null);
+    }
+  };
 
   const importBot = async (entry: DirectoryBot) => {
     setImporting(entry.slug);
@@ -122,6 +150,34 @@ export function BotDirectoryPanel({ onClose }: { onClose: () => void }) {
           </div>
           <button onClick={onClose} aria-label="Close bot directory" className="rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink"><X size={18} weight="bold" /></button>
         </header>
+
+        <section className="border-b border-hairline px-5 py-3">
+          <div className="mb-2 flex items-baseline justify-between gap-3">
+            <h2 className="font-mono text-[11px] uppercase tracking-wider text-ink-secondary">Ready-made crews</h2>
+            <span className="text-[11.5px] text-ink-secondary">A whole team and its room, in one click</span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {CREW_TEMPLATES.map((template) => (
+              <button
+                key={template.id}
+                type="button"
+                disabled={Boolean(importing)}
+                onClick={() => void importCrew(template)}
+                title={template.blurb}
+                className="flex min-w-[190px] flex-1 items-start gap-2 rounded-xl border border-hairline bg-card px-3 py-2 text-left hover:border-accent/50 disabled:opacity-40"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[13px] font-semibold text-ink">{template.label}</div>
+                  <div className="mt-0.5 line-clamp-2 text-[11.5px] leading-4 text-ink-secondary">{template.blurb}</div>
+                  <div className="mt-1 font-mono text-[10px] uppercase tracking-wide text-ink-secondary">
+                    {template.members.length} {template.members.length === 1 ? "bot" : "bots"}
+                  </div>
+                </div>
+                {importing === `crew:${template.id}` ? <Spin size={14} weight="fill" className="mt-1" /> : <Plus size={14} weight="bold" className="mt-1 shrink-0 text-ink-secondary" />}
+              </button>
+            ))}
+          </div>
+        </section>
 
         <form className="border-b border-hairline px-5 py-3" onSubmit={(event) => { event.preventDefault(); setPage(1); setSubmittedQuery(query.trim()); }}>
           <div className="flex items-center gap-2 rounded-lg border border-hairline bg-inset px-3 py-2">

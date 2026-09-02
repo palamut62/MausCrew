@@ -8,6 +8,7 @@ const frame: NotifyFrame = {
   botName: "Maus",
   threadId: "thread-1",
   title: "Maus finished",
+  detail: "All done",
   body: "All done",
 };
 
@@ -48,6 +49,27 @@ describe("desktop notifications", () => {
     const { notices } = installNotification("granted");
     showNotification(frame, vi.fn());
     expect(notices).toHaveLength(1);
-    expect(notices[0]).toMatchObject({ title: frame.title, options: { body: frame.body, tag: frame.threadId } });
+    expect(notices[0]).toMatchObject({ title: frame.title, options: { body: frame.body } });
+  });
+
+  it("groups per bot rather than per thread, and wears that bot's colour", () => {
+    const { notices } = installNotification("granted");
+    showNotification({ ...frame, threadId: "thread-1", botColor: "purple" }, vi.fn());
+    showNotification({ ...frame, threadId: "thread-2", botColor: "purple" }, vi.fn());
+    // Same bot, two threads, one tag: the second banner replaces the first
+    // instead of stacking a second one over the other bots.
+    expect(notices.map((notice) => notice.options?.tag)).toEqual(["mauscrew-bot:bot-1", "mauscrew-bot:bot-1"]);
+    const icon = String(notices[0].options?.icon ?? "");
+    expect(icon.startsWith("data:image/svg+xml,")).toBe(true);
+    expect(decodeURIComponent(icon)).toContain("#8057C8");
+    expect(decodeURIComponent(icon)).toContain(">MA<");
+  });
+
+  it("renotifies for an approval and stays silent for a status update", () => {
+    const { notices } = installNotification("granted");
+    showNotification({ ...frame, kind: "approval" }, vi.fn());
+    showNotification({ ...frame, kind: "done" }, vi.fn());
+    expect((notices[0].options as { renotify?: boolean }).renotify).toBe(true);
+    expect((notices[1].options as { renotify?: boolean }).renotify).toBe(false);
   });
 });

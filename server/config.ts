@@ -61,6 +61,15 @@ export interface AppConfig {
     envNames: string[];
     allowedBots: string[];
     enabled?: boolean;
+    /** Guidance the user attaches to this one server — when to reach for it,
+     * which account it points at, what to leave alone. Injected into the
+     * system prompt of every bot that mounts the server, so it lands on the
+     * turn rather than in a settings page nobody reads. */
+    instructions?: string;
+    /** Tools of this server the bot may not call. Advertised in the prompt so
+     * the model stops asking for them, and enforced at the permission gate so
+     * an unlisted call is denied rather than merely discouraged. */
+    disabledTools?: string[];
   }>;
   xai?: { key?: string; url?: string };
   /** Project key used for Sessions, catalog and agent tools. userId/sessionId
@@ -110,13 +119,16 @@ export interface AppConfig {
   fallbackChain?: string[];
   /** Browser control on this machine via Playwright. Off unless enabled: it
    * needs a separate install, and most bots never open a browser. */
-  pcBrowser?: { enabled?: boolean; headless?: boolean };
+  pcBrowser?: { enabled?: boolean; headless?: boolean; cdpEndpoint?: string };
   /** Superseded by `claudeGateways`; still read so a config written by an
    * older build keeps working, and migrated on first save. */
   claudeGateway?: { baseUrl?: string; authToken?: string; models?: string[] };
   /** Voice (ElevenLabs). `key` is the credential and is never echoed back;
    * `voice` is the chosen voice id, which is a setting, not a secret. */
   tts?: { key?: string; voice?: string };
+  /** Outbound Telegram notifications. The BotFather token is write-only;
+   * chatId and botUsername are non-secret connection metadata. */
+  telegram?: { botToken?: string; chatId?: string; botUsername?: string; enabled?: boolean };
   /** The person using the app (collected in onboarding, shown in the
    * sidebar). Not a secret — echoed back by GET /api/config. */
   profile?: { name?: string; email?: string };
@@ -186,6 +198,7 @@ export function loadConfig(): AppConfig {
   cfg.opencodeGo = { apiKey: process.env.OPENCODE_API_KEY, ...cfg.opencodeGo };
   cfg.deepseekHarness = { apiKey: process.env.DEEPSEEK_API_KEY, ...cfg.deepseekHarness };
   cfg.tts = { key: process.env.MAUSCREW_TTS_KEY ?? process.env.OMB_TTS_KEY, ...cfg.tts };
+  cfg.telegram = { botToken: process.env.MAUSCREW_TELEGRAM_BOT_TOKEN, ...cfg.telegram };
   return cfg;
 }
 
@@ -207,9 +220,14 @@ export function saveConfig(patch: Partial<AppConfig>): void {
     "deepseekHarness",
     "claudeGateway",
     "tts",
+    "telegram",
     "profile",
     "remoteAccess",
     "analytics",
+    // Was missing, and the API happily accepted it: `Object.assign(cfg,
+    // loadConfig())` after the save read the file back, so switching PC
+    // Browser on returned "off" immediately and every restart forgot it.
+    "pcBrowser",
   ] as const) {
     if (patch[key] && typeof patch[key] === "object") {
       disk[key] = { ...(disk[key] as object), ...patch[key] };
@@ -225,6 +243,10 @@ export function saveConfig(patch: Partial<AppConfig>): void {
   }
   if (patch.aguiAgents) disk.aguiAgents = patch.aguiAgents;
   if (patch.mcpServers) disk.mcpServers = patch.mcpServers;
+  // The order is user policy, not derived state. Omitting it here made the
+  // API accept a fallback chain and then clear it during its immediate
+  // loadConfig() refresh, so failover could never survive a save or restart.
+  if (patch.fallbackChain !== undefined) disk.fallbackChain = patch.fallbackChain;
   if (patch.sharedWorkspacePath !== undefined) {
     const sharedWorkspacePath = patch.sharedWorkspacePath.trim();
     if (sharedWorkspacePath) disk.sharedWorkspacePath = sharedWorkspacePath;

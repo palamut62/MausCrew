@@ -30,13 +30,17 @@ export function usePushToTalk(targetId: string, enabled: boolean, onError: () =>
   const held = useRef(false);
   const enabledRef = useRef(enabled);
   const onErrorRef = useRef(onError);
-  enabledRef.current = enabled;
-  onErrorRef.current = onError;
+  useEffect(() => {
+    enabledRef.current = enabled;
+    onErrorRef.current = onError;
+  }, [enabled, onError]);
 
   useEffect(() => {
     if (enabled) return;
-    held.current = false;
-    setActive(false);
+    queueMicrotask(() => {
+      held.current = false;
+      setActive(false);
+    });
   }, [enabled]);
 
   useEffect(() => {

@@ -9,11 +9,55 @@ import { openBlankTerminal } from "./terminal-launch.mjs";
 import { orderedServerPorts, readSavedServerPort, saveServerPort } from "./server-port.mjs";
 import { startUpdater, registerUpdaterIpc } from "./updater.mjs";
 import { shouldHideWindowOnClose } from "./window-lifecycle.mjs";
+import { extractGrokBotPreview, findDeepLinkUrl, parseDeepLinkBot, parseGrokBotTemplateId } from "./deep-link.mjs";
 import capabilitiesModule from "./capabilities.cjs";
 
 const { desktopCapabilities } = capabilitiesModule;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+/**
+ * Whether the non-macOS computer driver is actually on disk.
+ *
+ * Windows uses the Cua SDK bridge staged by scripts/prepare-host-cua.mjs (or
+ * its TypeScript source in dev). Linux uses the same pinned cua-driver the
+ * Local VM runs, installed into the data dir by the harness. Neither is a
+ * platform check: the flag says "the thing that does the clicking is here",
+ * which is the only claim the UI can honestly make on the user's behalf.
+ */
+function hostDriverStatus() {
+  if (process.platform === "win32") {
+    const staged =
+      fs.existsSync(path.join(process.resourcesPath ?? "", "server", "host-cua", "host-computer-proxy.mjs")) ||
+      fs.existsSync(path.join(__dirname, "..", "dist-server", "host-cua", "host-computer-proxy.mjs")) ||
+      fs.existsSync(path.join(__dirname, "..", "server", "host-computer-proxy.ts"));
+    return { staged };
+  }
+  if (process.platform === "linux") {
+    // Written by the harness when it finishes installing and serving the
+    // driver; absent or stale means not ready, which is the safe answer.
+    const dataDir = process.env.MAUSCREW_DATA_DIR || path.join(app.getPath("home"), ".mauscrew");
+    const descriptor = path.join(dataDir, "runtimes", "cua", "host-connection.json");
+    try {
+      const parsed = JSON.parse(fs.readFileSync(descriptor, "utf8"));
+      return { staged: parsed?.mode === "host", installing: parsed?.mode === "installing" };
+    } catch {
+      return { staged: false };
+    }
+  }
+  return null;
+}
+
+/** The same capability object the renderer gets, for main-process decisions
+ * that must agree with what the UI was told. */
+function hostCapabilities() {
+  return desktopCapabilities({
+    platform: process.platform,
+    env: process.env,
+    packaged: app.isPackaged,
+    hostDriver: hostDriverStatus(),
+  });
+}
 // 127.0.0.1 explicitly — vite binds IPv4; a bare "localhost" here can
 // resolve to ::1 and paint a black window
 const DEV_URL = process.env.ELECTRON_START_URL ?? "http://127.0.0.1:5199";
@@ -41,6 +85,99 @@ const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
 if (!hasSingleInstanceLock) app.quit();
 
+// mauscrew:// is MausCrew's own deep-link scheme. grokbot:// is also
+// registered here so the official "Add to Grok Bot" button on x.ai/bot/<id>
+// (grokbot://app/v1/bot-template?id=<id>) opens MausCrew instead — per-user
+// request, not a claim that MausCrew is xAI's app. Only the bot's public
+// preview (name + description already shown on that page) is available this
+// way; resolveGrokBotBot() below fetches and reads it back out. Whichever
+// app most recently ran setAsDefaultProtocolClient("grokbot") — MausCrew or
+// the real Grok Bot app — owns the scheme system-wide; if both are
+// installed, reinstalling one flips it back. Electron's own recipe for
+// dev-mode registration (github.com/electron/electron, "Launch app from URL
+// in another app").
+const DEEP_LINK_SCHEMES = ["mauscrew", "grokbot"];
+if (app.isPackaged) {
+  for (const scheme of DEEP_LINK_SCHEMES) app.setAsDefaultProtocolClient(scheme);
+} else if (process.defaultApp && process.argv.length >= 2) {
+  for (const scheme of DEEP_LINK_SCHEMES) {
+    app.setAsDefaultProtocolClient(scheme, process.execPath, [path.resolve(process.argv[1])]);
+  }
+}
+
+/** Queued when a deep link arrives before the window has finished loading
+ * (cold launch on Windows/Linux, or a same-tick macOS open-url). Flushed by
+ * the did-finish-load listener registered in createWindow(). */
+let pendingDeepLinkBot = null;
+
+function deliverDeepLinkBot(bot) {
+  const win = mainWindow;
+  if (win && !win.isDestroyed() && !win.webContents.isLoadingMainFrame()) {
+    win.webContents.send("deeplink:bot-add", bot);
+  } else {
+    pendingDeepLinkBot = bot;
+  }
+}
+
+/** Fetches x.ai/bot/<id>'s public preview and shapes it into the same
+ * {name,title,description} the import dialog expects. Never rejects — a
+ * network failure or a page x.ai has since restructured still opens the
+ * dialog, empty and explained, rather than doing nothing at all. */
+async function resolveGrokBotBot(id) {
+  const sourceUrl = `https://x.ai/bot/${id}`;
+  const fallback = {
+    name: "",
+    title: "",
+    description: `Imported from a Grok Bot link (${sourceUrl}) — its preview could not be loaded. Open that link to read it, then fill this in yourself.`,
+  };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const res = await fetch(sourceUrl, {
+      signal: controller.signal,
+      headers: { "user-agent": "MausCrew (+https://github.com/palamut62/MausCrew)" },
+    });
+    if (!res.ok) return fallback;
+    const preview = extractGrokBotPreview(await res.text());
+    if (!preview?.name) return fallback;
+    return {
+      name: preview.name,
+      title: "",
+      description: [
+        preview.description,
+        preview.sharerName ? `Originally by ${preview.sharerName} on Grok Bot.` : "",
+        `Source: ${sourceUrl}`,
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+    };
+  } catch {
+    return fallback;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function handleDeepLinkUrl(rawUrl) {
+  const bot = parseDeepLinkBot(rawUrl);
+  if (bot) {
+    showMainWindow();
+    deliverDeepLinkBot(bot);
+    return;
+  }
+  const grokBotId = parseGrokBotTemplateId(rawUrl);
+  if (!grokBotId) return;
+  showMainWindow();
+  deliverDeepLinkBot(await resolveGrokBotBot(grokBotId));
+}
+
+// macOS delivers the URL through this event, sometimes before the app is
+// ready — register it up front rather than inside whenReady().
+app.on("open-url", (event, url) => {
+  event.preventDefault();
+  handleDeepLinkUrl(url);
+});
+
 const CREDENTIALS_FILE = path.join(app.getPath("userData"), "credentials.bin");
 
 /** True when a credentials file existed but could not be read back. The
@@ -54,14 +191,12 @@ function migrateLegacySecureCredentials() {
   for (const legacyName of ["OpenMausBot", "openmausbot"]) {
     const legacyFile = path.join(appData, legacyName, "credentials.bin");
     if (!fs.existsSync(legacyFile) || legacyFile === CREDENTIALS_FILE) continue;
-    try {
-      fs.mkdirSync(path.dirname(CREDENTIALS_FILE), { recursive: true });
-      fs.copyFileSync(legacyFile, CREDENTIALS_FILE, fs.constants.COPYFILE_EXCL);
-      slog(`migrated secure credentials from ${legacyName}`);
-      return;
-    } catch (error) {
-      slog(`secure credential migration failed: ${error?.message ?? error}`);
-    }
+    // Electron safeStorage ciphertext is tied to the source app profile's
+    // Local State key. Copying only credentials.bin guarantees a file the new
+    // profile cannot decrypt and used to make a saved key look silently lost.
+    credentialStoreUnreadable = true;
+    slog(`secure credentials from ${legacyName} need to be entered again after the app rename`);
+    return;
   }
 }
 
@@ -226,7 +361,12 @@ async function startServerOn(port) {
   // Identity check is by PID: a dev harness server has the same API shape,
   // so only the child we actually forked (matching pid + static serving)
   // counts as ours.
-  for (let i = 0; i < 40; i++) {
+  // Driver discovery can exceed twenty seconds on a cold Windows install
+  // (antivirus scans every freshly unpacked CLI bridge). Killing our own
+  // healthy-but-still-booting child at that boundary made the desktop cycle
+  // through all three ports and show a false startup failure. Keep the probe
+  // interval responsive, but give the first packaged boot a full minute.
+  for (let i = 0; i < 120; i++) {
     if (exited) return null;
     try {
       const res = await fetch(`http://127.0.0.1:${port}/api/health`);
@@ -392,6 +532,12 @@ function createWindow() {
     });
   }
 
+  win.webContents.on("did-finish-load", () => {
+    if (!pendingDeepLinkBot) return;
+    win.webContents.send("deeplink:bot-add", pendingDeepLinkBot);
+    pendingDeepLinkBot = null;
+  });
+
   if (app.isPackaged) {
     win.loadURL(serverReady ? `http://127.0.0.1:${SERVER_PORT}` : ERROR_PAGE);
   } else {
@@ -404,8 +550,10 @@ function showMainWindow() {
   return createWindow();
 }
 
-app.on("second-instance", () => {
+app.on("second-instance", (_event, commandLine) => {
   if (app.isReady()) showMainWindow();
+  const link = findDeepLinkUrl(commandLine);
+  if (link) handleDeepLinkUrl(link);
 });
 
 /**
@@ -436,22 +584,71 @@ function registerSummonShortcut() {
   }
 }
 
+/** Bots blocked on the user, as last reported by the renderer. The tray is
+ * the only surface left when the window is hidden, so an approval that
+ * arrives then has to be visible and reachable from it. */
+let trayWaiting = [];
+
+function trayMenuTemplate() {
+  const openEntry = {
+    label: `Open MausCrew	${SUMMON_ACCELERATOR.replace("Control", "Ctrl").replace("Command", "Cmd")}`,
+    click: () => showMainWindow(),
+  };
+  const waitingEntries = trayWaiting.length
+    ? [
+        { label: trayWaiting.length === 1 ? "1 bot is waiting for you" : `${trayWaiting.length} bots are waiting for you`, enabled: false },
+        ...trayWaiting.slice(0, 10).map((bot) => ({
+          label: `  ${bot.name} — ${bot.kind === "question" ? "has a question" : "needs approval"}`,
+          click: () => {
+            showMainWindow();
+            mainWindow?.webContents.send("tray:select-bot", bot.id);
+          },
+        })),
+        { type: "separator" },
+      ]
+    : [];
+  return Menu.buildFromTemplate([
+    ...waitingEntries,
+    openEntry,
+    { type: "separator" },
+    {
+      label: "Quit MausCrew",
+      click: () => {
+        quitRequested = true;
+        app.quit();
+      },
+    },
+  ]);
+}
+
+function refreshTray() {
+  if (!tray) return;
+  tray.setToolTip(trayWaiting.length ? `MausCrew — ${trayWaiting.length} waiting for you` : "MausCrew");
+  tray.setContextMenu(trayMenuTemplate());
+  // The dock/taskbar badge is the same fact in the place people actually
+  // look; Linux only shows it under Unity, and setBadgeCount throws nowhere.
+  try {
+    app.setBadgeCount?.(trayWaiting.length);
+  } catch {
+    // Windows without a taskbar badge provider — the tooltip still carries it.
+  }
+}
+
+ipcMain.on("tray:status", (_event, waiting) => {
+  trayWaiting = Array.isArray(waiting)
+    ? waiting
+        .filter((bot) => bot && typeof bot.id === "string" && typeof bot.name === "string")
+        .map((bot) => ({ id: bot.id, name: String(bot.name).slice(0, 60), kind: bot.kind === "question" ? "question" : "approval" }))
+        .slice(0, 20)
+    : [];
+  refreshTray();
+});
+
 function createTray() {
   if (tray) return tray;
   try {
     tray = new Tray(TRAY_ICON);
-    tray.setToolTip("MausCrew");
-    tray.setContextMenu(Menu.buildFromTemplate([
-      { label: `Open MausCrew	${SUMMON_ACCELERATOR.replace("Control", "Ctrl").replace("Command", "Cmd")}`, click: () => showMainWindow() },
-      { type: "separator" },
-      {
-        label: "Quit MausCrew",
-        click: () => {
-          quitRequested = true;
-          app.quit();
-        },
-      },
-    ]));
+    refreshTray();
     tray.on("click", () => showMainWindow());
     tray.on("double-click", () => showMainWindow());
   } catch (error) {
@@ -464,7 +661,11 @@ function createTray() {
 // "This Mac" screen preview — served from the main process so the Screen
 // Recording permission prompt attributes to the app, never the server
 ipcMain.handle("screen:frame", async () => {
-  if (process.platform !== "darwin") return null;
+  // macOS, Windows and X11 all hand desktopCapturer a frame directly. Wayland
+  // routes it through a portal picker the user has to answer per capture,
+  // which is not a live preview — capabilities.cjs reports that, and this
+  // returns null rather than popping a dialog every few seconds.
+  if (!hostCapabilities().screenPreview.available) return null;
   const sources = await desktopCapturer.getSources({
     types: ["screen"],
     thumbnailSize: { width: 1280, height: 800 },
@@ -585,8 +786,22 @@ ipcMain.handle("desktop:capabilities", async () =>
     packaged: app.isPackaged,
     localConnection: await cuaReady,
     credentialStoreUnreadable,
+    hostDriver: hostDriverStatus(),
   }),
 );
+
+// Reveal, not open. `shell.openPath` on a path chosen by a model is a way to
+// run whatever that path points at; showItemInFolder only ever selects it in
+// the file manager, and the user clicked to get here.
+ipcMain.handle("shell:reveal", (_event, target) => {
+  if (typeof target !== "string" || !target.trim() || /[\0\r\n]/.test(target)) return false;
+  try {
+    shell.showItemInFolder(path.normalize(target.trim()));
+    return true;
+  } catch {
+    return false;
+  }
+});
 
 ipcMain.handle("credential:set", async (_event, name, value) => {
   const agui = typeof name === "string" ? name.match(/^aguiAuth:([\w-]{1,80})$/) : null;
@@ -663,6 +878,13 @@ app.whenReady().then(async () => {
   // in-app auto-update (packaged only) — checks GitHub releases, downloads on
   // the user's click, installs on "Restart to update"
   startUpdater(win);
+  // Windows/Linux deliver a cold launch's deep link as an argv entry rather
+  // than open-url (macOS only fires that event); did-finish-load above
+  // flushes it once the renderer can receive it.
+  if (process.platform !== "darwin") {
+    const initialLink = findDeepLinkUrl(process.argv);
+    if (initialLink) handleDeepLinkUrl(initialLink);
+  }
   app.on("activate", () => {
     showMainWindow();
   });

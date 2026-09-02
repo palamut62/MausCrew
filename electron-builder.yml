@@ -35,6 +35,20 @@ files:
 
 asar: true
 
+# Lets a webpage add a bot straight into the installed app. mauscrew:// is
+# MausCrew's own link; grokbot:// is also claimed so the official "Add to
+# Grok Bot" button on x.ai/bot/<id> opens MausCrew instead (see
+# electron/deep-link.mjs for why, and the limits of what that button's id
+# alone can deliver). Either way a review dialog shows before anything is
+# created (electron/main.mjs, src/components/ImportBotDialog.tsx).
+# electron-builder writes the NSIS registry keys on Windows, CFBundleURLTypes
+# in Info.plist on macOS, and the desktop file's MimeType on Linux.
+protocols:
+  name: MausCrew Bot Link
+  schemes:
+    - mauscrew
+    - grokbot
+
 extraResources:
   - from: dist
     to: ui

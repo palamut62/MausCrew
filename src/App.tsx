@@ -1,20 +1,30 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { List } from "@phosphor-icons/react";
 import { StoreProvider, useStore } from "@/state/store";
 import { NoBots } from "@/components/NoBots";
-import { Onboarding } from "@/components/Onboarding";
 import { emailGateDone, initAnalytics } from "@/lib/analytics";
 import { Sidebar } from "@/components/Sidebar";
 import { ChatView } from "@/components/ChatView";
-import { GroupView } from "@/components/GroupView";
-import { SettingsPanel } from "@/components/SettingsPanel";
-import { PluginsPanel } from "@/components/PluginsPanel";
-import { ComputerPanel } from "@/components/ComputerPanel";
-import { SettingsModal } from "@/components/SettingsModal";
 import { DesktopCapabilitiesProvider } from "@/components/DesktopCapabilities";
-import { RoutinesPage } from "@/components/RoutinesPage";
 import { NoEngines } from "@/components/NoEngines";
-import { BotDirectoryPanel } from "@/components/BotDirectoryPanel";
+import { useDeepLinkBotImport } from "@/lib/deep-link";
+import { waitingBots } from "@/lib/tray";
+
+// Chat is the launch path; secondary workspaces and modal surfaces are loaded
+// only when opened. Keeping them out of the startup chunk removes hundreds of
+// kilobytes from every ordinary launch without changing any route or state.
+const GroupView = lazy(() => import("@/components/GroupView").then((m) => ({ default: m.GroupView })));
+const SettingsPanel = lazy(() => import("@/components/SettingsPanel").then((m) => ({ default: m.SettingsPanel })));
+const PluginsPanel = lazy(() => import("@/components/PluginsPanel").then((m) => ({ default: m.PluginsPanel })));
+const ComputerPanel = lazy(() => import("@/components/ComputerPanel").then((m) => ({ default: m.ComputerPanel })));
+const SettingsModal = lazy(() => import("@/components/SettingsModal").then((m) => ({ default: m.SettingsModal })));
+const RoutinesPage = lazy(() => import("@/components/RoutinesPage").then((m) => ({ default: m.RoutinesPage })));
+const BotDirectoryPanel = lazy(() => import("@/components/BotDirectoryPanel").then((m) => ({ default: m.BotDirectoryPanel })));
+const ReviewQueuePage = lazy(() => import("@/components/ReviewQueuePage").then((m) => ({ default: m.ReviewQueuePage })));
+const WorkflowsPage = lazy(() => import("@/components/WorkflowsPage").then((m) => ({ default: m.WorkflowsPage })));
+const OrgChartPage = lazy(() => import("@/components/OrgChartPage").then((m) => ({ default: m.OrgChartPage })));
+const ImportBotDialog = lazy(() => import("@/components/ImportBotDialog").then((m) => ({ default: m.ImportBotDialog })));
+const Onboarding = lazy(() => import("@/components/Onboarding").then((m) => ({ default: m.Onboarding })));
 
 function Shell() {
   const { state, dispatch } = useStore();
@@ -25,6 +35,7 @@ function Shell() {
   // Sidebar.tsx's className comment).
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [directoryOpen, setDirectoryOpen] = useState(false);
+  const [deepLinkBot, clearDeepLinkBot] = useDeepLinkBotImport();
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const group = state.groups.find((g) => g.id === state.selectedId);
   const bot = group ? undefined : (state.bots.find((b) => b.id === state.selectedId) ?? state.bots[0]);
@@ -75,7 +86,7 @@ function Shell() {
   // and settingsOpen cover the same idea from a different trigger: close the
   // drawer whenever an action opens something over the chat.
   useEffect(() => {
-    setDrawerOpen(false);
+    queueMicrotask(() => setDrawerOpen(false));
   }, [state.selectedId, state.activeView, state.pluginsOpen, state.settingsOpen]);
 
   return (
@@ -106,25 +117,52 @@ function Shell() {
           menuButtonRef.current?.focus();
         }}
       />
-      {state.activeView === "routines" ? (
-        <RoutinesPage />
-      ) : noEngines ? (
-        <NoEngines />
-      ) : group ? (
-        <GroupView key={group.id} group={group} />
-      ) : bot ? (
-        <ChatView bot={bot} />
-      ) : (
-        <NoBots onBrowseDirectory={() => setDirectoryOpen(true)} />
-      )}
-      {state.settingsOpen && bot && <SettingsPanel bot={bot} />}
-      {state.computerOpen && bot && <ComputerPanel bot={bot} />}
-      {state.appSettingsOpen && <SettingsModal />}
-      {state.pluginsOpen && <PluginsPanel />}
-      {directoryOpen && <BotDirectoryPanel onClose={() => setDirectoryOpen(false)} />}
+      <Suspense fallback={<div className="flex min-w-0 flex-1 items-center justify-center text-sm text-ink-secondary">Loading…</div>}>
+        {state.activeView === "routines" ? (
+          <RoutinesPage />
+        ) : state.activeView === "reviews" ? (
+          <ReviewQueuePage />
+        ) : state.activeView === "workflows" ? (
+          <WorkflowsPage />
+        ) : state.activeView === "org" ? (
+          <OrgChartPage />
+        ) : noEngines ? (
+          <NoEngines />
+        ) : group ? (
+          <GroupView key={group.id} group={group} />
+        ) : bot ? (
+          <ChatView bot={bot} />
+        ) : (
+          <NoBots onBrowseDirectory={() => setDirectoryOpen(true)} />
+        )}
+        {state.settingsOpen && bot && <SettingsPanel bot={bot} />}
+        {state.computerOpen && bot && <ComputerPanel bot={bot} />}
+        {state.appSettingsOpen && <SettingsModal />}
+        {state.pluginsOpen && <PluginsPanel />}
+        {directoryOpen && <BotDirectoryPanel onClose={() => setDirectoryOpen(false)} />}
+        {deepLinkBot && <ImportBotDialog bot={deepLinkBot} onClose={clearDeepLinkBot} />}
+      </Suspense>
       </div>
     </div>
   );
+}
+
+/** Keeps the tray in step with who is blocked on the user, and opens the bot
+ * chosen from its menu. Browser builds have no `window.mauscrew`, so both
+ * halves no-op there rather than being conditionally imported. */
+function TrayBridge() {
+  const { state, dispatch } = useStore();
+  const waiting = waitingBots(state.bots);
+  // The list is small and its identity changes every render, so the effect is
+  // keyed on the content instead — otherwise every incoming token would push
+  // an identical menu to the main process.
+  const fingerprint = waiting.map((bot) => `${bot.id}:${bot.kind}`).join(",");
+  useEffect(() => {
+    window.mauscrew?.setTrayStatus?.(waiting);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the fingerprint above
+  }, [fingerprint]);
+  useEffect(() => window.mauscrew?.onTraySelectBot?.((botId) => dispatch({ type: "select", id: botId })), [dispatch]);
+  return null;
 }
 
 /** Analytics starts only after the harness says it may, so it lives inside the
@@ -145,8 +183,11 @@ export default function App() {
     <DesktopCapabilitiesProvider>
       <StoreProvider>
         <AnalyticsGate />
+        <TrayBridge />
         <Shell />
-        {gated && <Onboarding onDone={() => setGated(false)} />}
+        <Suspense fallback={null}>
+          {gated && <Onboarding onDone={() => setGated(false)} />}
+        </Suspense>
       </StoreProvider>
     </DesktopCapabilitiesProvider>
   );

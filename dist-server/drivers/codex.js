@@ -301,7 +301,10 @@ export const CodexDriver = {
                         const pend = rpcPending.get(msg.id);
                         if (pend) {
                             rpcPending.delete(msg.id);
-                            msg.error ? pend.reject(new Error(msg.error.message ?? JSON.stringify(msg.error))) : pend.resolve(msg.result);
+                            if (msg.error)
+                                pend.reject(new Error(msg.error.message ?? JSON.stringify(msg.error)));
+                            else
+                                pend.resolve(msg.result);
                         }
                     }
                     else if (msg.id !== undefined && msg.method) {

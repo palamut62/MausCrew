@@ -72,6 +72,8 @@ export interface Message {
   from?: { botId: string; name: string; color: MausColor };
   /** emoji reactions; by = "user" or a member botId. */
   reactions?: Array<{ emoji: string; by: string }>;
+  /** The message this one replies to; the excerpt is frozen at send time. */
+  replyTo?: { id: string; role: "bot" | "user"; excerpt: string };
   /** comm chips: "Messaged @X" linking to the bot⇄bot channel. */
   comm?: { groupId: string; withBotId: string; withName: string; withColor: MausColor };
 }
@@ -91,6 +93,7 @@ export interface Group {
   bulletin: string;
   unread: boolean;
   createdAt: number;
+  projectId?: string;
   /** auto-created bot⇄bot channel (ask_bot exchanges mirror here) */
   dm?: boolean;
   busyBotId?: string | null;
@@ -124,6 +127,9 @@ export interface Bot {
   /** Body shape, stored server-side beside the colour. Older bots saved before
    * shapes existed have none; the avatar falls back to deriving one. */
   shape?: string;
+  /** A picture chosen for this bot, as a data URL. Unset = the drawn
+   * character in the bot's colour. */
+  avatarImage?: string;
   unread: boolean;
   busy?: boolean;
   modelSelection: ModelSelection;
@@ -150,11 +156,59 @@ export interface Bot {
   /** When this bot wants to talk to another bot (ask_bot/delegate_bot),
    * pause and ask the user first. Off by default. */
   approvePeerComms?: boolean;
+  humanTakeover?: { active: boolean; since: number; threadId: string; groupId?: string };
   /** lifetime token/cost tally, folded server-side from runtime events */
   usage?: { inputTokens: number; outputTokens: number; costUsd: number; turns: number; since: number };
   messages: Message[];
   /** leaf of the visible conversation branch (see visibleMessages) */
   activeLeafId?: string | null;
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  description: string;
+  workspacePath?: string;
+  instructions: string;
+  resources: Array<{ id: string; label: string; value: string }>;
+  roomIds: string[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface Workflow {
+  id: string;
+  title: string;
+  ownerBotId: string;
+  threadId: string;
+  projectId?: string;
+  status: "active" | "blocked" | "completed" | "failed" | "cancelled";
+  steps: Array<{
+    id: string;
+    title: string;
+    assigneeBotId?: string;
+    dependsOn: string[];
+    status: "pending" | "running" | "blocked" | "done" | "failed";
+    output?: string;
+    updatedAt: number;
+  }>;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ReviewItem {
+  id: string;
+  title: string;
+  content: string;
+  target: string;
+  sourceBotId: string;
+  sourceThreadId: string;
+  projectId?: string;
+  status: "pending" | "sending" | "sent" | "failed" | "dismissed";
+  deliveryThreadId?: string;
+  result?: string;
+  createdAt: number;
+  updatedAt: number;
 }
 
 /** The visible conversation: walk parentId links from the active leaf back
@@ -189,9 +243,9 @@ export interface ConfigStatus {
   /** Engines to try, in order, when one runs out mid-turn. */
   fallbackChain?: string[];
   /** Browser control on this machine, via Playwright. */
-  pcBrowser?: { enabled: boolean; headless: boolean };
+  pcBrowser?: { enabled: boolean; headless: boolean; cdpEndpoint?: string };
   xai?: { configured: boolean };
-  composio: { configured: boolean };
+  composio: { configured: boolean; recoveryRequired?: boolean };
   box: { configured: boolean };
   opencodeGo?: { configured: boolean };
   /** DeepSeek Harness. `configured` = a key is saved; the key itself is never
@@ -233,11 +287,19 @@ export interface ConfigStatus {
     configuredEnvNames: string[];
     allowedBots: string[];
     enabled: boolean;
+    /** Per-server guidance, injected into the prompt of every bot that mounts
+     * this server. Absent when the user wrote none. */
+    instructions?: string;
+    /** Tools blocked at the permission gate for this server. */
+    disabledTools?: string[];
   }[];
   /** Voice (ElevenLabs). `configured` = a key is saved; `ready` = a key AND
    * a voice, which is what it takes to actually speak. The key itself is
    * never echoed back. */
   tts?: { configured: boolean; ready: boolean; voice: string };
+  /** Telegram BotFather token stays write-only; the destination and public
+   * bot username are safe to show in Settings. */
+  telegram?: { configured: boolean; enabled: boolean; chatId: string; botUsername: string };
   /** who's using the app — collected in onboarding, shown in the sidebar */
   profile?: { name: string; email: string };
   /** Product usage analytics. `enabled` gates whether PostHog is loaded at
@@ -281,11 +343,14 @@ export type AppSettingsSection = "general" | "connections" | "voice" | "computer
 interface AppState {
   bots: Bot[];
   groups: Group[];
+  projects: Project[];
+  workflows: Workflow[];
+  reviews: ReviewItem[];
   instances: InstanceInfo[];
   config: ConfigStatus | null;
   /** selected chat — a bot id OR a group id */
   selectedId: string;
-  activeView: "chat" | "routines";
+  activeView: "chat" | "routines" | "reviews" | "workflows" | "org";
   routines: Routine[];
   routineRuns: RoutineRun[];
   webhooks: WebhookTrigger[];
@@ -297,7 +362,7 @@ interface AppState {
   appSettingsOpen: boolean;
   appSettingsSection: AppSettingsSection;
   /** latest live frame of a bot's computer, per botId */
-  screens: Record<string, { png: string; mime: string }>;
+  screens: Record<string, { png: string; mime: string; display?: { width: number; height: number } }>;
   /** bots whose cloud computer is being provisioned */
   provisioning: Record<string, boolean>;
   connected: boolean;
@@ -307,8 +372,23 @@ interface AppState {
 }
 
 type Action =
-  | { type: "hydrate"; bots: Bot[]; groups: Group[] }
+  | { type: "hydrate"; bots: Bot[]; groups: Group[]; projects?: Project[]; workflows?: Workflow[]; reviews?: ReviewItem[] }
   | { type: "showRoutines" }
+  | { type: "showReviews" }
+  | { type: "showWorkflows" }
+  | { type: "showOrgChart" }
+  | { type: "projectPatched"; project: Project }
+  | { type: "projectDeleted"; projectId: string }
+  | { type: "workflowPatched"; workflow: Workflow }
+  | { type: "reviewPatched"; item: ReviewItem }
+  | { type: "createProject"; input: { name: string; description?: string; workspacePath?: string; instructions?: string; resources?: Array<{ label: string; value: string }>; memberIds: string[] } }
+  | { type: "updateProject"; projectId: string; patch: Partial<Pick<Project, "name" | "description" | "workspacePath" | "instructions" | "resources">> }
+  | { type: "deleteProject"; projectId: string }
+  | { type: "reviewAction"; itemId: string; action: "approve" | "dismiss" }
+  | { type: "deleteReview"; itemId: string }
+  | { type: "reviewDeleted"; itemId: string }
+  | { type: "cancelWorkflow"; workflowId: string }
+  | { type: "setTakeover"; botId: string; active: boolean; resume?: boolean }
   | { type: "routinesHydrated"; routines: Routine[]; runs: RoutineRun[] }
   | { type: "routinePatched"; routine: Routine }
   | { type: "routineDeleted"; routineId: string }
@@ -325,7 +405,7 @@ type Action =
   | { type: "markRoutineRunSeen"; runId: string }
   | { type: "groupPatched"; group: Partial<Group> & { id: string } }
   | { type: "groupDeleted"; groupId: string }
-  | { type: "createGroup"; memberIds: string[]; name?: string }
+  | { type: "createGroup"; memberIds: string[]; name?: string; projectId?: string }
   | { type: "sendGroup"; groupId: string; text: string }
   | {
       type: "patchGroup";
@@ -338,7 +418,7 @@ type Action =
   | { type: "instances"; instances: InstanceInfo[] }
   | { type: "configStatus"; config: ConfigStatus }
   | { type: "select"; id: string }
-  | { type: "send"; botId: string; text: string }
+  | { type: "send"; botId: string; text: string; replyTo?: string }
   | { type: "steer"; botId: string; text: string }
   | { type: "editMessage"; botId: string; messageId: string; text: string }
   | { type: "switchBranch"; botId: string; messageId: string }
@@ -373,7 +453,7 @@ type Action =
   | { type: "botPatched"; bot: Partial<Bot> & { id: string } }
   | { type: "messageAdded"; threadId: string; message: Message }
   | { type: "messagePatched"; threadId: string; message: Message }
-  | { type: "screenFrame"; botId: string; png: string; mime: string }
+  | { type: "screenFrame"; botId: string; png: string; mime: string; display?: { width: number; height: number } }
   | { type: "provisioning"; botId: string; on: boolean }
   | { type: "setModel"; botId: string; selection: ModelSelection }
   | { type: "interrupt"; botId: string }
@@ -395,6 +475,7 @@ type Action =
           | "notifications"
           | "computer"
           | "color"
+          | "avatarImage"
           | "autoApprove"
           | "speakReplies"
           | "voice"
@@ -429,7 +510,15 @@ function reducer(state: AppState, action: Action): AppState {
       const known = (id: string) => action.bots.some((b) => b.id === id) || action.groups.some((g) => g.id === id);
       const selectedId =
         state.selectedId && known(state.selectedId) ? state.selectedId : (action.bots[0]?.id ?? "");
-      return { ...state, bots: action.bots, groups: action.groups, selectedId };
+      return {
+        ...state,
+        bots: action.bots,
+        groups: action.groups,
+        projects: action.projects ?? [],
+        workflows: action.workflows ?? [],
+        reviews: action.reviews ?? [],
+        selectedId,
+      };
     }
     case "showRoutines":
       return {
@@ -440,6 +529,72 @@ function reducer(state: AppState, action: Action): AppState {
         appSettingsOpen: false,
         pluginsOpen: false,
       };
+    case "showReviews":
+      return {
+        ...state,
+        activeView: "reviews",
+        settingsOpen: false,
+        computerOpen: false,
+        appSettingsOpen: false,
+        pluginsOpen: false,
+      };
+    case "showWorkflows":
+      return {
+        ...state,
+        activeView: "workflows",
+        settingsOpen: false,
+        computerOpen: false,
+        appSettingsOpen: false,
+        pluginsOpen: false,
+      };
+    case "showOrgChart":
+      return {
+        ...state,
+        activeView: "org",
+        settingsOpen: false,
+        computerOpen: false,
+        appSettingsOpen: false,
+        pluginsOpen: false,
+      };
+    case "projectPatched": {
+      const exists = state.projects.some((project) => project.id === action.project.id);
+      return {
+        ...state,
+        projects: exists
+          ? state.projects.map((project) => (project.id === action.project.id ? action.project : project))
+          : [action.project, ...state.projects],
+      };
+    }
+    case "projectDeleted":
+      return { ...state, projects: state.projects.filter((project) => project.id !== action.projectId) };
+    // Both of these arrive from two directions — the live frame and the reply
+    // to the request that caused it — and the reply is not always the later
+    // one. Approving a send whose delivery fails immediately broadcasts
+    // "failed" before the 202 carrying "sending" has even been read, so
+    // applying whatever landed last left the item stuck mid-send on screen
+    // until a reload. The record's own clock decides instead.
+    case "workflowPatched": {
+      const current = state.workflows.find((workflow) => workflow.id === action.workflow.id);
+      if (current && action.workflow.updatedAt < current.updatedAt) return state;
+      return {
+        ...state,
+        workflows: current
+          ? state.workflows.map((workflow) => (workflow.id === action.workflow.id ? action.workflow : workflow))
+          : [action.workflow, ...state.workflows],
+      };
+    }
+    case "reviewPatched": {
+      const current = state.reviews.find((item) => item.id === action.item.id);
+      if (current && action.item.updatedAt < current.updatedAt) return state;
+      return {
+        ...state,
+        reviews: current
+          ? state.reviews.map((item) => (item.id === action.item.id ? action.item : item))
+          : [action.item, ...state.reviews],
+      };
+    }
+    case "reviewDeleted":
+      return { ...state, reviews: state.reviews.filter((item) => item.id !== action.itemId) };
     case "routinesHydrated":
       return { ...state, routines: action.routines, routineRuns: action.runs };
     case "routinePatched": {
@@ -564,7 +719,11 @@ function reducer(state: AppState, action: Action): AppState {
     case "botAdded":
       return {
         ...state,
-        bots: [action.bot, ...state.bots],
+        // POST /api/bots and the server-sent `bot` event announce the same
+        // record independently. On a fast local server the SSE frame can win
+        // the race and `botPatched` inserts it before this response arrives;
+        // adding blindly here then rendered one bot twice in the sidebar.
+        bots: [action.bot, ...state.bots.filter((bot) => bot.id !== action.bot.id)],
         activeView: "chat",
         selectedId: action.bot.id,
       };
@@ -665,7 +824,17 @@ function reducer(state: AppState, action: Action): AppState {
     case "screenFrame":
       return {
         ...state,
-        screens: { ...state.screens, [action.botId]: { png: action.png, mime: action.mime } },
+        screens: {
+          ...state.screens,
+          // The geometry only arrives with frames from a box whose desktop
+          // reported it; keep the last known one rather than dropping to
+          // "uncontrollable" for one frame.
+          [action.botId]: {
+            png: action.png,
+            mime: action.mime,
+            display: action.display ?? state.screens[action.botId]?.display,
+          },
+        },
         provisioning: { ...state.provisioning, [action.botId]: false },
       };
     case "provisioning":
@@ -796,6 +965,13 @@ function reducer(state: AppState, action: Action): AppState {
     case "runRoutine":
     case "cancelRoutineRun":
     case "markRoutineRunSeen":
+    case "createProject":
+    case "updateProject":
+    case "deleteProject":
+    case "reviewAction":
+    case "deleteReview":
+    case "cancelWorkflow":
+    case "setTakeover":
       return state;
   }
 }
@@ -806,6 +982,9 @@ const MAX_KEPT_SCREEN_FRAMES = 8;
 const initialState: AppState = {
   bots: [],
   groups: [],
+  projects: [],
+  workflows: [],
+  reviews: [],
   instances: [],
   config: null,
   selectedId: "",
@@ -964,6 +1143,44 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           : null;
       rawDispatch(action);
       switch (action.type) {
+        case "createProject":
+          api("/api/projects", { method: "POST", body: JSON.stringify(action.input) })
+            .then(({ project, group }) => {
+              rawDispatch({ type: "projectPatched", project });
+              rawDispatch({ type: "groupPatched", group });
+              rawDispatch({ type: "select", id: group.id });
+            })
+            .catch(showError);
+          break;
+        case "updateProject":
+          api(`/api/projects/${action.projectId}`, { method: "PATCH", body: JSON.stringify(action.patch) })
+            .then(({ project }) => rawDispatch({ type: "projectPatched", project }))
+            .catch(showError);
+          break;
+        case "deleteProject":
+          api(`/api/projects/${action.projectId}`, { method: "DELETE" }).catch(showError);
+          break;
+        case "reviewAction":
+          api(`/api/review-queue/${action.itemId}/${action.action}`, { method: "POST" })
+            .then(({ item }) => rawDispatch({ type: "reviewPatched", item }))
+            .catch(showError);
+          break;
+        case "deleteReview":
+          api(`/api/review-queue/${action.itemId}`, { method: "DELETE" }).catch(showError);
+          break;
+        case "cancelWorkflow":
+          api(`/api/workflows/${action.workflowId}/cancel`, { method: "POST" })
+            .then(({ workflow }) => rawDispatch({ type: "workflowPatched", workflow }))
+            .catch(showError);
+          break;
+        case "setTakeover":
+          api(`/api/bots/${action.botId}/takeover`, {
+            method: "POST",
+            body: JSON.stringify({ active: action.active, resume: action.resume === true }),
+          })
+            .then(({ bot }) => rawDispatch({ type: "botPatched", bot }))
+            .catch(showError);
+          break;
         case "createRoutine":
           api("/api/routines", { method: "POST", body: JSON.stringify(action.input) }).catch(showError);
           break;
@@ -988,7 +1205,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "send":
           api(`/api/bots/${action.botId}/messages`, {
             method: "POST",
-            body: JSON.stringify({ text: action.text }),
+            body: JSON.stringify({ text: action.text, ...(action.replyTo ? { replyTo: action.replyTo } : {}) }),
           }).catch(showError);
           break;
         case "editMessage":
@@ -1133,7 +1350,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "createGroup":
           api(`/api/groups`, {
             method: "POST",
-            body: JSON.stringify({ memberIds: action.memberIds, name: action.name }),
+            body: JSON.stringify({ memberIds: action.memberIds, name: action.name, projectId: action.projectId }),
           })
             .then(({ group }) => {
               rawDispatch({ type: "groupPatched", group });
@@ -1230,7 +1447,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const loadAll = () =>
       Promise.all([
         api("/api/bots")
-          .then(({ bots, groups }) => alive && rawDispatch({ type: "hydrate", bots, groups: groups ?? [] }))
+          .then(({ bots, groups, projects, workflows, reviews }) =>
+            alive && rawDispatch({
+              type: "hydrate",
+              bots,
+              groups: groups ?? [],
+              projects: projects ?? [],
+              workflows: workflows ?? [],
+              reviews: reviews ?? [],
+            }),
+          )
           .catch(() => {}),
         api("/api/instances")
           .then(({ instances }) => alive && rawDispatch({ type: "instances", instances }))
@@ -1372,6 +1598,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "group.deleted":
           rawDispatch({ type: "groupDeleted", groupId: frame.groupId });
           break;
+        case "project":
+          rawDispatch({ type: "projectPatched", project: frame.project });
+          break;
+        case "project.deleted":
+          rawDispatch({ type: "projectDeleted", projectId: frame.projectId });
+          break;
+        case "workflow":
+          rawDispatch({ type: "workflowPatched", workflow: frame.workflow });
+          break;
+        case "review":
+          rawDispatch({ type: "reviewPatched", item: frame.item });
+          break;
+        case "review.deleted":
+          rawDispatch({ type: "reviewDeleted", itemId: frame.itemId });
+          break;
         case "routine":
           rawDispatch({ type: "routinePatched", routine: frame.routine });
           break;
@@ -1415,7 +1656,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         }
         case "screen":
-          rawDispatch({ type: "screenFrame", botId: frame.botId, png: frame.png, mime: frame.mime ?? "image/png" });
+          rawDispatch({
+            type: "screenFrame",
+            botId: frame.botId,
+            png: frame.png,
+            mime: frame.mime ?? "image/png",
+            ...(frame.display ? { display: frame.display } : {}),
+          });
           break;
         case "computer":
           rawDispatch({ type: "provisioning", botId: frame.botId, on: frame.state === "provisioning" });
@@ -1496,6 +1743,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [refreshInstances]);
+
+  // A notification tapped while the tab was backgrounded is answered by the
+  // service worker, which can focus the window but not reach into React —
+  // it posts the bot id back here instead.
+  useEffect(() => {
+    const container = navigator.serviceWorker;
+    if (!container) return;
+    const onMessage = (event: MessageEvent) => {
+      const data = event.data as { type?: string; botId?: string } | null;
+      if (data?.type === "notification-open" && data.botId) dispatch({ type: "select", id: data.botId });
+    };
+    container.addEventListener("message", onMessage);
+    return () => container.removeEventListener("message", onMessage);
+  }, [dispatch]);
 
   const value = useMemo(() => ({ state, dispatch, refreshInstances }), [state, dispatch, refreshInstances]);
   return (

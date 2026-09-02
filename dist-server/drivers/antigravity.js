@@ -18,6 +18,24 @@ import { augmentedPath } from "../env-path.js";
 import { newEventId, newId } from "../contracts.js";
 import { appendNative } from "./native.js";
 const DRIVER_KIND = "antigravityAgent";
+/** The first agy that carries `--print --output-format stream-json`, which is
+ * the whole of how this driver talks to it. Anything older prints help. */
+export const MIN_AGY_VERSION = "1.1.0";
+/** `agy --version` prints a bare "1.1.12", sometimes with a build suffix.
+ * Unparseable output is treated as new enough: refusing to run on a version
+ * string we simply failed to read would be the worse mistake. */
+export function meetsMinimumAgyVersion(version, minimum = MIN_AGY_VERSION) {
+    const parse = (value) => value.trim().match(/(\d+)\.(\d+)\.(\d+)/)?.slice(1, 4).map(Number);
+    const found = parse(version);
+    const want = parse(minimum);
+    if (!found || !want)
+        return true;
+    for (let i = 0; i < 3; i++) {
+        if (found[i] !== want[i])
+            return found[i] > want[i];
+    }
+    return true;
+}
 // model catalog from `agy models` (agy 1.1.12)
 const MODELS = {
     default: "gemini-3.1-pro-high",
@@ -127,12 +145,12 @@ export const AntigravityDriver = {
             // backstop watchdog: if agy hangs without emitting `result` and without
             // exiting, the bot would stay busy forever (agy's own --print-timeout 10m
             // is the only other net). Assigned just below; settle() always clears it.
-            let watchdog;
+            const timers = {};
             const settle = (ok, stopReason, cost = null) => {
                 if (settled)
                     return;
                 settled = true;
-                clearTimeout(watchdog);
+                clearTimeout(timers.watchdog);
                 active.delete(threadId);
                 emit({ ...base(threadId, turnId), type: "turn.completed", ok, stopReason, cost });
             };
@@ -276,14 +294,14 @@ export const AntigravityDriver = {
             active.set(threadId, { stop, turnId });
             // 11 min — just above agy's own 10m --print-timeout, so agy normally
             // settles first; this is the backstop for a fully wedged child.
-            watchdog = setTimeout(() => {
+            timers.watchdog = setTimeout(() => {
                 if (!settled) {
                     emit({ ...base(threadId, turnId), type: "runtime.error", message: "agy watchdog timeout" });
                     stop();
                     settle(false, "timeout");
                 }
             }, 11 * 60_000);
-            watchdog.unref?.();
+            timers.watchdog.unref?.();
             emit({ ...base(threadId, turnId), type: "turn.started" });
             return { turnId };
         };
@@ -293,6 +311,18 @@ export const AntigravityDriver = {
             });
             if (!version)
                 return { state: "unavailable", reason: `\`${config.cli}\` CLI not found` };
+            // Installed is not the same as usable. This driver drives agy through
+            // `--print --output-format stream-json`, which older builds do not have:
+            // agy 1.0.0 answers the flags with its help text and exit code 2, so the
+            // engine looked ready in the picker and every turn died on a wall of
+            // usage output. Say it here, once, where the user can act on it.
+            if (!meetsMinimumAgyVersion(version)) {
+                return {
+                    state: "unavailable",
+                    version,
+                    reason: `agy ${MIN_AGY_VERSION} or newer is required for headless runs — found ${version}. Update the CLI and reopen Settings.`,
+                };
+            }
             // No auth field: agy auth is keyring-backed with no reliable file marker
             // (~/.gemini/antigravity-cli/ exists after first run even when logged
             // out), so any file heuristic would overstate "signed in". Leave undefined.

@@ -5,11 +5,13 @@
 // the real thing misbehaves:
 //
 //   FAKE_CLAUDE_MODE   happy (default) | exit-early | hang | malformed
+//                      | model-rejected | deferral-unsupported | rate-limited | stream
 //                      | stream (partial-message text deltas before the
 //                        whole-message frame, plus subagent noise to drop)
 //                      | model-rejected (what a gateway does with a model id
 //                        it does not serve: the refusal arrives as ordinary
 //                        assistant prose, then an is_error result)
+//                      | rate-limited (same transport shape, but retryable)
 //   FAKE_CLAUDE_DUMP   path to write {argv, env, prompt, mcpConfig} as JSON,
 //                      so the test can assert on argv shape and env hygiene.
 //                      mcpConfig is read back from the --mcp-config file the
@@ -98,6 +100,23 @@ process.stdin.on("end", () => {
   if (mode === "model-rejected") {
     // verbatim shape of DeepSeek's 400, which is what the CLI relays
     const text = `API Error: 400 The supported API model names are deepseek-v4-pro, deepseek-v4-flash, and deepseek-v4-flash-vision-exp, but you passed ${model}.`;
+    out({ type: "assistant", message: { content: [{ type: "text", text }] } });
+    out({ type: "result", is_error: true, stop_reason: "error", result: text });
+    process.exit(0);
+  }
+
+  if (mode === "deferral-unsupported") {
+    // verbatim shape of OpenRouter's 400 for a non-Anthropic model: the wire
+    // format is accepted, the deferred-tools part of it is not, and no model
+    // id on this endpoint can fix it.
+    const text = `API Error: 400 Deferred custom tools are only supported on Anthropic models and on Anthropic-compatible provider endpoints that implement deferral. Other endpoints cannot call tools omitted from tools[]. Received ${model}.`;
+    out({ type: "assistant", message: { content: [{ type: "text", text }] } });
+    out({ type: "result", is_error: true, stop_reason: "error", result: text });
+    process.exit(0);
+  }
+
+  if (mode === "rate-limited") {
+    const text = "API Error: Request rejected (429) · rate limit reached for fake provider";
     out({ type: "assistant", message: { content: [{ type: "text", text }] } });
     out({ type: "result", is_error: true, stop_reason: "error", result: text });
     process.exit(0);

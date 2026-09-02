@@ -9,6 +9,9 @@ export type PolicyRule = {
     tools?: string[];
     intents?: Array<NonNullable<GovernedAction["intent"]>>;
     risks?: Array<GovernedAction["risk"]>;
+    /** Matches actions that touch credentials (a .env, an ssh key, a
+     * keychain read), whether or not they also write anything. */
+    sensitive?: boolean;
     externalWrite?: boolean;
     summaryMatches?: string[];
   };
@@ -28,25 +31,43 @@ export const defaultPolicy: PolicyDocument = {
   defaults: {
     shell: "ask",
     filesystem: "ask",
-    browser: "allow",
+    browser: "ask",
     computer: "ask",
     mcp: "ask",
     composio: "ask",
-    network: "allow",
+    network: "ask",
     agent: "ask",
     other: "ask",
   },
   rules: [
     {
       id: "safety.high-risk",
-      description: "Block destructive commands and sensitive credential access.",
+      description: "Block destructive commands — rm -rf, mkfs, fork bombs, force pushes.",
       when: { risks: ["high"] },
       decision: "deny",
+    },
+    {
+      id: "safety.sensitive",
+      // Asks rather than denies, and sits ahead of safe.read-only so that
+      // reading a credential file is a decision instead of an auto-allow.
+      //
+      // It used to be folded into the rule above, which meant a read-only,
+      // value-redacting `sed 's/=.*/=<redacted>/' .env` was refused outright
+      // with nowhere in the app to say yes.
+      description: "Credential files and keychains need a person at the approval card.",
+      when: { sensitive: true },
+      decision: "ask",
     },
     {
       id: "safety.external-write",
       description: "External writes require a person at the approval card.",
       when: { externalWrite: true },
+      decision: "ask",
+    },
+    {
+      id: "safety.network-boundary",
+      description: "Browser and network access need a person at the approval card.",
+      when: { categories: ["browser", "network"] },
       decision: "ask",
     },
     {
@@ -71,6 +92,7 @@ function matches(rule: PolicyRule, action: GovernedAction) {
     (!when.tools?.length || when.tools.some((tool) => globMatches(action.tool.name, tool))) &&
     (!when.intents?.length || (action.intent !== undefined && when.intents.includes(action.intent))) &&
     (!when.risks?.length || when.risks.includes(action.risk)) &&
+    (when.sensitive === undefined || when.sensitive === action.sensitive) &&
     (when.externalWrite === undefined || when.externalWrite === action.externalWrite) &&
     (!when.summaryMatches?.length || when.summaryMatches.some((pattern) => globMatches(summary, pattern)))
   );

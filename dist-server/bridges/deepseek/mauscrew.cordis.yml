@@ -49,6 +49,15 @@
 - id: session-checkpoints
   name: '@deepseek-ai/dsh-session-checkpoint-policy'
 
+# Service seam used by the model-facing question tool and MausCrew's
+# mailbox-backed provider below. The custom gate injects this service, so it
+# must exist before that plugin can activate.
+- id: user-questions
+  name: '@deepseek-ai/dsh-user-questions'
+
+- id: ask-user
+  name: '@deepseek-ai/dsh-tool-ask-user'
+
 # One policy home is shared by bash and filesystem tools. The provider fails
 # closed when bwrap/Landlock/Seatbelt cannot enforce the requested mode; it
 # never falls through to an unrestricted child. `danger-full-access` remains

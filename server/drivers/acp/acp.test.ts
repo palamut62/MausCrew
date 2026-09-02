@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ensureDirs } from "../../config.ts";
 import type { ProviderInstance } from "../../contracts.ts";
 import { recordEvents, type EventRecorder } from "../../testing/events.ts";
-import { createAcpDriver, type AcpSupport } from "./core.ts";
+import { createAcpDriver, isAuthFailureMessage, type AcpSupport } from "./core.ts";
 import { GrokAgentDriver } from "./grok.ts";
 import { GeminiAgentDriver } from "./gemini.ts";
 import { KimiAgentDriver } from "./kimi.ts";
@@ -681,6 +681,40 @@ describe("ACP snapshot", () => {
       expect((await instance.snapshot()).authenticated).toBe(true);
     } finally {
       await instance.dispose();
+    }
+  });
+});
+
+// Every CLI phrases a signed-out failure its own way, and none of them phrase
+// it the way our loginNote does. Matching the note verbatim recognised none of
+// them, so a signed-out engine failed as an ordinary error — no setup
+// affordance, and the sentence saying what to run went unsaid.
+describe("isAuthFailureMessage", () => {
+  it("recognises how the CLIs actually say it", () => {
+    for (const message of [
+      "Authentication required",
+      'Authentication required: \n\nYour code: JHKB-WWFQ\n\nClick the "Login" button to authenticate',
+      "Authorization failed",
+      "HTTP 401 Unauthorized",
+      "You are not signed in",
+      "Please log in to continue",
+      "invalid api key",
+      "Invalid credentials",
+    ]) {
+      expect(isAuthFailureMessage(message), message).toBe(true);
+    }
+  });
+
+  it("leaves ordinary failures alone", () => {
+    for (const message of [
+      "model not found: opencode-go/minimax-m3",
+      "rate limit exceeded, retry in 30s",
+      "spawn ENOENT",
+      "the session was cancelled",
+      "Deferred custom tools are only supported on Anthropic models",
+      "connection reset by peer",
+    ]) {
+      expect(isAuthFailureMessage(message), message).toBe(false);
     }
   });
 });

@@ -147,6 +147,49 @@ function driveMcp(entry: McpEntry, calls: Array<{ name: string; args: (prev: str
   });
 }
 
+/** What the injected server actually advertises for this turn. A real client
+ * only calls what tools/list gave it, and the harness now advertises a
+ * smaller set past the comms depth cap — so the fake has to look, too. */
+function listMcpTools(entry: McpEntry): Promise<string[]> {
+  return new Promise((resolve, reject) => {
+    const env: Record<string, string> = { ...(process.env as Record<string, string>) };
+    for (const { name, value } of entry.env ?? []) env[name] = value;
+    const child = spawn(entry.command, entry.args ?? [], { env, stdio: ["pipe", "pipe", "inherit"] });
+    child.on("error", reject);
+    const timer = setTimeout(() => (child.kill(), reject(new Error("mcp tools/list timeout"))), 60_000);
+    const write = (obj: unknown) => child.stdin.write(JSON.stringify(obj) + "\n");
+    let buf = "";
+    let listed = false;
+    child.stdout.on("data", (c) => {
+      buf += c;
+      let nl;
+      while ((nl = buf.indexOf("\n")) !== -1) {
+        const line = buf.slice(0, nl);
+        buf = buf.slice(nl + 1);
+        if (!line.trim()) continue;
+        let msg: any;
+        try {
+          msg = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        if (msg.id === undefined) continue;
+        if (!listed) {
+          listed = true;
+          write({ jsonrpc: "2.0", method: "notifications/initialized" });
+          write({ jsonrpc: "2.0", id: 2, method: "tools/list" });
+          continue;
+        }
+        clearTimeout(timer);
+        child.kill();
+        resolve(((msg.result?.tools ?? []) as Array<{ name: string }>).map((tool) => tool.name));
+        return;
+      }
+    });
+    write({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05" } });
+  });
+}
+
 function playTurn() {
   out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "hello from fake acp" } } } });
   out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "tool_call", toolCallId: "tc-1", title: "run" } } });
@@ -211,6 +254,13 @@ function handle(msg: any) {
       break;
     }
     case "session/load": {
+      // The harness sends the CURRENT turn's mcpServers here too, and they are
+      // not the ones the session was created with — the agents entry carries
+      // this turn's comms depth. Ignoring them made a resumed session look
+      // like it had no tools at all.
+      const loaded: McpEntry[] = Array.isArray(msg.params?.mcpServers) ? msg.params.mcpServers : [];
+      agentsMcp = loaded.find((s: any) => s?.name === "agents") ?? agentsMcp;
+      routinesMcp = loaded.find((s: any) => s?.name === "routines") ?? routinesMcp;
       const opts = configOptions();
       result(msg.id, opts ? { configOptions: opts } : {});
       break;
@@ -275,18 +325,43 @@ function handle(msg: any) {
             : { stopReason: "end_turn", _meta: { inputTokens: 10, outputTokens: 5 } },
         );
       };
+      // the tools this turn was actually offered decide what a real client
+      // could do with them — past the depth cap ask_bot is simply not there
+      if (mode === "list-agent-tools" && agentsMcp) {
+        void listMcpTools(agentsMcp)
+          .then((tools) => {
+            out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `agent tools: ${tools.join(",")}` } } } });
+            complete();
+          })
+          .catch((e) => {
+            out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `agent tools error: ${(e as Error).message}` } } } });
+            complete();
+          });
+        return;
+      }
       if (mode === "ask-peer" && agentsMcp) {
         // the comms e2e: reach a peer bot through the injected agents proxy
-        // and reply with whatever it said (the peer's fake runs plain happy
-        // — its depth-1 turn gets no agents server, so no recursion)
-        void driveMcp(agentsMcp, [
-          { name: "list_bots", args: () => ({}) },
-          {
-            name: "ask_bot",
-            args: (list) => ({ bot_id: /id: ([\w-]+)/.exec(list)?.[1] ?? "", message: "ping from fake" }),
-          },
-        ])
+        // and reply with whatever it said. Past the depth cap the peer-calling
+        // tools are not advertised at all, so this plays plain happy text
+        // instead — the same thing a real client does with a tool it was
+        // never offered, and the recursion stop the cap exists for.
+        void listMcpTools(agentsMcp)
+          .then((tools) => {
+            if (!tools.includes("ask_bot")) {
+              out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "hello from fake acp" } } } });
+              complete();
+              return null;
+            }
+            return driveMcp(agentsMcp!, [
+              { name: "list_bots", args: () => ({}) },
+              {
+                name: "ask_bot",
+                args: (list) => ({ bot_id: /id: ([\w-]+)/.exec(list)?.[1] ?? "", message: "ping from fake" }),
+              },
+            ]);
+          })
           .then((reply) => {
+            if (reply === null) return;
             out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `peer says: ${reply}` } } } });
             complete();
           })
@@ -301,18 +376,27 @@ function handle(msg: any) {
         // immediately; the harness fires the peer's depth-1 turn after our
         // turn settles. We don't need the peer's reply in our text — the
         // comms e2e verifies the channel mirroring on its own.
-        void driveMcp(agentsMcp, [
-          { name: "list_bots", args: () => ({}) },
-          {
-            name: "delegate_bot",
-            args: (list) => ({
-              bot_id: /id: ([\w-]+)/.exec(list)?.[1] ?? "",
-              message: "delegated task",
-              reason: "followup",
-            }),
-          },
-        ])
+        void listMcpTools(agentsMcp)
+          .then((tools) => {
+            if (!tools.includes("delegate_bot")) {
+              out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "hello from fake acp" } } } });
+              complete();
+              return null;
+            }
+            return driveMcp(agentsMcp!, [
+              { name: "list_bots", args: () => ({}) },
+              {
+                name: "delegate_bot",
+                args: (list) => ({
+                  bot_id: /id: ([\w-]+)/.exec(list)?.[1] ?? "",
+                  message: "delegated task",
+                  reason: "followup",
+                }),
+              },
+            ]);
+          })
           .then((reply) => {
+            if (reply === null) return;
             out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `delegated: ${reply}` } } } });
             complete();
           })

@@ -1,7 +1,7 @@
 import { track } from "@/lib/analytics";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, Clock, Microphone, Plus, Square, Users, X } from "@phosphor-icons/react";
-import { useStore, visibleMessages, type Bot, type Group } from "@/state/store";
+import { ArrowBendUpLeft, ArrowUp, Clock, Microphone, Plus, Square, Users, X } from "@phosphor-icons/react";
+import { useStore, visibleMessages, type Bot, type Group, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { useComposerDraft } from "@/lib/drafts";
 import { MausAvatar } from "./Avatar";
@@ -41,11 +41,16 @@ export function Composer({
   group,
   members,
   onEditLast,
+  replyTo,
+  onClearReply,
 }: {
   bot?: Bot;
   group?: Group;
   members?: Bot[];
   onEditLast?: () => void;
+  /** The message the next send quotes, chosen from the transcript. */
+  replyTo?: Message | null;
+  onClearReply?: () => void;
 }) {
   const { state, dispatch } = useStore();
   const { capabilities } = useDesktopCapabilities();
@@ -121,7 +126,7 @@ export function Composer({
   }, [mention, dismissedAt, state.bots, bot?.id, group, members]);
   const pickerOpen = candidates.length > 0;
 
-  useEffect(() => setHighlight(0), [mention?.start, mention?.query]);
+  useEffect(() => queueMicrotask(() => setHighlight(0)), [mention?.start, mention?.query]);
 
   // grow the textarea with its content (capped by max-h in the className)
   useEffect(() => {
@@ -176,18 +181,23 @@ export function Composer({
       dispatch({ type: "sendGroup", groupId: group.id, text: t });
       track("message_sent", { room: true });
     } else if (bot) {
-      dispatch({ type: "send", botId: bot.id, text: t });
-      track("message_sent", { driver: bot.modelSelection?.instanceId });
+      // A reply only rides an ordinary send: a steered message joins a turn
+      // already in flight, where quoting one earlier line would be noise.
+      dispatch({ type: "send", botId: bot.id, text: t, ...(replyTo ? { replyTo: replyTo.id } : {}) });
+      track("message_sent", { driver: bot.modelSelection?.instanceId, reply: Boolean(replyTo) });
     }
+    onClearReply?.();
     setText("");
     setAttachments([]);
   };
   useEffect(() => {
     if (!busy && queued) {
-      if (group) dispatch({ type: "sendGroup", groupId: group.id, text: queued });
-      else if (bot) dispatch({ type: "send", botId: bot.id, text: queued });
-      track("message_sent", { queued: true });
-      setQueued(null);
+      queueMicrotask(() => {
+        if (group) dispatch({ type: "sendGroup", groupId: group.id, text: queued });
+        else if (bot) dispatch({ type: "send", botId: bot.id, text: queued });
+        track("message_sent", { queued: true });
+        setQueued(null);
+      });
     }
   }, [busy, queued, bot, group, dispatch]);
 
@@ -197,10 +207,10 @@ export function Composer({
     if (!recording) return;
     const bridge = window.mauscrew;
     if (!bridge) {
-      setRecording(false);
+      queueMicrotask(() => setRecording(false));
       return;
     }
-    setSpeechError(null);
+    queueMicrotask(() => setSpeechError(null));
     const offTranscript = bridge.onSpeechTranscript((line) => {
       if (typeof line.text === "string") {
         const base = baseText.current;
@@ -242,6 +252,22 @@ export function Composer({
         </div>
       )}
       <div className="relative mx-auto max-w-[760px]">
+        {replyTo && (
+          <div className="mb-2 flex items-start gap-2 rounded-lg border border-hairline bg-panel px-3 py-2 text-[12.5px] text-ink-secondary">
+            <ArrowBendUpLeft size={13} weight="bold" className="mt-0.5 shrink-0 text-accent" />
+            <span className="min-w-0 flex-1">
+              <span className="text-ink">Replying to {replyTo.role === "user" ? "your message" : "this reply"}</span>
+              <span className="ml-1.5 line-clamp-1 opacity-80">{(replyTo.text ?? "").replace(/\s+/g, " ").slice(0, 160)}</span>
+            </span>
+            <button
+              onClick={onClearReply}
+              aria-label="Cancel reply"
+              className="rounded p-0.5 hover:bg-raised hover:text-ink"
+            >
+              <X size={13} weight="bold" />
+            </button>
+          </div>
+        )}
         {queued && (
           <div className="mb-2 flex items-center gap-2 rounded-lg border border-hairline bg-panel px-3 py-2 text-[12.5px] text-ink-secondary">
             <Clock size={13} weight="bold" className="shrink-0" />

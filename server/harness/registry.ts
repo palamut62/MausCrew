@@ -27,9 +27,27 @@ export type RegistryEntry =
 export class ProviderRegistry {
   private byId = new Map<InstanceId, RegistryEntry>();
   private driversByKind: Map<string, AnyProviderDriver>;
+  /** Instances whose last turn ended because the CLI refused to authenticate.
+   *
+   * A driver's own check is a guess made from disk — a credentials file that
+   * exists but holds an expired token reads as "signed in" and the picker says
+   * ready right up until the turn fails. The turn is the only authority on
+   * this, so its verdict is remembered and overlaid on the snapshot until a
+   * turn succeeds again. */
+  private authFailures = new Map<InstanceId, string>();
 
   constructor(drivers: readonly AnyProviderDriver[]) {
     this.driversByKind = new Map(drivers.map((d) => [d.driverKind, d]));
+  }
+
+  /** A turn refused for want of a login. Kept until one succeeds. */
+  noteAuthFailure(instanceId: InstanceId, reason: string): void {
+    if (this.byId.has(instanceId)) this.authFailures.set(instanceId, reason.split("\n").filter(Boolean).at(-1) ?? reason);
+  }
+
+  /** A turn ran, so whatever the snapshot said about signing in is stale. */
+  clearAuthFailure(instanceId: InstanceId): void {
+    this.authFailures.delete(instanceId);
   }
 
   async load(configs: InstanceConfigMap) {
@@ -108,6 +126,13 @@ export class ProviderRegistry {
           snapshot = await inst.snapshot();
         } catch (e) {
           snapshot = { state: "unavailable", reason: e instanceof Error ? e.message : String(e) };
+        }
+        // The turn's verdict wins over the driver's disk check, never the
+        // other way round: a driver that already knows it is signed out is
+        // right, and one that thinks it is signed in has been proven wrong.
+        const authFailure = this.authFailures.get(inst.instanceId);
+        if (authFailure && snapshot.state === "available" && snapshot.authenticated !== false) {
+          snapshot = { ...snapshot, authenticated: false, reason: snapshot.reason ?? authFailure };
         }
         return {
           instanceId: inst.instanceId,

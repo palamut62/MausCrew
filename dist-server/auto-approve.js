@@ -21,7 +21,11 @@ const DESTRUCTIVE = [
 // Not destructive, but exactly what you don't hand over unattended: a
 // bot reading your keys is quiet, permanent, and unrecoverable.
 const SENSITIVE = [
-    /(^|[\s/"'])\.env(\.|$|["'\s])/i,
+    // The trailing class is "anything that is not part of a longer name", not
+    // just whitespace: `. ./.env;` and `cat .env)` are the same file, and a
+    // boundary list that only knew about spaces and quotes missed both. It
+    // still declines to match `.envrc` or `.environment`.
+    /(^|[\s/"'])\.env($|[^\w-])/i,
     /\.ssh\/|id_rsa|id_ed25519|authorized_keys/i,
     /\.aws\/credentials|\.netrc|\.npmrc|\.pypirc|\.docker\/config\.json/i,
     /security\s+find-(generic|internet)-password|\bkeychain\b/i,

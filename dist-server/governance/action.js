@@ -25,7 +25,7 @@ function categoryFor(tool) {
         return "filesystem";
     if (/computer|screenshot|click|type_text|press_key|scroll/.test(bare))
         return "computer";
-    if (/webfetch|web_search|browser|navigate|open_url/.test(bare))
+    if (/webfetch|web[_-]?search|browser|navigate|open_url/.test(bare))
         return "browser";
     if (/fetch|http|network|download|upload/.test(bare))
         return "network";
@@ -60,7 +60,8 @@ export function normalizePermissionAction(input) {
     const category = categoryFor(input.tool);
     const intent = intentFor(input.tool, category);
     const externalWrite = externalWriteFor(category, intent, input.summary);
-    const highRisk = looksDestructive(input.summary) || looksSensitive(input.summary) || looksDestructive(input.tool);
+    const destructive = looksDestructive(input.summary) || looksDestructive(input.tool);
+    const sensitive = looksSensitive(input.summary) || looksSensitive(input.tool);
     return {
         id: input.requestId || randomUUID(),
         timestamp: new Date().toISOString(),
@@ -74,7 +75,11 @@ export function normalizePermissionAction(input) {
             ...(category === "filesystem" ? { path: input.summary } : {}),
             ...(["mcp", "composio"].includes(category) ? { tool: input.tool } : {}),
         },
-        risk: highRisk ? "high" : externalWrite || intent === "write" || intent === "execute" ? "medium" : "low",
+        // Only destructive reaches "high". Credential access is medium and
+        // carries `sensitive`, so a policy can hold it at an approval card
+        // instead of refusing it.
+        risk: destructive ? "high" : sensitive || externalWrite || intent === "write" || intent === "execute" ? "medium" : "low",
+        sensitive,
         externalWrite,
         metadata: { summary: input.summary, ...(input.raw === undefined ? {} : { raw: input.raw }) },
     };

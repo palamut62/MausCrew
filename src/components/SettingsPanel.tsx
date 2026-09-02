@@ -1,5 +1,6 @@
-import { BookOpen, CaretLeft, Crown, FolderOpen, PuzzlePiece, X } from "@phosphor-icons/react";
-import { useEffect, useState, type CSSProperties } from "react";
+import { BookOpen, CaretLeft, Crown, FolderOpen, Image as ImageIcon, PuzzlePiece, Trash, X } from "@phosphor-icons/react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { avatarDataUrl, AvatarImageError } from "@/lib/avatar-image";
 import { api, useStore, type Bot } from "@/state/store";
 import { MausAvatar } from "./Avatar";
 import { MAUS_COLORS, MAUS_COLOR_NAMES } from "@/lib/colors";
@@ -38,6 +39,8 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [voices, setVoices] = useState<Array<{ id: string; label: string; description?: string }>>([]);
   const [voicesLoading, setVoicesLoading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
   const patch = (
     p: Partial<
       Pick<
@@ -57,9 +60,19 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
         | "workspacePath"
         | "dynamicCordis"
         | "section"
+        | "avatarImage"
       >
     >,
   ) => dispatch({ type: "updateBot", botId: bot.id, patch: p });
+
+  const chooseAvatar = async (file: File) => {
+    setAvatarError(null);
+    try {
+      patch({ avatarImage: await avatarDataUrl(file) });
+    } catch (error) {
+      setAvatarError(error instanceof AvatarImageError ? error.message : "That image could not be used.");
+    }
+  };
   const engine = state.instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId);
   const canCoordinate = engine?.capabilities?.agentsMcp === true;
   const currentChief = state.bots.find((candidate) => candidate.chiefOfStaff);
@@ -134,7 +147,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
 
       <div className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-5 pb-[max(1.25rem,var(--safe-bottom))]">
         <div className="flex justify-center py-5">
-          <MausAvatar color={bot.color} name={bot.name} seed={bot.id} shape={bot.shape} size={112} />
+          <MausAvatar color={bot.color} name={bot.name} seed={bot.id} shape={bot.shape} image={bot.avatarImage} size={112} />
         </div>
 
         <div className="flex flex-col gap-4">
@@ -144,7 +157,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                 Bot
               </span>
               <button
-                onClick={() => patch({ color: "green" })}
+                onClick={() => patch({ color: "green", avatarImage: "" })}
                 className="rounded-md px-2 py-1.5 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
               >
                 Reset
@@ -163,12 +176,52 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                     className={cn(
                       "size-8 rounded-md border-2 border-transparent transition-transform hover:scale-110",
                       bot.color === color && "ring-2 ring-accent-border ring-offset-2 ring-offset-card",
+                      // With a picture set the colour is still the bot's accent
+                      // everywhere else, so the grid stays live — it just no
+                      // longer decides the tile.
+                      bot.avatarImage && "opacity-70",
                     )}
                     style={{ backgroundColor: MAUS_COLORS[color] }}
                     title={color}
                     aria-label={`Use ${color} accent`}
                   />
                 ))}
+              </div>
+
+              <div className="mt-3 border-t border-hairline pt-3">
+                <div className="mb-2 font-mono text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
+                  Picture
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    className="hidden"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      event.target.value = "";
+                      if (file) void chooseAvatar(file);
+                    }}
+                  />
+                  <button
+                    onClick={() => fileRef.current?.click()}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-hairline px-2.5 py-1.5 text-[12.5px] text-ink hover:bg-raised"
+                  >
+                    <ImageIcon size={14} /> {bot.avatarImage ? "Replace" : "Upload"}
+                  </button>
+                  {bot.avatarImage && (
+                    <button
+                      onClick={() => patch({ avatarImage: "" })}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-hairline px-2.5 py-1.5 text-[12.5px] text-danger hover:bg-danger/10"
+                    >
+                      <Trash size={14} /> Remove
+                    </button>
+                  )}
+                </div>
+                <div className="mt-1.5 text-[11px] text-ink-secondary">
+                  {avatarError ?? "Squared and scaled to 256px here; nothing leaves this machine."}
+                </div>
               </div>
             </div>
           </div>

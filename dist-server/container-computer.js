@@ -44,7 +44,9 @@ const HOST_VIEWER_PORT = 6080;
 const MEMORY_BYTES = 4 * 1024 * 1024 * 1024;
 const NANO_CPUS = 2_000_000_000;
 const PIDS_LIMIT = 512;
-const LINUX_WHEELS = {
+/** Exported so the host driver (server/host-cua.ts) installs byte-for-byte
+ * the same build the Local VM runs — one pinned artifact, one place to bump. */
+export const LINUX_WHEELS = {
     x86_64: {
         url: "https://files.pythonhosted.org/packages/fa/d7/a43008a328a40c85e7bc706fc20235b9abedc75e28b413817655153157ff/cua_driver-0.20.0-py3-none-manylinux_2_31_x86_64.whl",
         sha256: "f60c35696a37f37ac954935e478ae4754f220856d022036625c9400d72185961",

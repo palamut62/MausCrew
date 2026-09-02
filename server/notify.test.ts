@@ -13,6 +13,7 @@ describe("buildNotification", () => {
       botId: "bot-1",
       threadId: "thread-1",
       title: "Scout needs approval",
+      detail: "rm -rf ./build",
       body: "rm -rf ./build",
     });
     expect(buildNotification("question", bot, "thread-1", "which branch?")?.title).toBe("Scout has a question");

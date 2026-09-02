@@ -89,6 +89,114 @@ function ActionButton({
   );
 }
 
+interface HostStatus {
+  supported: boolean;
+  session: "x11" | "wayland" | "headless";
+  installed: boolean;
+  running: boolean;
+  version: string;
+  arch: string;
+  problem?: string;
+}
+
+/**
+ * "This computer" as a destination, on the platform where it needs setting up.
+ *
+ * macOS starts its driver with the app and Windows ships one inside the
+ * package; only Linux has a driver to fetch, so the card renders there and
+ * nowhere else rather than showing three platforms a control two of them
+ * cannot use.
+ */
+function HostComputerCard() {
+  const [status, setStatus] = useState<HostStatus | null>(null);
+  const [pending, setPending] = useState<"install" | "start" | "stop" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      const response = await fetch("/api/host-computer");
+      if (!response.ok) return;
+      setStatus((await response.json()) as HostStatus);
+    } catch {
+      /* the harness is restarting; the next poll picks it up */
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 5000);
+    return () => window.clearInterval(timer);
+  }, [refresh]);
+
+  const act = async (action: "install" | "start" | "stop") => {
+    setPending(action);
+    setError(null);
+    try {
+      const response = await fetch(`/api/host-computer/${action}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error ?? `${action} failed`);
+      setStatus(body as HostStatus);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setPending(null);
+    }
+  };
+
+  // Only Linux has anything to do here.
+  if (!status || (status.session === "headless" && !status.installed && !status.supported)) return null;
+
+  return (
+    <Card
+      title="This computer"
+      subtitle="Let a bot drive the desktop you are looking at, using the same pinned Cua driver the Local VM runs. It sees and clicks your real screen — the sandbox boundary is gone, so approvals are the only thing between a bot and your files."
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <span
+          className={cn(
+            "flex items-center gap-1.5 rounded-md px-2.5 py-1 font-mono text-[12.5px] tracking-tight",
+            status.running ? "bg-success/15 text-success" : "bg-raised text-ink-secondary",
+          )}
+        >
+          {status.running ? <Check size={12} weight="fill" /> : <Circle size={9} weight="fill" />}
+          {status.running ? "Serving this session" : status.installed ? "Installed, not running" : "Not installed"}
+        </span>
+        {status.supported && !status.installed && (
+          <ActionButton action="pull" pending={pending === "install" ? "pull" : null} onClick={() => void act("install")}>
+            Install driver ({status.version})
+          </ActionButton>
+        )}
+        {status.supported && status.installed && !status.running && (
+          <ActionButton action="start" pending={pending === "start" ? "start" : null} onClick={() => void act("start")}>
+            Start
+          </ActionButton>
+        )}
+        {status.running && (
+          <ActionButton action="stop" pending={pending === "stop" ? "stop" : null} danger onClick={() => void act("stop")}>
+            Stop
+          </ActionButton>
+        )}
+      </div>
+      {!status.supported && (
+        <div className="mt-3 rounded-lg bg-raised px-3 py-2 text-[12px] leading-relaxed text-ink-secondary">
+          {status.session === "wayland"
+            ? "This is a Wayland session. Desktop control needs X11 — log in with an Xorg session, or give the bot a cloud computer or the Local VM instead."
+            : status.session === "headless"
+              ? "No graphical session was found on this machine, so there is nothing to drive."
+              : `There is no pinned driver build for ${status.arch}.`}
+        </div>
+      )}
+      {(error ?? status.problem) && (
+        <div className="mt-3 rounded-lg bg-danger/10 px-3 py-2 text-[12px] text-danger">{error ?? status.problem}</div>
+      )}
+    </Card>
+  );
+}
+
 export function LocalComputerSection() {
   const [status, setStatus] = useState<Status | null>(null);
   const [loading, setLoading] = useState(true);
@@ -187,6 +295,7 @@ export function LocalComputerSection() {
 
   return (
     <>
+      <HostComputerCard />
       <Card
         title="Local VM"
         subtitle={`A shared Cua Linux sandbox on this ${host} for bots to browse and work in — isolated, backed by one durable workspace, and automatically recycled after 8 hours without activity.`}

@@ -16,9 +16,17 @@ export interface Notification {
   kind: NotifyKind;
   botId: string;
   botName: string;
+  botTitle?: string;
   threadId: string;
   title: string;
+  /** Complete event text for durable channels such as Telegram. Desktop
+   * notifications keep using `body`, which is intentionally concise. */
+  detail: string;
   body: string;
+  /** The bot's accent colour, carried so the banner can wear that bot's own
+   * icon. Grouping notifications per bot is only legible when they are also
+   * told apart at a glance; a name in the title is not enough on a phone. */
+  botColor?: string;
 }
 
 /** One line, short enough for a lock screen, with the newlines and code
@@ -31,8 +39,10 @@ export function summarize(text: string, max = 140): string {
 export interface NotifyBot {
   id: string;
   name: string;
+  title?: string;
   threadId: string;
   notifications?: boolean;
+  color?: string;
 }
 
 /** Build the frame for one event, or null when it should stay quiet.
@@ -64,5 +74,15 @@ export function buildNotification(
   // badge in the sidebar already carries that much.
   if (kind === "done" && !body) return null;
 
-  return { kind, botId: bot.id, botName: bot.name, threadId, title, body };
+  return {
+    kind,
+    botId: bot.id,
+    botName: bot.name,
+    ...(bot.title ? { botTitle: bot.title } : {}),
+    threadId,
+    title,
+    detail: detail.trim(),
+    body,
+    ...(bot.color ? { botColor: bot.color } : {}),
+  };
 }

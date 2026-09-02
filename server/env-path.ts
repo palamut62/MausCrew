@@ -219,7 +219,7 @@ function parseCmdShim(shim: string): ResolvedSpawn | null {
 /** `#!/usr/bin/env node` → `node <script>`. Only node: nothing else has a
  * meaningful Windows equivalent worth guessing at. */
 function parseNodeShebang(file: string): ResolvedSpawn | null {
-  let head = "";
+  let head: string;
   let fd: number | null = null;
   try {
     fd = openSync(file, "r");

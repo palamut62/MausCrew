@@ -83,7 +83,7 @@ function resolveModels(env: Record<string, string | undefined>) {
 // recognized", "Method not found") that reaches the error card verbatim,
 // naming neither the engine nor the setting that failed. Say what we asked for.
 async function applySetting(
-  request: (method: string, params: unknown, timeoutMs?: number) => Promise<any>,
+  request: (method: string, params: unknown, timeoutMs?: number) => Promise<unknown>,
   method: string,
   params: Record<string, unknown>,
   what: string,
@@ -94,6 +94,7 @@ async function applySetting(
     throw new Error(
       `Droid rejected ${what} via ${method}: ${(e as Error).message}. ` +
         `Check that \`droid\` is current (0.196.0+ supports it) and that this account can use that value.`,
+      { cause: e },
     );
   }
 }

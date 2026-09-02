@@ -32,6 +32,25 @@ self.addEventListener("activate", (event) =>
   ),
 );
 
+// A banner posted through this worker (the only kind a backgrounded phone
+// gets) has no page-side onclick, so the tap is answered here: focus an open
+// client if there is one and tell it which bot to select, otherwise open the
+// app at that bot.
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const botId = event.notification.data?.botId;
+  event.waitUntil((async () => {
+    const clientList = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    for (const client of clientList) {
+      if (!("focus" in client)) continue;
+      await client.focus();
+      if (botId) client.postMessage({ type: "notification-open", botId });
+      return;
+    }
+    if (self.clients.openWindow) await self.clients.openWindow(botId ? `/?bot=${encodeURIComponent(botId)}` : "/");
+  })());
+});
+
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   const { pathname } = new URL(event.request.url);

@@ -10,7 +10,7 @@
 // turned it into `node <script>` on Windows too, so the e2e half now runs
 // everywhere alongside the mention-resolution units.
 import { spawn, type ChildProcess } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -92,6 +92,22 @@ describe("comms e2e (fake ACP fleet)", () => {
     return { status: res.status, body: await res.json() };
   };
 
+  /** The newest settled reply matching `needle`, ignoring one already seen. */
+  const waitForText = async (botId: string, needle: string, timeoutMs: number, ignore?: string): Promise<string> => {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const state = (await api("GET", "/api/bots")).body;
+      const bot = state.bots.find((b: any) => b.id === botId);
+      const hit = bot?.messages
+        ?.filter((m: any) => m.role === "bot" && m.kind === "text" && m.text?.includes(needle))
+        .map((m: any) => m.text as string)
+        .findLast((text: string) => text !== ignore);
+      if (hit && !bot.busy) return hit;
+      if (Date.now() > deadline) throw new Error(`no "${needle}" from ${botId}; tail: ${JSON.stringify(bot?.messages?.slice(-4))}`);
+      await new Promise((r) => setTimeout(r, 250));
+    }
+  };
+
   beforeAll(async () => {
     chmodSync(FAKE_CLI, 0o755);
     home = mkdtempSync(join(tmpdir(), "mauscrew-comms-test-"));
@@ -109,9 +125,8 @@ describe("comms e2e (fake ACP fleet)", () => {
             config: { cli: FAKE_CLI, fullAuto: true },
           },
           // a separate asker instance for the async-handoff e2e. B can stay
-          // on `grok` because its depth-1 turn runs without the agents
-          // integration either way (the depth guard), so it just plays
-          // plain happy text.
+          // on `grok`: past the depth cap its turn is offered no peer-calling
+          // tools, so its fake falls through to plain happy text.
           askerDelegate: {
             driver: "grokAgent",
             environment: { FAKE_ACP_MODE: "delegate-peer" },
@@ -120,6 +135,19 @@ describe("comms e2e (fake ACP fleet)", () => {
           creator: {
             driver: "grokAgent",
             environment: { FAKE_ACP_MODE: "create-bot" },
+            config: { cli: FAKE_CLI, fullAuto: true },
+          },
+          // reports back what the agents server advertised for its turn, so a
+          // test can read the depth cap's effect directly instead of
+          // inferring it from a refusal.
+          toolLister: {
+            driver: "grokAgent",
+            environment: { FAKE_ACP_MODE: "list-agent-tools" },
+            config: { cli: FAKE_CLI, fullAuto: true },
+          },
+          roomModel: {
+            driver: "grokAgent",
+            environment: { FAKE_ACP_DUMP: join(home, "room-model-dump.json") },
             config: { cli: FAKE_CLI, fullAuto: true },
           },
           // a peer whose agent crashes at initialize — the delegated turn
@@ -195,6 +223,40 @@ describe("comms e2e (fake ACP fleet)", () => {
     const ask = await api("POST", "/api/internal/ask-bot", { toBotId: "x", message: "hi" });
     expect(ask.status).toBe(401);
   });
+
+  it(
+    "forwards a bot's selected model into a Room turn",
+    async () => {
+      const created = (await api("POST", "/api/bots")).body.bot;
+      expect((await api("PATCH", `/api/bots/${created.id}`, {
+        name: "Room Model Probe",
+        modelSelection: { instanceId: "roomModel", model: "grok-4.5" },
+      })).status).toBe(200);
+      const room = (await api("POST", "/api/groups", {
+        name: "Model Room",
+        memberIds: [created.id],
+      })).body.group;
+
+      expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "reply once" })).status).toBe(202);
+      const deadline = Date.now() + 25_000;
+      for (;;) {
+        const state = (await api("GET", "/api/bots")).body;
+        const current = state.groups.find((group: any) => group.id === room.id);
+        if (!current?.busyBotId && current?.messages?.some((message: any) => message.text?.includes("hello from fake acp"))) {
+          break;
+        }
+        if (Date.now() > deadline) {
+          throw new Error(`room turn did not settle: ${JSON.stringify(current?.messages?.slice(-4))}`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+
+      const invocation = JSON.parse(readFileSync(join(home, "room-model-dump.json"), "utf8"));
+      expect(invocation.argv).toContain("-m");
+      expect(invocation.argv[invocation.argv.indexOf("-m") + 1]).toBe("grok-4.5");
+    },
+    30_000,
+  );
 
   it(
     "carries a question from bot A through the agents proxy to bot B and back",
@@ -758,7 +820,6 @@ describe("comms e2e (fake ACP fleet)", () => {
     for (;;) {
       const state = (await api("GET", "/api/bots")).body;
       askerBot = state.bots.find((b: any) => b.id === asker.id);
-      helperBot = state.bots.find((b: any) => b.id === helper.id);
       card = askerBot.messages.find(
         (m: any) => m.kind === "options" && m.card?.requestId && m.card?.tool === "ask_bot",
       );
@@ -817,14 +878,13 @@ describe("comms e2e (fake ACP fleet)", () => {
 
   // ── depth guard regression ───────────────────────────────────────────
   // A bot invoked via ask_bot or delegate_bot runs at depth=1, which equals
-  // MAX_COMMS_DEPTH. The depth guard in startTurn must refuse to inject
-  // the agents integration, so B's CLI sees no agents mcpServer and falls
-  // through to its plain happy text — NOT a "one hop" error from a depth-1
-  // ask_bot. If the guard were removed, B's fake (also in ask-peer mode)
-  // would call ask_bot, the harness would refuse recursion, and B's reply
-  // would contain "peer error: ... one hop". The absence of that error is
-  // the regression signal.
-  it("does not inject the agents integration into a depth-1 turn", async () => {
+  // MAX_COMMS_DEPTH. That turn is offered no peer-calling tool, so B's fake
+  // falls through to its plain happy text — NOT a "one hop" error from a
+  // depth-1 ask_bot, and not a peer turn it managed to start anyway. If the
+  // cap broke, B would call ask_bot, the harness would refuse recursion, and
+  // B's reply would carry "peer error: ... one hop". The absence of that
+  // error is the regression signal.
+  it("offers a depth-1 turn nothing it could start another turn with", async () => {
     const seeded = (await api("GET", "/api/bots")).body.bots[0];
     await api("PATCH", `/api/bots/${seeded.id}`, { hidden: true });
     // A runs delegate-peer and hands off to B, which runs ask-peer. If the
@@ -871,4 +931,33 @@ describe("comms e2e (fake ACP fleet)", () => {
     expect(reply.text).not.toContain("one hop");
     expect(reply.text).not.toContain("peer error");
   }, 45_000);
+
+  // The cap takes away the tools that could start another turn — and only
+  // those. A delegated teammate is told to mark the workflow step it was
+  // handed and to queue outbound text for approval, and mounting nothing at
+  // all used to leave it able to do neither.
+  it("still offers a depth-1 turn the tools that only report on its own work", async () => {
+    const seeded = (await api("GET", "/api/bots")).body.bots[0];
+    await api("PATCH", `/api/bots/${seeded.id}`, { hidden: true });
+    const lister = (await api("POST", "/api/bots")).body.bot;
+    await api("PATCH", `/api/bots/${lister.id}`, { name: "Lister", modelSelection: { instanceId: "toolLister", model: "grok-4.6" } });
+    const asker = (await api("POST", "/api/bots")).body.bot;
+    await api("PATCH", `/api/bots/${asker.id}`, { name: "Asker", modelSelection: { instanceId: "askerDelegate", model: "grok-4.6" } });
+
+    // depth 0: the user asks Lister directly, so it sees the whole catalogue
+    await api("POST", `/api/bots/${lister.id}/messages`, { text: "what have you got?" });
+    const direct = await waitForText(lister.id, "agent tools:", 30_000);
+    expect(direct).toContain("ask_bot");
+    expect(direct).toContain("update_workflow_step");
+    expect(direct).toContain("queue_review");
+
+    // depth 1: Asker hands the work to Lister, which may only report
+    await api("POST", `/api/bots/${asker.id}/messages`, { text: "delegate this to @Lister please" });
+    const delegated = await waitForText(lister.id, "agent tools:", 40_000, direct);
+    expect(delegated).toContain("update_workflow_step");
+    expect(delegated).toContain("queue_review");
+    expect(delegated).not.toContain("ask_bot");
+    expect(delegated).not.toContain("delegate_bot");
+    expect(delegated).not.toContain("create_bot");
+  }, 60_000);
 });

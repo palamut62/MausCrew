@@ -2,10 +2,11 @@ import { track } from "@/lib/analytics";
 import { Spin } from "./Spin";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowClockwise, ArrowLineDown, BellRinging, CalendarDots, CaretDown, CaretRight, Check, ClipboardText, Copy, Crown, EyeSlash, FileArrowUp, FolderPlus, Gear, MagnifyingGlass, Pencil, Plus, PushPin, PushPinSlash, PuzzlePiece, Robot as BotIcon, Trash, Users, X } from "@phosphor-icons/react";
-import { api, useStore, formatTime, visibleMessages, type Bot, type Group, type Message } from "@/state/store";
+import { ArrowClockwise, ArrowLineDown, BellRinging, CalendarDots, CaretDown, CaretRight, Check, ClipboardText, Copy, Crown, EyeSlash, FileArrowUp, FolderPlus, Gear, MagnifyingGlass, Pencil, Plus, PushPin, PushPinSlash, PuzzlePiece, Robot as BotIcon, ShareNetwork, Trash, TreeStructure, Users, UsersThree, X } from "@phosphor-icons/react";
+import { api, useStore, formatTime, visibleMessages, type Bot, type Group, type Message, type Project } from "@/state/store";
 import { MausAvatar, InitialsAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot-motion";
+import { botShareLink } from "@/lib/share-bot";
 import { useUpdaterState } from "@/lib/updater";
 import { cn } from "@/lib/cn";
 import { downloadSelectedTeam } from "@/lib/team-files";
@@ -38,7 +39,7 @@ function UpdateButton() {
   // download and install both round-trip through main before the status
   // changes — spin on the click itself, and let the new status clear it
   const [pending, setPending] = useState(false);
-  useEffect(() => setPending(false), [status]);
+  useEffect(() => queueMicrotask(() => setPending(false)), [status]);
   // a check that found nothing lands back on idle — acknowledge it for 3s
   const upToDate = Boolean(checkedAt) && (!s || s.status === "idle") && Date.now() - checkedAt < 3000;
   useEffect(() => {
@@ -154,7 +155,7 @@ function StackedMauses({ members }: { members: Bot[] }) {
     const b = members[0];
     return (
       <div className="flex size-9 shrink-0 items-center justify-center">
-        {b ? <MausAvatar color={b.color} name={b.name} seed={b.id} shape={b.shape} size={36} /> : <Users size={18} className="text-ink-secondary" />}
+        {b ? <MausAvatar color={b.color} name={b.name} seed={b.id} shape={b.shape} image={b.avatarImage} size={36} /> : <Users size={18} className="text-ink-secondary" />}
       </div>
     );
   }
@@ -573,7 +574,7 @@ function ExportTeamPanel({
                 onClick={() => toggle(bot.id)}
                 className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-raised/70 disabled:opacity-40"
               >
-                <MausAvatar color={bot.color} name={bot.name} seed={bot.id} shape={bot.shape} size={28} />
+                <MausAvatar color={bot.color} name={bot.name} seed={bot.id} shape={bot.shape} image={bot.avatarImage} size={28} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[14px] text-ink">{bot.name}</span>
                   {bot.title && <span className="block truncate text-[11.5px] text-ink-secondary">{bot.title}</span>}
@@ -628,10 +629,24 @@ function ExportTeamPanel({
   );
 }
 
+function parseProjectResources(value: string): Array<{ label: string; value: string }> {
+  return value
+    .split(/\r?\n/)
+    .map((line) => {
+      const separator = line.indexOf(":");
+      if (separator < 1) return null;
+      const label = line.slice(0, separator).trim();
+      const resourceValue = line.slice(separator + 1).trim();
+      return label && resourceValue ? { label, value: resourceValue } : null;
+    })
+    .filter((resource): resource is { label: string; value: string } => Boolean(resource));
+}
+
 /** Pick members → Create. The room name is optional; the server defaults it. */
-function NewRoomPanel({ onClose }: { onClose: () => void }) {
+function NewRoomPanel({ onClose, defaultProjectId }: { onClose: () => void; defaultProjectId?: string }) {
   const { state, dispatch } = useStore();
   const [name, setName] = useState("");
+  const [projectId, setProjectId] = useState(defaultProjectId ?? "");
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const cardRef = useRef<HTMLDivElement>(null);
   const bots = state.bots.filter((b) => !b.hidden);
@@ -674,7 +689,7 @@ function NewRoomPanel({ onClose }: { onClose: () => void }) {
   }, [onClose]);
   const create = () => {
     if (!picked.size) return;
-    dispatch({ type: "createGroup", memberIds: [...picked], name: name.trim() || undefined });
+    dispatch({ type: "createGroup", memberIds: [...picked], name: name.trim() || undefined, projectId: projectId || undefined });
     track("room_created", { members: picked.size });
     onClose();
   };
@@ -701,6 +716,15 @@ function NewRoomPanel({ onClose }: { onClose: () => void }) {
           placeholder="Room name (optional)"
           className="mb-3 w-full rounded-lg bg-raised/70 px-3 py-2 text-[14px] text-ink placeholder:text-ink-secondary focus:outline-none"
         />
+        {state.projects.length > 0 && (
+          <label className="mb-3 block">
+            <span className="mb-1 block text-[11px] font-medium text-ink-secondary">Project boundary</span>
+            <select value={projectId} onChange={(event) => setProjectId(event.target.value)} className="w-full rounded-lg border border-hairline bg-raised/70 px-3 py-2 text-[12.5px] text-ink focus:outline-none">
+              <option value="">No project — standalone room</option>
+              {state.projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+            </select>
+          </label>
+        )}
         <div className="flex max-h-64 flex-col gap-0.5 overflow-y-auto">
           {bots.length === 0 && (
             <div className="px-2 py-4 text-center text-[13px] text-ink-secondary">Create a bot first — rooms are made of bots.</div>
@@ -711,7 +735,7 @@ function NewRoomPanel({ onClose }: { onClose: () => void }) {
               onClick={() => toggle(b.id)}
               className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-raised/50"
             >
-              <MausAvatar color={b.color} name={b.name} seed={b.id} shape={b.shape} size={28} />
+              <MausAvatar color={b.color} name={b.name} seed={b.id} shape={b.shape} image={b.avatarImage} size={28} />
               <span className="min-w-0 flex-1 truncate text-[14px] text-ink">{b.name}</span>
               <span
                 className={cn(
@@ -733,6 +757,89 @@ function NewRoomPanel({ onClose }: { onClose: () => void }) {
         </button>
       </div>
     </div>
+  );
+}
+
+function NewProjectPanel({ onClose }: { onClose: () => void }) {
+  const { state, dispatch } = useStore();
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [workspacePath, setWorkspacePath] = useState("");
+  const [instructions, setInstructions] = useState("");
+  const [resources, setResources] = useState("");
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const bots = state.bots.filter((bot) => !bot.hidden);
+  const toggle = (id: string) => setPicked((previous) => {
+    const next = new Set(previous);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const create = () => {
+    if (!name.trim() || !picked.size) return;
+    dispatch({
+      type: "createProject",
+      input: {
+        name: name.trim(),
+        description: description.trim() || undefined,
+        workspacePath: workspacePath.trim() || undefined,
+        instructions: instructions.trim() || undefined,
+        resources: parseProjectResources(resources),
+        memberIds: [...picked],
+      },
+    });
+    onClose();
+  };
+  return createPortal(
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <div role="dialog" aria-modal="true" aria-label="New Project" className="max-h-[90vh] w-full max-w-[520px] overflow-y-auto rounded-xl border border-hairline bg-card p-5">
+        <div className="flex items-center justify-between gap-3"><div><div className="text-[16px] font-semibold text-ink">New Project</div><div className="mt-0.5 text-[11.5px] text-ink-secondary">A private room, workspace, instructions, and team in one boundary.</div></div><button onClick={onClose} className="rounded-lg p-2 text-ink-secondary hover:bg-raised hover:text-ink"><X size={16} /></button></div>
+        <div className="mt-4 grid gap-3">
+          <label><span className="mb-1 block text-[11px] font-medium text-ink-secondary">Name</span><input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="MausCrew Project" className="w-full rounded-lg border border-hairline bg-raised/60 px-3 py-2 text-[13px] text-ink focus:outline-none" /></label>
+          <label><span className="mb-1 block text-[11px] font-medium text-ink-secondary">Description</span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="What this team owns" className="w-full rounded-lg border border-hairline bg-raised/60 px-3 py-2 text-[13px] text-ink focus:outline-none" /></label>
+          <label><span className="mb-1 block text-[11px] font-medium text-ink-secondary">Workspace</span><div className="flex gap-2"><input value={workspacePath} onChange={(event) => setWorkspacePath(event.target.value)} placeholder="C:\\projects\\mauscrew" className="min-w-0 flex-1 rounded-lg border border-hairline bg-raised/60 px-3 py-2 font-mono text-[11.5px] text-ink focus:outline-none" /><button onClick={async () => { const pickedPath = await window.mauscrew?.chooseWorkspace?.(); if (pickedPath) setWorkspacePath(pickedPath); }} className="rounded-lg border border-hairline px-3 text-[11.5px] text-ink-secondary hover:bg-raised hover:text-ink">Browse</button></div></label>
+          <label><span className="mb-1 block text-[11px] font-medium text-ink-secondary">Shared instructions</span><textarea value={instructions} onChange={(event) => setInstructions(event.target.value)} rows={3} placeholder="Rules every member should follow in this project" className="w-full resize-y rounded-lg border border-hairline bg-raised/60 px-3 py-2 text-[12px] text-ink focus:outline-none" /></label>
+          <label><span className="mb-1 block text-[11px] font-medium text-ink-secondary">Resources</span><textarea value={resources} onChange={(event) => setResources(event.target.value)} rows={3} placeholder={"Design: https://…\nBrief: C:\\projects\\brief.md"} className="w-full resize-y rounded-lg border border-hairline bg-raised/60 px-3 py-2 font-mono text-[11.5px] text-ink focus:outline-none" /><span className="mt-1 block text-[10.5px] text-ink-secondary">One Label: value resource per line. Every room member receives it as project context.</span></label>
+        </div>
+        <div className="mt-4 text-[11px] font-medium text-ink-secondary">Team</div>
+        <div className="mt-1.5 grid max-h-56 gap-1 overflow-y-auto sm:grid-cols-2">{bots.map((bot) => <button key={bot.id} onClick={() => toggle(bot.id)} className="flex items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-raised"><MausAvatar color={bot.color} name={bot.name} seed={bot.id} shape={bot.shape} image={bot.avatarImage} size={25} /><span className="min-w-0 flex-1 truncate text-[12.5px] text-ink">{bot.name}</span><span className={cn("flex size-4 items-center justify-center rounded border", picked.has(bot.id) ? "border-accent bg-accent text-app" : "border-hairline")}>{picked.has(bot.id) && <Check size={10} weight="fill" />}</span></button>)}</div>
+        <button disabled={!name.trim() || !picked.size} onClick={create} className="mt-4 w-full rounded-lg bg-accent py-2.5 text-[13px] font-semibold text-app hover:brightness-110 disabled:opacity-40">Create project and room</button>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+function ProjectSettingsPanel({ project, onClose }: { project: Project; onClose: () => void }) {
+  const { dispatch } = useStore();
+  const [name, setName] = useState(project.name);
+  const [description, setDescription] = useState(project.description);
+  const [workspacePath, setWorkspacePath] = useState(project.workspacePath ?? "");
+  const [instructions, setInstructions] = useState(project.instructions);
+  const [resources, setResources] = useState(() => project.resources.map((resource) => `${resource.label}: ${resource.value}`).join("\n"));
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const save = () => {
+    if (!name.trim()) return;
+    dispatch({ type: "updateProject", projectId: project.id, patch: { name: name.trim(), description: description.trim(), workspacePath: workspacePath.trim(), instructions: instructions.trim(), resources: parseProjectResources(resources).map((resource, index) => ({ id: project.resources[index]?.id ?? `resource-${index}`, ...resource })) } });
+    onClose();
+  };
+  return createPortal(
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <div role="dialog" aria-modal="true" aria-label={`Edit ${project.name}`} className="w-full max-w-[520px] rounded-xl border border-hairline bg-card p-5">
+        <div className="flex items-center justify-between"><div><div className="text-[16px] font-semibold text-ink">Project settings</div><div className="mt-0.5 text-[11px] text-ink-secondary">Changes apply only inside this project's rooms.</div></div><button onClick={onClose} className="rounded-lg p-2 text-ink-secondary hover:bg-raised hover:text-ink"><X size={16} /></button></div>
+        <div className="mt-4 grid gap-3">
+          <label><span className="mb-1 block text-[11px] text-ink-secondary">Name</span><input value={name} onChange={(event) => setName(event.target.value)} className="w-full rounded-lg border border-hairline bg-raised/60 px-3 py-2 text-[13px] text-ink focus:outline-none" /></label>
+          <label><span className="mb-1 block text-[11px] text-ink-secondary">Description</span><input value={description} onChange={(event) => setDescription(event.target.value)} className="w-full rounded-lg border border-hairline bg-raised/60 px-3 py-2 text-[13px] text-ink focus:outline-none" /></label>
+          <label><span className="mb-1 block text-[11px] text-ink-secondary">Workspace</span><div className="flex gap-2"><input value={workspacePath} onChange={(event) => setWorkspacePath(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-hairline bg-raised/60 px-3 py-2 font-mono text-[11.5px] text-ink focus:outline-none" /><button onClick={async () => { const pickedPath = await window.mauscrew?.chooseWorkspace?.(); if (pickedPath) setWorkspacePath(pickedPath); }} className="rounded-lg border border-hairline px-3 text-[11px] text-ink-secondary hover:bg-raised hover:text-ink">Browse</button></div></label>
+          <label><span className="mb-1 block text-[11px] text-ink-secondary">Shared instructions</span><textarea rows={4} value={instructions} onChange={(event) => setInstructions(event.target.value)} className="w-full resize-y rounded-lg border border-hairline bg-raised/60 px-3 py-2 text-[12px] text-ink focus:outline-none" /></label>
+          <label><span className="mb-1 block text-[11px] text-ink-secondary">Resources</span><textarea rows={3} value={resources} onChange={(event) => setResources(event.target.value)} placeholder="Label: URL or local path" className="w-full resize-y rounded-lg border border-hairline bg-raised/60 px-3 py-2 font-mono text-[11.5px] text-ink focus:outline-none" /></label>
+        </div>
+        <div className="mt-5 flex items-center justify-between gap-3 border-t border-hairline pt-4">
+          {confirmDelete ? <div className="flex items-center gap-2"><span className="text-[11px] text-danger">Keep rooms, remove project?</span><button onClick={() => { dispatch({ type: "deleteProject", projectId: project.id }); onClose(); }} className="rounded-lg bg-danger px-2.5 py-1.5 text-[11px] font-medium text-white">Remove</button><button onClick={() => setConfirmDelete(false)} className="px-2 py-1.5 text-[11px] text-ink-secondary">Cancel</button></div> : <button onClick={() => setConfirmDelete(true)} className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[11.5px] text-danger hover:bg-danger/10"><Trash size={13} />Remove project</button>}
+          <button disabled={!name.trim()} onClick={save} className="rounded-lg bg-accent px-4 py-2 text-[12px] font-semibold text-app hover:brightness-110 disabled:opacity-40">Save</button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -828,6 +935,11 @@ function BotContextMenu({ menu, onClose }: { menu: MenuState; onClose: () => voi
         item(<ClipboardText size={16} weight="bold" className="text-ink-secondary" />, "Copy conversation ID", () => {
           void navigator.clipboard?.writeText(bot.threadId);
         }),
+        // Carries the profile only. The recipient reviews it in the import
+        // dialog before any bot is created on their side.
+        item(<ShareNetwork size={16} weight="bold" className="text-ink-secondary" />, "Copy share link", () => {
+          void navigator.clipboard?.writeText(botShareLink(bot));
+        }),
         divider("d3"),
         item(
           <EyeSlash size={16} weight="bold" className="text-ink-secondary" />,
@@ -859,6 +971,7 @@ function BotListItem({ bot, onMenu }: { bot: Bot; onMenu: (menu: MenuState) => v
   const previewText = preview(bot, visible);
   return (
     <button
+      data-bot-id={bot.id}
       onClick={() => dispatch({ type: "select", id: bot.id })}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -875,7 +988,7 @@ function BotListItem({ bot, onMenu }: { bot: Bot; onMenu: (menu: MenuState) => v
             : "hover:bg-raised/60",
       )}
     >
-      <MausAvatar color={bot.color} name={bot.name} seed={bot.id} shape={bot.shape} state={stateForBot(bot)} size={36} />
+      <MausAvatar color={bot.color} name={bot.name} seed={bot.id} shape={bot.shape} image={bot.avatarImage} state={stateForBot(bot)} size={36} />
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2">
           <span className="flex min-w-0 items-center gap-1.5 truncate text-[15px] font-semibold text-ink">
@@ -918,6 +1031,9 @@ export function Sidebar({ open, onClose, onOpenDirectory }: { open: boolean; onC
   const [roomMenu, setRoomMenu] = useState<{ groupId: string; x: number; y: number } | null>(null);
   const [plusOpen, setPlusOpen] = useState(false);
   const [newRoom, setNewRoom] = useState(false);
+  const [newRoomProjectId, setNewRoomProjectId] = useState<string | undefined>();
+  const [newProject, setNewProject] = useState(false);
+  const [editProjectId, setEditProjectId] = useState<string | null>(null);
   const [exportTeamOpen, setExportTeamOpen] = useState(false);
   const [pendingImport, setPendingImport] = useState<PendingTeamImport | null>(null);
   const [teamFeedback, setTeamFeedback] = useState<{ error: boolean; text: string } | null>(null);
@@ -994,6 +1110,8 @@ export function Sidebar({ open, onClose, onOpenDirectory }: { open: boolean; onC
       group.bulletin.toLowerCase().includes(q) ||
       group.messages.some((message) => messageSearchText(message).includes(q)),
   );
+  const projectRoomIds = new Set(state.projects.flatMap((project) => project.roomIds));
+  const looseGroups = visibleGroups.filter((group) => !projectRoomIds.has(group.id));
   const sectionedBots = new Map<string, Bot[]>();
   for (const bot of visibleBots) {
     const section = bot.section?.trim() || "Unassigned";
@@ -1079,6 +1197,16 @@ export function Sidebar({ open, onClose, onOpenDirectory }: { open: boolean; onC
                 <button
                   onClick={() => {
                     setPlusOpen(false);
+                    setNewProject(true);
+                  }}
+                  className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
+                >
+                  <FolderPlus size={16} weight="bold" className="text-ink-secondary" />
+                  New Project
+                </button>
+                <button
+                  onClick={() => {
+                    setPlusOpen(false);
                     track("bot_created");
                     dispatch({ type: "newBot" });
                   }}
@@ -1100,6 +1228,7 @@ export function Sidebar({ open, onClose, onOpenDirectory }: { open: boolean; onC
                 <button
                   onClick={() => {
                     setPlusOpen(false);
+                    setNewRoomProjectId(undefined);
                     setNewRoom(true);
                   }}
                   className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
@@ -1168,7 +1297,22 @@ export function Sidebar({ open, onClose, onOpenDirectory }: { open: boolean; onC
               <BotListItem bot={chiefBot} onMenu={setMenu} />
             </div>
           )}
-          {visibleGroups.map((g) => (
+          {state.projects.map((project) => {
+            const rooms = visibleGroups.filter((group) => project.roomIds.includes(group.id));
+            if (!rooms.length && q) return null;
+            return (
+              <div key={project.id} className="mb-1 rounded-lg border border-hairline/60 bg-inset/20 p-1">
+                <div className="flex items-center gap-1.5 px-2 py-1 text-[10.5px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
+                  <FolderPlus size={12} weight="bold" />
+                  <span className="min-w-0 flex-1 truncate">{project.name}</span>
+                  <button onClick={() => { setNewRoomProjectId(project.id); setNewRoom(true); }} aria-label={`Add room to ${project.name}`} className="rounded p-1 hover:bg-raised hover:text-ink"><Plus size={11} weight="bold" /></button>
+                  <button onClick={() => setEditProjectId(project.id)} aria-label={`Edit ${project.name}`} className="rounded p-1 hover:bg-raised hover:text-ink"><Pencil size={11} weight="bold" /></button>
+                </div>
+                {rooms.map((group) => <GroupListItem key={group.id} group={group} onMenu={setRoomMenu} />)}
+              </div>
+            );
+          })}
+          {looseGroups.map((g) => (
             <GroupListItem key={g.id} group={g} onMenu={setRoomMenu} />
           ))}
           {orderedSections.map(([section, bots]) => {
@@ -1195,6 +1339,42 @@ export function Sidebar({ open, onClose, onOpenDirectory }: { open: boolean; onC
       {/* Footer */}
       <div className="border-t border-hairline/70 px-3 pb-[max(0.75rem,var(--safe-bottom))] pt-2">
         <SidebarUpdateCard />
+        <button
+          onClick={() => dispatch({ type: "showReviews" })}
+          className={cn(
+            "flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors",
+            state.activeView === "reviews" ? "bg-raised text-ink" : "text-ink hover:bg-raised/50",
+          )}
+        >
+          <ClipboardText size={20} weight={state.activeView === "reviews" ? "fill" : "bold"} className={state.activeView === "reviews" ? "text-accent" : "text-ink-secondary"} />
+          <span className="flex-1 text-[14px]">Review queue</span>
+          {state.reviews.filter((item) => item.status === "pending").length > 0 && (
+            <span className="rounded-full bg-accent px-1.5 py-0.5 font-mono text-[10px] font-semibold text-app">{state.reviews.filter((item) => item.status === "pending").length}</span>
+          )}
+        </button>
+        <button
+          onClick={() => dispatch({ type: "showWorkflows" })}
+          className={cn(
+            "flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors",
+            state.activeView === "workflows" ? "bg-raised text-ink" : "text-ink hover:bg-raised/50",
+          )}
+        >
+          <TreeStructure size={20} weight={state.activeView === "workflows" ? "fill" : "bold"} className={state.activeView === "workflows" ? "text-accent" : "text-ink-secondary"} />
+          <span className="flex-1 text-[14px]">Workflows</span>
+          {state.workflows.some((workflow) => workflow.status === "active" || workflow.status === "blocked") && (
+            <span className="size-2 rounded-full bg-accent" />
+          )}
+        </button>
+        <button
+          onClick={() => dispatch({ type: "showOrgChart" })}
+          className={cn(
+            "flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors",
+            state.activeView === "org" ? "bg-raised text-ink" : "text-ink hover:bg-raised/50",
+          )}
+        >
+          <UsersThree size={20} weight={state.activeView === "org" ? "fill" : "bold"} className={state.activeView === "org" ? "text-accent" : "text-ink-secondary"} />
+          <span className="flex-1 text-[14px]">Org chart</span>
+        </button>
         <button
           onClick={() => dispatch({ type: "showRoutines" })}
           className={cn(
@@ -1244,7 +1424,11 @@ export function Sidebar({ open, onClose, onOpenDirectory }: { open: boolean; onC
           onClose={() => setRoomMenu(null)}
         />
       )}
-      {newRoom && <NewRoomPanel onClose={() => setNewRoom(false)} />}
+      {newRoom && <NewRoomPanel defaultProjectId={newRoomProjectId} onClose={() => { setNewRoom(false); setNewRoomProjectId(undefined); }} />}
+      {newProject && <NewProjectPanel onClose={() => setNewProject(false)} />}
+      {editProjectId && state.projects.find((project) => project.id === editProjectId) && (
+        <ProjectSettingsPanel project={state.projects.find((project) => project.id === editProjectId)!} onClose={() => setEditProjectId(null)} />
+      )}
       {exportTeamOpen && (
         <ExportTeamPanel
           returnFocusRef={importReturnRef}

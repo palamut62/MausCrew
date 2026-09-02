@@ -276,6 +276,49 @@ describe("RoutineManager", () => {
   });
 });
 
+describe("rejected input", () => {
+  // The HTTP layer reads `status` off the thrown error. Plain Errors came back
+  // as 500s, so "Time must use HH:MM" looked to the app like a broken harness
+  // rather than a form to fix.
+  const rejections: Array<[string, unknown]> = [
+    ["a time that is not a time", { type: "daily", time: "99:99", weekdays: [1] }],
+    ["an interval under the floor", { type: "interval", everyMinutes: 1 }],
+    ["an interval over the ceiling", { type: "interval", everyMinutes: 10_000 }],
+    ["a schedule kind that does not exist", { type: "hourly" }],
+  ];
+  for (const [label, schedule] of rejections) {
+    it(`refuses ${label} as a client error`, () => {
+      const h = harness();
+      let thrown: any;
+      try {
+        h.manager.create({ name: "x", prompt: "y", botId: "maus-1", schedule: schedule as never });
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown, `${label} should have been refused`).toBeInstanceOf(Error);
+      expect(thrown.status).toBe(400);
+    });
+  }
+
+  it("refuses an empty name and an empty prompt as client errors", () => {
+    const h = harness();
+    const daily = { type: "daily", time: "09:00", weekdays: [1] } as const;
+    for (const input of [
+      { name: "", prompt: "y", botId: "maus-1", schedule: daily },
+      { name: "x", prompt: "", botId: "maus-1", schedule: daily },
+    ]) {
+      let thrown: any;
+      try {
+        h.manager.create(input as never);
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown, `${JSON.stringify(input)} should have been refused`).toBeInstanceOf(Error);
+      expect(thrown.status).toBe(400);
+    }
+  });
+});
+
 describe("interval schedules", () => {
   it("counts from when it was saved rather than a wall-clock grid", () => {
     const start = new Date(2026, 7, 17, 8, 0, 0).getTime();

@@ -233,7 +233,9 @@ export async function provisionBox(cfg, botId, botName) {
         if (cleanup?.ok)
             throw error;
         const message = error instanceof Error ? error.message : String(error);
-        throw new Error(`${message}. The new computer could not be removed automatically; delete box ${box.id} in ascii.dev.`);
+        throw new Error(`${message}. The new computer could not be removed automatically; delete box ${box.id} in ascii.dev.`, {
+            cause: error,
+        });
     }
 }
 /** Wake the bot's box and return a FRESH desktop URL. */
@@ -306,8 +308,22 @@ const SHOT_CMD = [
     'case "$w" in ""|*[!0-9]*) w=0;; esac',
     'scrot -o -q 70 "$f" 2>/dev/null || import -window root -quality 70 "$f" 2>/dev/null || ffmpeg -y -f x11grab -i "$DISPLAY" -frames:v 1 -q:v 7 "$f" >/dev/null 2>&1',
     `if [ "$w" -gt ${PANEL_WIDTH} ] 2>/dev/null && command -v convert >/dev/null 2>&1; then convert "$f" -thumbnail ${PANEL_WIDTH}x -quality 70 "$f" 2>/dev/null || true; fi`,
-    'test -s "$f" && echo captured',
+    // The geometry rides along with the frame because the panel needs it to
+    // turn a click on a downscaled JPEG back into a screen coordinate. Asking
+    // for it separately would be a second round trip per frame.
+    'g=$(xdotool getdisplaygeometry 2>/dev/null | tr " " "x")',
+    'test -s "$f" && echo "captured ${g:-unknown}"',
 ].join("; ");
+/** `captured 1920x1080` → the display size, or null when xdotool was absent
+ * (an older image, or a box whose desktop has not started). */
+export function parseDisplayGeometry(stdout) {
+    const match = /captured\s+(\d{2,5})x(\d{2,5})/.exec(stdout);
+    if (!match)
+        return null;
+    const width = Number(match[1]);
+    const height = Number(match[2]);
+    return width && height ? { width, height } : null;
+}
 /** Read a file off the box as base64 — raw artifact bytes when the API
  * supports it (33% less transfer, no JSON envelope), else the files API. */
 async function readFileBase64(cfg, boxId, path) {
@@ -345,5 +361,6 @@ export async function screenshotBox(cfg, botId, knownBoxId) {
     const data = await readFileBase64(cfg, boxId, PANEL_PATH);
     if (!data)
         throw new Error("could not read the frame back from the box");
-    return { png: data, format: "jpeg" };
+    const display = parseDisplayGeometry(out.stdout);
+    return { png: data, format: "jpeg", ...(display ? { display } : {}) };
 }

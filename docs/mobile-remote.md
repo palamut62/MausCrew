@@ -41,6 +41,12 @@ Do not replace Serve with a public router port-forward.
   **Settings → Mobile**.
 - Provider credential changes, new pairings and device administration are
   rejected on remote sessions.
+- A paired phone may take control of a bot's **cloud** computer and drive it
+  (click, scroll, type) — that is how a sign-in or a CAPTCHA gets finished when
+  you are away from the desk, and the bot is paused while you hold control.
+  Taking over **this computer** or the Local VM stays desktop-only: those act
+  on the machine the harness runs on, which is a different risk class from a
+  disposable cloud box.
 
 The initial release uses a 30-day browser session. Re-pair the phone after that
 period or revoke it sooner from the desktop.

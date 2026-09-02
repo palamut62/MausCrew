@@ -34,6 +34,15 @@ export type GovernedAction = {
     tool?: string;
   };
   risk: ActionRisk;
+  /**
+   * The action touches credentials — a .env, an ssh key, a keychain read.
+   *
+   * Separate from `risk` on purpose. Reading a credential file is a decision
+   * a person should make; it is not the same kind of event as `rm -rf /`, and
+   * collapsing the two into "high" meant the only rule that could see it was
+   * the one that denies outright, leaving no way to say yes.
+   */
+  sensitive: boolean;
   externalWrite: boolean;
   metadata?: Record<string, unknown>;
 };
@@ -51,7 +60,7 @@ function categoryFor(tool: string): ActionCategory {
   if (SHELL_TOOLS.has(bare)) return "shell";
   if (READ_FILE_TOOLS.has(bare) || WRITE_FILE_TOOLS.has(bare) || /file|directory|folder/.test(bare)) return "filesystem";
   if (/computer|screenshot|click|type_text|press_key|scroll/.test(bare)) return "computer";
-  if (/webfetch|web_search|browser|navigate|open_url/.test(bare)) return "browser";
+  if (/webfetch|web[_-]?search|browser|navigate|open_url/.test(bare)) return "browser";
   if (/fetch|http|network|download|upload/.test(bare)) return "network";
   if (/ask_bot|delegate_bot|agent|handoff/.test(bare)) return "agent";
   if (/composio/.test(tool.toLowerCase())) return "composio";
@@ -86,7 +95,8 @@ export function normalizePermissionAction(input: {
   const category = categoryFor(input.tool);
   const intent = intentFor(input.tool, category);
   const externalWrite = externalWriteFor(category, intent, input.summary);
-  const highRisk = looksDestructive(input.summary) || looksSensitive(input.summary) || looksDestructive(input.tool);
+  const destructive = looksDestructive(input.summary) || looksDestructive(input.tool);
+  const sensitive = looksSensitive(input.summary) || looksSensitive(input.tool);
   return {
     id: input.requestId || randomUUID(),
     timestamp: new Date().toISOString(),
@@ -100,7 +110,11 @@ export function normalizePermissionAction(input: {
       ...(category === "filesystem" ? { path: input.summary } : {}),
       ...(["mcp", "composio"].includes(category) ? { tool: input.tool } : {}),
     },
-    risk: highRisk ? "high" : externalWrite || intent === "write" || intent === "execute" ? "medium" : "low",
+    // Only destructive reaches "high". Credential access is medium and
+    // carries `sensitive`, so a policy can hold it at an approval card
+    // instead of refusing it.
+    risk: destructive ? "high" : sensitive || externalWrite || intent === "write" || intent === "execute" ? "medium" : "low",
+    sensitive,
     externalWrite,
     metadata: { summary: input.summary, ...(input.raw === undefined ? {} : { raw: input.raw }) },
   };

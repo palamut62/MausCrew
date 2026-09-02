@@ -37,5 +37,15 @@ export function buildNotification(kind, bot, threadId, detail) {
     // badge in the sidebar already carries that much.
     if (kind === "done" && !body)
         return null;
-    return { kind, botId: bot.id, botName: bot.name, threadId, title, body };
+    return {
+        kind,
+        botId: bot.id,
+        botName: bot.name,
+        ...(bot.title ? { botTitle: bot.title } : {}),
+        threadId,
+        title,
+        detail: detail.trim(),
+        body,
+        ...(bot.color ? { botColor: bot.color } : {}),
+    };
 }

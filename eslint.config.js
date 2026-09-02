@@ -22,6 +22,7 @@ const IGNORED = [
   "output/**",
   "coverage/**",
   ".playwright-cli/**",
+  ".worktrees/**",
   ".mauscrew-scratch/**",
   ".tmp-wheel-inspect/**",
   "electron/vendor/**",
@@ -36,6 +37,7 @@ const UNUSED = [
 
 export default tseslint.config(
   { ignores: IGNORED },
+  { languageOptions: { parserOptions: { tsconfigRootDir: import.meta.dirname } } },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
@@ -103,8 +105,23 @@ export default tseslint.config(
     },
   },
   {
-    files: ["server/**/*.{ts,mjs}", "electron/**/*.{mjs,cjs}", "scripts/**/*.mjs", "*.ts", "*.mjs", "*.js"],
+    files: [
+      "server/**/*.{ts,mjs}",
+      "electron/**/*.{mjs,cjs}",
+      "scripts/**/*.mjs",
+      "test-sweep/scripts/**/*.mjs",
+      "*.ts",
+      "*.mjs",
+      "*.js",
+    ],
     languageOptions: { globals: { ...globals.node } },
+  },
+  {
+    // The live/probe sweep scripts run on modern Node, whose web-compatible
+    // globals (fetch, AbortController, TextDecoder, URL) are not included in
+    // the globals package's Node preset yet.
+    files: ["test-sweep/scripts/**/*.mjs"],
+    languageOptions: { globals: { ...globals.node, ...globals.browser } },
   },
   {
     // CommonJS by extension: the Electron preload and its helpers cannot be ESM.

@@ -21,13 +21,13 @@ import { ClaudeDriver, permissionSocketPath } from "./claude.ts";
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-claude-cli.ts");
 
 describe("ClaudeDriver.decodeConfig", () => {
-  it("defaults to the claude binary with acceptEdits", () => {
-    expect(ClaudeDriver.decodeConfig({})).toEqual({ cli: "claude", permissionMode: "acceptEdits" });
-    expect(ClaudeDriver.decodeConfig(undefined)).toEqual({ cli: "claude", permissionMode: "acceptEdits" });
+  it("defaults to the claude binary with manual permissions", () => {
+    expect(ClaudeDriver.decodeConfig({})).toEqual({ cli: "claude", permissionMode: "manual" });
+    expect(ClaudeDriver.decodeConfig(undefined)).toEqual({ cli: "claude", permissionMode: "manual" });
   });
 
-  it("accepts the three known permission modes", () => {
-    for (const permissionMode of ["acceptEdits", "auto", "bypassPermissions"] as const) {
+  it("accepts the four known permission modes", () => {
+    for (const permissionMode of ["acceptEdits", "auto", "manual", "bypassPermissions"] as const) {
       expect(ClaudeDriver.decodeConfig({ permissionMode }).permissionMode).toBe(permissionMode);
     }
   });
@@ -59,7 +59,7 @@ describe("ClaudeDriver.decodeConfig", () => {
       }),
     ).toEqual({
       cli: "claude",
-      permissionMode: "acceptEdits",
+      permissionMode: "manual",
       baseUrl: "https://api.deepseek.com/anthropic",
       authToken: "tok",
       models: ["deepseek-v4-pro", "deepseek-v4-flash"],
@@ -182,6 +182,57 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     // the prefix IS the mistake, so the sentence has to say so
     expect(error.message).toContain("bare model ids");
     expect(error.message).toContain("Settings → Claude gateways");
+    expect(recorder.events.at(-1)).toMatchObject({ type: "turn.completed", ok: false });
+  });
+
+  it("names the endpoint, not the model id, when deferral is what is missing", async () => {
+    // An aggregator that relays a non-Anthropic model accepts the wire format
+    // but not the deferred tools every bot here mounts. It surfaced as a raw
+    // 400, and the model-id advice next door would have sent the user to fix
+    // a gateway setting that was already correct.
+    await create("deferral-unsupported", {
+      baseUrl: "https://openrouter.ai/api",
+      models: ["deepseek/deepseek-chat", "anthropic/claude-sonnet-4.5"],
+    });
+    await instance.adapter.sendTurn({
+      threadId: "t-deferral",
+      text: "hi",
+      model: "deepseek/deepseek-chat",
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const error = recorder.events.find((e) => e.type === "runtime.error") as any;
+    expect(error).toBeTruthy();
+    expect(error.setup).toBe(true);
+    expect(error.message).toContain("deepseek/deepseek-chat");
+    expect(error.message).toMatch(/deferred tool calls/i);
+    // the way out is a different model family or engine — NOT the id list
+    expect(error.message).toMatch(/anthropic\/…|anthropic\/…/);
+    expect(error.message).not.toContain("Fix the id in Settings");
+    expect(recorder.events.at(-1)).toMatchObject({ type: "turn.completed", ok: false });
+  });
+
+  it("does not inherit user MCP servers or user settings", async () => {
+    await create();
+    const dump = join(scratch, "isolated-settings.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    await instance.adapter.sendTurn({ threadId: "t-isolated-settings", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed");
+    const { argv } = JSON.parse(readFileSync(dump, "utf8")) as { argv: string[] };
+    expect(argv).toEqual(expect.arrayContaining(["--setting-sources", "project,local", "--strict-mcp-config"]));
+  });
+
+  it("surfaces a retryable provider result so the harness can fail over", async () => {
+    await create("rate-limited");
+    await instance.adapter.sendTurn({ threadId: "t-rate-limited", text: "hi", model: "claude-sonnet-5" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const error = recorder.events.find((e) => e.type === "runtime.error");
+    expect(error).toMatchObject({
+      type: "runtime.error",
+      message: expect.stringMatching(/429.*rate limit/i),
+    });
+    expect(error).not.toMatchObject({ setup: true });
     expect(recorder.events.at(-1)).toMatchObject({ type: "turn.completed", ok: false });
   });
 

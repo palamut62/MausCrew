@@ -17,6 +17,11 @@ export interface WebhookTrigger {
   verifiedAt?: number;
   verificationSample?: WebhookVerificationSample;
   eventTypes?: string[];
+  /** GitHub and Slack sign their deliveries instead of sending a token. */
+  provider?: "github" | "slack";
+  /** Whether the platform's signing key has been saved. The key itself is
+   * never echoed back. */
+  signingSecretSet?: boolean;
 }
 
 export interface WebhookTriggerInput {
@@ -27,6 +32,7 @@ export interface WebhookTriggerInput {
   enabled?: boolean;
   verificationPending?: boolean;
   eventTypes?: string[];
+  provider?: "github" | "slack" | "";
 }
 
 export interface WebhookVerificationSample {

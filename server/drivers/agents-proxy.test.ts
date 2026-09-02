@@ -29,6 +29,9 @@ let lastDelegateBody: any = null;
 let delegateResponse: unknown = { queued: true, message: "Delegation queued." };
 let lastCreateBody: any = null;
 let createResponse: unknown = { botId: "bot-researcher", name: "Researcher" };
+let lastWorkflowBody: any = null;
+let lastWorkflowStepBody: any = null;
+let lastReviewBody: any = null;
 
 let child: ChildProcess;
 const pending = new Map<number, (msg: any) => void>();
@@ -109,6 +112,25 @@ beforeAll(async () => {
       });
       return;
     }
+    if (req.method === "POST" && ["/api/internal/workflows", "/api/internal/workflows/step", "/api/internal/review-queue"].includes(req.url ?? "")) {
+      let data = "";
+      req.on("data", (c) => (data += c));
+      req.on("end", () => {
+        const body = JSON.parse(data);
+        res.writeHead(req.url === "/api/internal/workflows" || req.url === "/api/internal/review-queue" ? 201 : 200, { "content-type": "application/json" });
+        if (req.url === "/api/internal/workflows") {
+          lastWorkflowBody = body;
+          return res.end(JSON.stringify({ workflow: { id: "workflow-1", status: "active", steps: [{ id: "step-real-1" }] } }));
+        }
+        if (req.url === "/api/internal/workflows/step") {
+          lastWorkflowStepBody = body;
+          return res.end(JSON.stringify({ workflow: { id: "workflow-1", status: "completed" } }));
+        }
+        lastReviewBody = body;
+        return res.end(JSON.stringify({ item: { id: "review-1", status: "pending" } }));
+      });
+      return;
+    }
     res.writeHead(404, { "content-type": "application/json" });
     res.end(JSON.stringify({ error: "unknown" }));
   });
@@ -159,6 +181,9 @@ describe("agents-proxy MCP surface", () => {
       "check_bot",
       "stop_bot",
       "create_bot",
+      "create_workflow",
+      "update_workflow_step",
+      "queue_review",
     ]);
   });
 
@@ -237,6 +262,58 @@ describe("agents-proxy MCP surface", () => {
       name: "Researcher",
       title: "Evidence researcher",
       depth: 0,
+    });
+  });
+
+  it("creates and advances a persistent workflow with the source identity", async () => {
+    const created = await callTool("create_workflow", {
+      title: "Ship onboarding",
+      project_id: "project-1",
+      steps: [
+        { id: "design", title: "Design", bot_id: "bot-designer", depends_on: [] },
+        { id: "build", title: "Build", bot_id: "bot-builder", depends_on: ["design"] },
+      ],
+    });
+    expect(created.result.content[0].text).toContain("Workflow created");
+    expect(lastWorkflowBody).toMatchObject({
+      fromBotId: "bot-asker",
+      fromThreadId: "thread-asker-routine",
+      projectId: "project-1",
+      steps: [{ id: "design", assigneeBotId: "bot-designer" }, { id: "build", dependsOn: ["design"] }],
+    });
+
+    const updated = await callTool("update_workflow_step", {
+      workflow_id: "workflow-1",
+      step_id: "step-real-1",
+      status: "done",
+      output: "Approved implementation",
+    });
+    expect(updated.result.content[0].text).toContain("completed");
+    expect(lastWorkflowStepBody).toMatchObject({
+      fromBotId: "bot-asker",
+      fromThreadId: "thread-asker-routine",
+      workflowId: "workflow-1",
+      stepId: "step-real-1",
+      status: "done",
+      output: "Approved implementation",
+    });
+  });
+
+  it("queues outbound content without claiming it was sent", async () => {
+    const result = await callTool("queue_review", {
+      title: "Release note",
+      content: "Version is ready.",
+      target: "Slack #releases",
+      project_id: "project-1",
+    });
+    expect(result.result.content[0].text).toContain("It has not been sent");
+    expect(lastReviewBody).toMatchObject({
+      fromBotId: "bot-asker",
+      fromThreadId: "thread-asker-routine",
+      title: "Release note",
+      content: "Version is ready.",
+      target: "Slack #releases",
+      projectId: "project-1",
     });
   });
 
@@ -357,5 +434,89 @@ describe("agents-proxy MCP surface", () => {
   it("requires bot_id and message", async () => {
     const res = await callTool("ask_bot", { bot_id: "", message: "" });
     expect(res.result.isError).toBe(true);
+  });
+});
+
+// A turn another bot started: the recursion cap must take away the tools that
+// could start a third turn, and nothing else. Before this, it took away the
+// whole server — so a delegated teammate could not mark the workflow step it
+// had just been handed, or queue outbound text for the user to approve.
+describe("at the recursion cap", () => {
+  let capped: ChildProcess;
+  const cappedPending = new Map<number, (msg: any) => void>();
+  let cappedId = 500;
+
+  const cappedRpc = (method: string, params?: unknown): Promise<any> =>
+    new Promise((resolve, reject) => {
+      const id = cappedId++;
+      cappedPending.set(id, resolve);
+      capped.stdin!.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+      setTimeout(() => {
+        if (cappedPending.delete(id)) reject(new Error(`${method} timed out`));
+      }, 10_000).unref?.();
+    });
+
+  beforeAll(async () => {
+    capped = spawn(process.execPath, [PROXY], {
+      env: {
+        ...process.env,
+        MAUSCREW_HARNESS_URL: `http://127.0.0.1:${stubPort}`,
+        MAUSCREW_BOT_ID: "bot-asker",
+        MAUSCREW_THREAD_ID: "thread-asker-routine",
+        MAUSCREW_COMMS_TOKEN: TOKEN,
+        MAUSCREW_TURN_DEPTH: "1",
+        MAUSCREW_COMMS_MAX_DEPTH: "1",
+      },
+      stdio: ["pipe", "pipe", "inherit"],
+    });
+    let buf = "";
+    capped.stdout!.on("data", (c) => {
+      buf += c;
+      let nl;
+      while ((nl = buf.indexOf("\n")) !== -1) {
+        const line = buf.slice(0, nl);
+        buf = buf.slice(nl + 1);
+        if (!line.trim()) continue;
+        const msg = JSON.parse(line);
+        cappedPending.get(msg.id)?.(msg);
+        cappedPending.delete(msg.id);
+      }
+    });
+    await cappedRpc("initialize", { protocolVersion: "2024-11-05" });
+  });
+
+  afterAll(() => {
+    capped?.kill();
+  });
+
+  it("advertises only the tools that report on work already assigned", async () => {
+    const list = await cappedRpc("tools/list");
+    expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual(["update_workflow_step", "queue_review"]);
+  });
+
+  it("refuses every tool that would start another turn", async () => {
+    for (const name of ["ask_bot", "ask_bots", "delegate_bot", "create_bot", "list_bots", "create_workflow"]) {
+      const res = await cappedRpc("tools/call", { name, arguments: { bot_id: "bot-helper", message: "ping" } });
+      expect(res.error?.code, `${name} should be refused at the cap`).toBe(-32602);
+    }
+    expect(lastAskBody, "no peer turn may be started from a capped turn").toBeTruthy();
+  });
+
+  it("still lets the assignee report its step and queue a review", async () => {
+    lastWorkflowStepBody = null;
+    lastReviewBody = null;
+    const step = await cappedRpc("tools/call", {
+      name: "update_workflow_step",
+      arguments: { workflow_id: "wf-1", step_id: "step-1", status: "done", output: "collected" },
+    });
+    expect(step.result.isError).toBeFalsy();
+    expect(lastWorkflowStepBody).toMatchObject({ workflowId: "wf-1", stepId: "step-1", status: "done" });
+
+    const review = await cappedRpc("tools/call", {
+      name: "queue_review",
+      arguments: { title: "Note", content: "text", target: "Slack #releases" },
+    });
+    expect(review.result.isError).toBeFalsy();
+    expect(lastReviewBody).toMatchObject({ title: "Note", target: "Slack #releases" });
   });
 });

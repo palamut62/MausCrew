@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { providerEventName, slackUrlVerification } from "./webhook-signature.js";
 export const MAX_WEBHOOK_BODY_BYTES = 256 * 1024;
 function json(res, status, body, close = false) {
     res.writeHead(status, {
@@ -96,6 +97,37 @@ export function createWebhookIngressHandler(manager) {
         try {
             const pathSecret = match[2] ? decodeURIComponent(match[2]) : "";
             const secret = pathSecret || bearerSecret(req);
+            const provider = manager.providerFor(match[1]);
+            if (provider) {
+                // A signature covers the raw bytes, so the body has to be read before
+                // it can be checked — the size cap in readRawBody is what keeps that
+                // from being a way in.
+                const raw = await readRawBody(req);
+                const signed = manager.verifySigned(match[1], { rawBody: raw, header: (name) => header(req, name) });
+                if (!signed.ok) {
+                    manager.recordRejected(match[1], 401, signed.reason ?? "signature check failed", {
+                        contentType: header(req, "content-type"),
+                        eventName: eventName(req),
+                        deliveryId: deliveryId(req),
+                    });
+                    return json(res, 401, { error: signed.reason ?? "signature check failed" });
+                }
+                const contentType = header(req, "content-type")?.split(";")[0]?.trim().toLowerCase() ?? "application/json";
+                const payload = parsePayload(raw, contentType);
+                // Slack proves the URL exists before it will send events. Answering
+                // the handshake here keeps it from becoming a bot turn.
+                const challenge = provider === "slack" ? slackUrlVerification(payload) : null;
+                if (challenge)
+                    return json(res, 200, { challenge });
+                const result = manager.receive(match[1], "", {
+                    payload,
+                    contentType,
+                    eventName: providerEventName(provider, { rawBody: raw, header: (name) => header(req, name) }, payload),
+                    userAgent: header(req, "user-agent"),
+                    deliveryId: deliveryId(req),
+                }, { signatureVerified: true });
+                return json(res, 202, { accepted: true, ...result });
+            }
             // Reject bad capability URLs before buffering or parsing attacker input.
             if (!manager.authorize(match[1], secret)) {
                 manager.recordRejected(match[1], 401, "Invalid webhook URL or secret", {
