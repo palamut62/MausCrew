@@ -4,6 +4,7 @@ import { ArrowBendUpLeft, ArrowClockwise, ArrowDown, Brain, CaretDown, CaretLeft
 import {
   useStore,
   useStreaming,
+  formatDateTime,
   formatTime,
   messageVersions,
   visibleMessages,
@@ -371,6 +372,9 @@ function Bubble({
               <ChatMarkdown text={text} />
             </MessageBoundary>
           )}
+          <div className="mt-2 border-t border-hairline/60 pt-1.5 text-right font-mono text-[10px] tabular-nums tracking-tight text-ink-secondary/70">
+            {formatDateTime(message.at)}
+          </div>
         </div>
         {!user && (
           <div className="flex flex-col gap-0.5 self-end pb-0.5">
@@ -391,12 +395,6 @@ function Bubble({
           </div>
         )}
         {!user && message.kind === "text" && <ReactionBar threadId={bot.threadId} message={message} />}
-        {/* bot rows carry their time in the role stamp already */}
-        {user && (
-          <span className="order-first mr-1 self-end pb-1 font-mono text-[11px] tabular-nums tracking-tight text-ink-secondary/70 opacity-0 pointer-coarse:opacity-100 transition-opacity group-hover:opacity-100">
-            {formatTime(message.at)}
-          </span>
-        )}
       </div>
       <ReactionChips threadId={bot.threadId} message={message} align={user ? "right" : "left"} />
       {versions.length > 1 && (

@@ -1778,3 +1778,14 @@ export function formatTime(at: number) {
     minute: "2-digit",
   });
 }
+
+/** Compact, locale-aware timestamp for a conversation card. */
+export function formatDateTime(at: number) {
+  return new Date(at).toLocaleString([], {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}

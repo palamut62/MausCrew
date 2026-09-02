@@ -7,6 +7,7 @@ import { ArrowDown, CaretDown, PushPin } from "@phosphor-icons/react";
 import {
   useStore,
   useStreaming,
+  formatDateTime,
   formatTime,
   type Bot,
   type Group,
@@ -100,14 +101,11 @@ const Transcript = memo(function Transcript({
                   title={new Date(m.at).toLocaleString()}
                 >
                   {user ? m.text : <ChatMarkdown text={m.text} />}
+                  <div className="mt-2 border-t border-hairline/60 pt-1.5 text-right font-mono text-[10px] tabular-nums tracking-tight text-ink-secondary/70">
+                    {formatDateTime(m.at)}
+                  </div>
                 </div>
                 {!user && <ReactionBar threadId={group.threadId} message={m} />}
-                {/* bot rows carry their time in the cluster stamp already */}
-                {user && (
-                  <span className="self-end pb-1 font-mono text-[11px] tabular-nums tracking-tight text-ink-secondary/70 opacity-0 pointer-coarse:opacity-100 transition-opacity group-hover:opacity-100">
-                    {formatTime(m.at)}
-                  </span>
-                )}
               </div>
               <ReactionChips threadId={group.threadId} message={m} members={members} align={user ? "right" : "left"} />
             </div>
