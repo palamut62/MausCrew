@@ -577,7 +577,12 @@ describe("harness HTTP API", () => {
       await stream.until((frame) => frame.kind === "hello");
       const imported = await api("POST", "/api/teams/import", importManifest);
       expect(imported.status).toBe(201);
-      expect(imported.body.bots.map((bot: { name: string }) => bot.name)).toEqual(["Mira", "Scout"]);
+      // Imported INTO the workspace they were exported from, so both names are
+      // already taken and the copies get numbered. A team file opened in a
+      // workspace that has neither name keeps them exactly as written — the
+      // rule only fires on a collision, because two bots with one name make
+      // `@Mira` resolve to whichever the matcher reaches first.
+      expect(imported.body.bots.map((bot: { name: string }) => bot.name)).toEqual(["Mira 2", "Scout 2"]);
       expect(imported.body.bots.every((bot: { id: string }) => ![first.id, second.id].includes(bot.id))).toBe(true);
       expect(imported.body.bots[0]).not.toHaveProperty("alwaysAllow");
       expect(imported.body.group.memberIds).toEqual(imported.body.bots.map((bot: { id: string }) => bot.id));
@@ -601,6 +606,65 @@ describe("harness HTTP API", () => {
       }
     } finally {
       stream.close();
+    }
+  });
+
+  it("packages a bot's skills and memory, and installs exactly what the file says", async () => {
+    // A shared bot that carries only its prompt arrives able to describe the
+    // job and unable to do it. The package carries the playbooks too, and the
+    // install writes them directly: no turn is run, so what the receiving
+    // user reviewed is what ends up on disk.
+    const source = (await api("POST", "/api/bots")).body.bot;
+    await api("PATCH", `/api/bots/${source.id}`, { name: "Packager", title: "Research" });
+    expect(
+      (await api("POST", `/api/bots/${source.id}/skills`, {
+        name: "connect-navimow",
+        description: "Connect a Segway Navimow",
+        whenToUse: "use this when the user needs to connect a mower",
+        instructions: "# Connect\n\nSign in, then finish first-run setup.",
+      })).status,
+    ).toBe(201);
+
+    // skills ride along by default; memory only when asked for
+    const withoutMemory = await api("POST", "/api/teams/export", { name: "Pack", memberIds: [source.id] });
+    expect(withoutMemory.body.team.members[0].skills).toHaveLength(1);
+    expect(withoutMemory.body.team.members[0]).not.toHaveProperty("memory");
+
+    const optedOut = await api("POST", "/api/teams/export", {
+      name: "Pack",
+      memberIds: [source.id],
+      include: { skills: false },
+    });
+    expect(optedOut.body.team.members[0]).not.toHaveProperty("skills");
+
+    // a file that also carries memory installs it as the bot's own profile
+    const manifest = structuredClone(withoutMemory.body);
+    manifest.team.members[0].memory = "Never mow before confirming the lawn is clear.";
+
+    const imported = await api("POST", "/api/teams/import", manifest);
+    expect(imported.status).toBe(201);
+    expect(imported.body.installed).toEqual({ skills: 1, memories: 1 });
+
+    const copy = imported.body.bots[0];
+    const installedSkills = await api("GET", `/api/bots/${copy.id}/skills`);
+    expect(installedSkills.body.skills.map((skill: { id: string }) => skill.id)).toEqual(["connect-navimow"]);
+    expect(installedSkills.body.skills[0].whenToUse).toContain("connect a mower");
+    expect((await api("GET", `/api/bots/${copy.id}/memory`)).body.profile).toBe(
+      "Never mow before confirming the lawn is clear.",
+    );
+    // the sender's own bot is untouched by the round trip
+    expect((await api("GET", `/api/bots/${source.id}/memory`)).body.profile).toBe("");
+
+    // a package the parser rejects creates nothing at all
+    const poisoned = structuredClone(manifest);
+    poisoned.team.members[0].skills = [{ name: "../escape", description: "x", instructions: "y" }];
+    const before = (await api("GET", "/api/bots")).body.bots.length;
+    expect((await api("POST", "/api/teams/import", poisoned)).status).toBe(400);
+    expect((await api("GET", "/api/bots")).body.bots).toHaveLength(before);
+
+    expect((await api("DELETE", `/api/groups/${imported.body.group.id}`)).status).toBe(200);
+    for (const bot of [source, ...imported.body.bots]) {
+      expect((await api("DELETE", `/api/bots/${bot.id}`)).status).toBe(200);
     }
   });
 

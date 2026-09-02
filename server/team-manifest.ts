@@ -17,6 +17,16 @@ const COLORS: readonly MausColor[] = [
   "coral",
 ];
 
+/** A playbook, in the same shape the workspace `SKILL.md` already holds.
+ * Deliberately the file's own fields and nothing more: a skill that survives
+ * the round trip is one the Skill Center can edit afterwards. */
+export interface TeamManifestSkill {
+  name: string;
+  description: string;
+  whenToUse?: string;
+  instructions: string;
+}
+
 export interface TeamManifestMember {
   key: string;
   name: string;
@@ -25,7 +35,30 @@ export interface TeamManifestMember {
   appearance: {
     color: MausColor;
   };
+  /** What the bot can DO, not just what it was told to be. A shared file
+   * without these makes a bot that reads the part and cannot play it. */
+  skills?: TeamManifestSkill[];
+  /** The bot's own memory profile, as the prose it is stored as.
+   *
+   * Only the profile: the shared memory file is the user's own words about
+   * their setup and the journal is a running record of their work, and
+   * neither is the bot's to carry into someone else's machine. Even this one
+   * is opt-in at export — it is the field most likely to hold something
+   * personal, and a share should never move that by default. */
+  memory?: string;
 }
+
+/** Skills are procedures, so a long one is normal; a hundred of them in one
+ * shared file is not, and neither is a memory the size of a book. */
+const MAX_SKILLS_PER_MEMBER = 40;
+const MAX_SKILL_NAME = 64;
+const MAX_SKILL_DESCRIPTION = 500;
+const MAX_SKILL_WHEN_TO_USE = 1_000;
+const MAX_SKILL_INSTRUCTIONS = 128 * 1024;
+const MAX_MEMORY = 16_000;
+/** Same rule as the skill store's own directory names: a manifest must not be
+ * able to describe a skill the Skill Center could then never open. */
+const SKILL_NAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 export type TeamManifestResponder =
   | { kind: "member"; member: string }
@@ -53,6 +86,10 @@ interface ExportableBot {
   title: string;
   description: string;
   color: MausColor;
+  /** Resolved by the caller, which owns the workspace and the memory store.
+   * Absent means "the user chose not to share this", not "there is none". */
+  skills?: TeamManifestSkill[];
+  memory?: string;
 }
 
 interface ExportableTeam {
@@ -78,6 +115,37 @@ function optionalString(value: unknown, field: string, max: number): string | un
   const result = value.trim();
   if (result.length > max) throw new Error(`${field} is too long`);
   return result || undefined;
+}
+
+/** The skills a member ships, or undefined when it ships none.
+ *
+ * Absent and empty are kept distinct all the way through: a file that says
+ * nothing about skills and a file that says "no skills" both install nothing,
+ * but only the second is a claim the sender made. */
+function parseSkills(value: unknown, field: string): TeamManifestSkill[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) throw new Error(`${field} must be a list`);
+  if (value.length > MAX_SKILLS_PER_MEMBER) {
+    throw new Error(`${field} may hold at most ${MAX_SKILLS_PER_MEMBER} skills`);
+  }
+  const seen = new Set<string>();
+  return value.map((raw, index): TeamManifestSkill => {
+    const at = `${field}[${index}]`;
+    if (!isRecord(raw)) throw new Error(`${at} must be an object`);
+    const name = requiredString(raw.name, `${at}.name`, MAX_SKILL_NAME);
+    if (!SKILL_NAME_RE.test(name)) {
+      throw new Error(`${at}.name must be lowercase kebab-case`);
+    }
+    if (seen.has(name)) throw new Error(`Duplicate skill: ${name}`);
+    seen.add(name);
+    const whenToUse = optionalString(raw.whenToUse, `${at}.whenToUse`, MAX_SKILL_WHEN_TO_USE);
+    return {
+      name,
+      description: requiredString(raw.description, `${at}.description`, MAX_SKILL_DESCRIPTION),
+      ...(whenToUse ? { whenToUse } : {}),
+      instructions: requiredString(raw.instructions, `${at}.instructions`, MAX_SKILL_INSTRUCTIONS),
+    };
+  });
 }
 
 /** Parse an untrusted shared file into the small, portable subset we support. */
@@ -119,6 +187,8 @@ export function parseTeamManifest(value: unknown): TeamManifestV1 {
     // exported before the mascot engine was retired still carry it, and an
     // unknown-field error would make those files unimportable for no gain.
 
+    const skills = parseSkills(raw.skills, `${field}.skills`);
+    const memory = optionalString(raw.memory, `${field}.memory`, MAX_MEMORY);
     return {
       key,
       name: requiredString(raw.name, `${field}.name`, 100),
@@ -127,6 +197,8 @@ export function parseTeamManifest(value: unknown): TeamManifestV1 {
       appearance: {
         color: appearance.color as MausColor,
       },
+      ...(skills ? { skills } : {}),
+      ...(memory ? { memory } : {}),
     };
   });
 
@@ -196,6 +268,8 @@ export function createTeamManifest(team: ExportableTeam, bots: ExportableBot[]):
       appearance: {
         color: bot.color,
       },
+      ...(bot.skills?.length ? { skills: bot.skills } : {}),
+      ...(bot.memory?.trim() ? { memory: bot.memory } : {}),
     };
   });
 

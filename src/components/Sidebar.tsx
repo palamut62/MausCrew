@@ -10,6 +10,7 @@ import { botShareLink } from "@/lib/share-bot";
 import { useUpdaterState } from "@/lib/updater";
 import { cn } from "@/lib/cn";
 import { downloadSelectedTeam } from "@/lib/team-files";
+import { importPreview, withoutUnwanted, type PendingTeamImport } from "@/lib/team-package";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { SidebarUpdateCard } from "./UpdateBanner";
 
@@ -270,49 +271,6 @@ function RoomContextMenu({
   );
 }
 
-interface PendingTeamImport {
-  manifest: unknown;
-  name: string;
-  roomName: string;
-  members: Array<{ name: string; title: string }>;
-}
-
-function importPreview(manifest: unknown): PendingTeamImport {
-  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
-    throw new Error("This file does not contain a team.");
-  }
-  const root = manifest as Record<string, unknown>;
-  if (root.format !== "mauscrew.team" && root.format !== "openmaus.team") {
-    throw new Error("This is not a MausCrew team file.");
-  }
-  if (root.version !== 1) throw new Error(`Team file version ${String(root.version)} is not supported.`);
-  if (!root.team || typeof root.team !== "object" || Array.isArray(root.team)) {
-    throw new Error("This team file is missing its team definition.");
-  }
-  const team = root.team as Record<string, unknown>;
-  if (typeof team.name !== "string" || !team.name.trim()) throw new Error("This team does not have a name.");
-  if (!Array.isArray(team.members) || team.members.length === 0) throw new Error("This team has no members.");
-  const members = team.members.map((member, index) => {
-    if (!member || typeof member !== "object" || Array.isArray(member)) {
-      throw new Error(`Team member ${index + 1} is invalid.`);
-    }
-    const value = member as Record<string, unknown>;
-    if (typeof value.name !== "string" || !value.name.trim()) {
-      throw new Error(`Team member ${index + 1} does not have a name.`);
-    }
-    return {
-      name: value.name.trim(),
-      title: typeof value.title === "string" ? value.title.trim() : "",
-    };
-  });
-  const room = team.room;
-  const roomName =
-    room && typeof room === "object" && !Array.isArray(room) && typeof (room as Record<string, unknown>).name === "string"
-      ? String((room as Record<string, unknown>).name).trim()
-      : team.name.trim();
-  return { manifest, name: team.name.trim(), roomName, members };
-}
-
 function ImportTeamPanel({
   pending,
   onClose,
@@ -329,6 +287,14 @@ function ImportTeamPanel({
   const [error, setError] = useState("");
   const dialogRef = useRef<HTMLDivElement>(null);
   const confirmRef = useRef<HTMLButtonElement>(null);
+  const skillCount = pending.members.reduce((total, member) => total + member.skills.length, 0);
+  const memoryCount = pending.members.filter((member) => member.memory).length;
+  // Both default to on: the reader opened a file they meant to install, and a
+  // package that arrives half-empty because of a default is a worse surprise
+  // than one whose contents are listed right above the button.
+  const [takeSkills, setTakeSkills] = useState(true);
+  const [takeMemory, setTakeMemory] = useState(true);
+  const [open, setOpen] = useState<number | null>(null);
 
   useEffect(() => {
     confirmRef.current?.focus();
@@ -373,10 +339,13 @@ function ImportTeamPanel({
     setWorking(true);
     setError("");
     try {
+      // Dropping content here rather than asking the server to skip it keeps
+      // one rule true end to end: the file that arrives is exactly what gets
+      // installed. What the reader unticked never reaches the machine.
       const response = (await api("/api/teams/import", {
         method: "POST",
-        body: JSON.stringify(pending.manifest),
-      })) as { bots: Bot[]; group: Group };
+        body: JSON.stringify(withoutUnwanted(pending.manifest, { skills: takeSkills, memory: takeMemory })),
+      })) as { bots: Bot[]; group: Group; installed?: { skills: number; memories: number } };
       for (const bot of response.bots) dispatch({ type: "botAdded", bot });
       dispatch({ type: "groupPatched", group: response.group });
       dispatch({ type: "select", id: response.group.id });
@@ -407,17 +376,79 @@ function ImportTeamPanel({
           This creates {pending.members.length} new {pending.members.length === 1 ? "bot" : "bots"} and the room “{pending.roomName}”.
         </div>
         <div className="mt-4 max-h-64 space-y-1 overflow-y-auto rounded-xl bg-raised/50 p-2">
-          {pending.members.map((member, index) => (
-            <div key={`${member.name}-${index}`} className="flex items-baseline gap-2 rounded-lg px-2.5 py-2">
-              <span className="min-w-0 flex-1 truncate text-[14px] font-medium text-ink">{member.name}</span>
-              <span className="max-w-[190px] truncate text-[12.5px] text-ink-secondary">
-                {member.title || "General assistant"}
-              </span>
-            </div>
-          ))}
+          {pending.members.map((member, index) => {
+            const carries = member.skills.length > 0 || Boolean(member.memory);
+            return (
+              <div key={`${member.name}-${index}`} className="rounded-lg">
+                <button
+                  type="button"
+                  disabled={!carries}
+                  onClick={() => setOpen(open === index ? null : index)}
+                  className={cn(
+                    "flex w-full items-baseline gap-2 rounded-lg px-2.5 py-2 text-left",
+                    carries && "hover:bg-raised",
+                  )}
+                >
+                  <span className="min-w-0 flex-1 truncate text-[14px] font-medium text-ink">{member.name}</span>
+                  {member.skills.length > 0 && (
+                    <span className="shrink-0 rounded-md bg-inset px-1.5 py-0.5 font-mono text-[10px] text-ink-secondary">
+                      {member.skills.length} {member.skills.length === 1 ? "skill" : "skills"}
+                    </span>
+                  )}
+                  {member.memory && (
+                    <span className="shrink-0 rounded-md bg-inset px-1.5 py-0.5 font-mono text-[10px] text-ink-secondary">
+                      memory
+                    </span>
+                  )}
+                  <span className="max-w-[150px] truncate text-[12.5px] text-ink-secondary">
+                    {member.title || "General assistant"}
+                  </span>
+                </button>
+                {open === index && carries && (
+                  // The package's own words. A reader who cannot see what a
+                  // shared bot will be able to do has not really reviewed it.
+                  <div className="space-y-2 px-2.5 pb-2.5">
+                    {member.skills.map((skill) => (
+                      <div key={skill.name} className="rounded-lg bg-inset/60 px-2.5 py-1.5">
+                        <div className="font-mono text-[11.5px] text-ink">{skill.name}</div>
+                        {skill.whenToUse && (
+                          <div className="mt-0.5 text-[11.5px] leading-relaxed text-ink-secondary">{skill.whenToUse}</div>
+                        )}
+                      </div>
+                    ))}
+                    {member.memory && (
+                      <div className="rounded-lg bg-inset/60 px-2.5 py-1.5">
+                        <div className="text-[11px] uppercase tracking-[0.1em] text-ink-secondary">Memory</div>
+                        <div className="mt-0.5 max-h-28 overflow-y-auto whitespace-pre-wrap text-[11.5px] leading-relaxed text-ink-secondary">
+                          {member.memory}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
+        {(skillCount > 0 || memoryCount > 0) && (
+          <div className="mt-3 space-y-1.5 rounded-xl border border-hairline px-3 py-2.5">
+            {skillCount > 0 && (
+              <label className="flex cursor-pointer items-center gap-2.5 text-[12.5px] text-ink">
+                <input type="checkbox" checked={takeSkills} onChange={(event) => setTakeSkills(event.target.checked)} className="accent-accent" />
+                Install {skillCount} {skillCount === 1 ? "skill" : "skills"}
+              </label>
+            )}
+            {memoryCount > 0 && (
+              <label className="flex cursor-pointer items-center gap-2.5 text-[12.5px] text-ink">
+                <input type="checkbox" checked={takeMemory} onChange={(event) => setTakeMemory(event.target.checked)} className="accent-accent" />
+                Install the memory {memoryCount === 1 ? "this bot brings" : "these bots bring"}
+              </label>
+            )}
+          </div>
+        )}
         <div className="mt-3 text-[12.5px] leading-relaxed text-ink-secondary">
           The bots will use your default engine. Conversations, permissions, and computer access are never imported.
+          {skillCount > 0 && " Nothing runs during the install."}
         </div>
         {error && <div role="alert" className="mt-3 rounded-lg bg-danger/10 px-3 py-2 text-[12.5px] text-danger">{error}</div>}
         <div className="mt-5 flex justify-end gap-2">
@@ -456,6 +487,11 @@ function ExportTeamPanel({
   const { state } = useStore();
   const [name, setName] = useState("");
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  // Skills make a shared bot able to do the job rather than only describe it,
+  // so they travel by default. Memory is the field most likely to hold
+  // something about this user's own life, so it never leaves unasked.
+  const [withSkills, setWithSkills] = useState(true);
+  const [withMemory, setWithMemory] = useState(false);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
   const bots = state.bots.filter((bot) => !bot.hidden);
@@ -516,7 +552,7 @@ function ExportTeamPanel({
     setWorking(true);
     setError("");
     try {
-      const exported = await downloadSelectedTeam(teamName, [...picked]);
+      const exported = await downloadSelectedTeam(teamName, [...picked], { skills: withSkills, memory: withMemory });
       track("team_exported", { members: exported.members });
       onExported(exported.name);
     } catch (cause) {
@@ -590,6 +626,17 @@ function ExportTeamPanel({
               </button>
             );
           })}
+        </div>
+        <div className="mt-3 space-y-1.5 rounded-xl border border-hairline px-3 py-2.5">
+          <label className="flex cursor-pointer items-center gap-2.5 text-[12.5px] text-ink">
+            <input type="checkbox" checked={withSkills} onChange={(event) => setWithSkills(event.target.checked)} className="accent-accent" />
+            Include their skills
+          </label>
+          <label className="flex cursor-pointer items-center gap-2.5 text-[12.5px] text-ink">
+            <input type="checkbox" checked={withMemory} onChange={(event) => setWithMemory(event.target.checked)} className="accent-accent" />
+            Include what they remember
+            <span className="text-[11.5px] text-ink-secondary">— may describe you</span>
+          </label>
         </div>
         <div className="mt-3 text-[12.5px] leading-relaxed text-ink-secondary">
           Messages, permissions, credentials, engines, and computer access are never included.

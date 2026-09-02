@@ -28,14 +28,21 @@ function downloadManifest(manifest: ExportedTeam): { name: string; members: numb
   return { name: manifest.team.name, members: manifest.team.members.length };
 }
 
-/** Export an ad-hoc selection of bots without creating a room first. */
+/** Export an ad-hoc selection of bots without creating a room first.
+ *
+ * `include` decides how much of each bot travels. Skills are procedures the
+ * user wrote on purpose and make a shared bot able to do the job rather than
+ * only describe it, so they default to on. Memory is the one field likely to
+ * hold something about the user's own life; it travels only when this screen
+ * says so. */
 export async function downloadSelectedTeam(
   name: string,
   memberIds: string[],
+  include: { skills: boolean; memory: boolean } = { skills: true, memory: false },
 ): Promise<{ name: string; members: number }> {
   const manifest = (await api("/api/teams/export", {
     method: "POST",
-    body: JSON.stringify({ name, memberIds }),
+    body: JSON.stringify({ name, memberIds, include }),
   })) as ExportedTeam;
   return downloadManifest(manifest);
 }

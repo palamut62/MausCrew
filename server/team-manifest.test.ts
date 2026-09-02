@@ -175,3 +175,99 @@ describe("team manifests", () => {
     ).toThrow("at most 50 members");
   });
 });
+
+// A shared bot that carries only its prompt arrives able to describe the job
+// and unable to do it. These fields are what make a package a package: the
+// playbooks it can run, and — only when the sender says so — what it knows.
+describe("packaged skills and memory", () => {
+  const skill = (name: string) => ({
+    name,
+    description: `What ${name} does`,
+    whenToUse: `use this when the user asks for ${name}`,
+    instructions: `# ${name}\n\nDo the thing.`,
+  });
+
+  it("carries a member's skills and memory through a round trip", () => {
+    const manifest = createTeamManifest(
+      { name: "Solo", memberIds: ["bot-a"], bulletin: "", defaultResponder: { kind: "everyone" } },
+      [
+        {
+          id: "bot-a",
+          name: "Scout",
+          title: "Research",
+          description: "Finds evidence",
+          color: "cyan",
+          skills: [skill("connect-navimow"), skill("control-navimow")],
+          memory: "Never mow before confirming the lawn is clear.",
+        },
+      ],
+    );
+    const member = manifest.team.members[0]!;
+    expect(member.skills?.map((s) => s.name)).toEqual(["connect-navimow", "control-navimow"]);
+    expect(member.memory).toBe("Never mow before confirming the lawn is clear.");
+    // and the file survives being read back as an untrusted one
+    expect(parseTeamManifest(manifest).team.members[0]!.skills).toHaveLength(2);
+  });
+
+  it("omits both fields when the sender did not share them", () => {
+    const manifest = createTeamManifest(
+      { name: "Solo", memberIds: ["bot-a"], bulletin: "", defaultResponder: { kind: "everyone" } },
+      [{ id: "bot-a", name: "Scout", title: "", description: "", color: "cyan" }],
+    );
+    const member = manifest.team.members[0]!;
+    expect(member).not.toHaveProperty("skills");
+    expect(member).not.toHaveProperty("memory");
+  });
+
+  it("still reads a file written before packages existed", () => {
+    const legacy = {
+      format: "mauscrew.team",
+      version: 1,
+      team: {
+        name: "Old",
+        members: [{ key: "a", name: "Ada", title: "", description: "", appearance: { color: "green" } }],
+        room: { name: "Old", bulletin: "", defaultResponder: { kind: "everyone" } },
+      },
+    };
+    const parsed = parseTeamManifest(legacy);
+    expect(parsed.team.members[0]!.skills).toBeUndefined();
+    expect(parsed.team.members[0]!.memory).toBeUndefined();
+  });
+
+  const withSkills = (skills: unknown) => ({
+    format: "mauscrew.team",
+    version: 1,
+    team: {
+      name: "T",
+      members: [{ key: "a", name: "Ada", title: "", description: "", appearance: { color: "green" }, skills }],
+      room: { name: "T", bulletin: "", defaultResponder: { kind: "everyone" } },
+    },
+  });
+
+  it("refuses a skill name the Skill Center could never open", () => {
+    // the store's directories are kebab-case; a manifest must not be able to
+    // describe a skill that cannot exist as a folder
+    expect(() => parseTeamManifest(withSkills([skill("../escape")]))).toThrow(/kebab-case/);
+    expect(() => parseTeamManifest(withSkills([skill("Not Kebab")]))).toThrow(/kebab-case/);
+  });
+
+  it("refuses a duplicate skill, an oversized bundle and a malformed entry", () => {
+    expect(() => parseTeamManifest(withSkills([skill("dup"), skill("dup")]))).toThrow(/Duplicate skill/);
+    expect(() => parseTeamManifest(withSkills(Array.from({ length: 41 }, (_, i) => skill(`s-${i}`))))).toThrow(/at most/);
+    expect(() => parseTeamManifest(withSkills([{ name: "no-body", description: "x" }]))).toThrow(/instructions is required/);
+    expect(() => parseTeamManifest(withSkills("not-a-list"))).toThrow(/must be a list/);
+  });
+
+  it("refuses a memory larger than the field allows", () => {
+    const oversized = {
+      format: "mauscrew.team",
+      version: 1,
+      team: {
+        name: "T",
+        members: [{ key: "a", name: "Ada", title: "", description: "", appearance: { color: "green" }, memory: "x".repeat(16_001) }],
+        room: { name: "T", bulletin: "", defaultResponder: { kind: "everyone" } },
+      },
+    };
+    expect(() => parseTeamManifest(oversized)).toThrow(/too long/);
+  });
+});

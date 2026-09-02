@@ -183,6 +183,13 @@ work in at one click; each arrives as an ordinary team you can edit, export, and
 can be handed to someone else with **Copy share link** — a `mauscrew://` link the receiving app shows for
 review before it creates anything, carrying the profile and nothing else.
 
+An exported team is a **package**, not just a name and a prompt: it carries each bot's skills, and — only
+when the export screen says so — what that bot remembers. The receiving window lists what is inside before
+anything is created (every playbook, what it claims to be for, the memory in full) and lets you decline
+either part; what you declined never reaches the machine. The install then writes exactly that: skill files
+into the bot's own workspace, memory into its profile. No turn is run, so a shared bot cannot talk itself
+into a skill the sender never wrote.
+
 ### 📎 Replies, artifacts, and per-server MCP rules
 
 Reply to any message and the quote rides with the turn, so the bot answers the thing you pointed at rather

@@ -12,6 +12,29 @@ const NAMES = [
     "Bramble", "Fig", "Juniper", "Moss", "Pebble", "Rio", "Skye", "Tuli",
     "Ursa", "Yuki", "Zuko", "Momo", "Kiwi", "Plum", "Sprout", "Turnip",
 ];
+/**
+ * The requested name, or the first free numbered variant of it.
+ *
+ * Two bots called "Panko" are not a cosmetic problem: rooms address each
+ * other by name, so `@Panko` silently resolves to whichever the matcher sees
+ * first and the other is unreachable. Importing the same team file twice —
+ * or a Chief proposing a specialist a teammate already covers — used to
+ * produce exactly that. The auto-namer above already numbers a collision;
+ * this applies the same rule to a name someone asked for by hand.
+ */
+export function uniqueBotName(requested, taken) {
+    const wanted = requested.trim();
+    if (!wanted)
+        return wanted;
+    const used = new Set([...taken].map((n) => n.trim().toLowerCase()));
+    if (!used.has(wanted.toLowerCase()))
+        return wanted;
+    for (let i = 2;; i++) {
+        const candidate = `${wanted} ${i}`;
+        if (!used.has(candidate.toLowerCase()))
+            return candidate;
+    }
+}
 export function pickBotName(taken) {
     const used = new Set([...taken].map((n) => n.trim().toLowerCase()));
     const free = NAMES.filter((n) => !used.has(n.toLowerCase()));

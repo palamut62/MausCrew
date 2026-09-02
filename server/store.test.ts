@@ -330,3 +330,44 @@ describe("Store", () => {
     expect(reloaded.bot(bot.id)?.busy).toBe(false);
   });
 });
+
+// Rooms address bots by name: two bots called the same thing make `@Panko`
+// resolve to whichever the matcher reaches first, leaving the other
+// unreachable. Importing a team file twice, or a Chief proposing a name a
+// teammate already has, used to produce exactly that.
+describe("bot names stay unique", () => {
+  // each case starts from an empty roster: the outer suite's cleanup does not
+  // reach this block, and a leftover "Panko 2" would move every number along
+  beforeEach(() => {
+    rmSync(DATA_DIR, { recursive: true, force: true });
+  });
+
+  it("numbers a name that is already taken", () => {
+    const store = new Store(selection);
+    store.createBot({ name: "Panko" });
+    const second = store.createBot({ name: "Panko" });
+    const third = store.createBot({ name: "panko" });
+    expect(second.name).toBe("Panko 2");
+    // case is not a distinction a person makes when typing @panko
+    expect(third.name).toBe("panko 3");
+  });
+
+  it("leaves a free name exactly as asked for", () => {
+    const store = new Store(selection);
+    store.createBot({ name: "Panko" });
+    expect(store.createBot({ name: "Otto" }).name).toBe("Otto");
+  });
+
+  it("keeps numbering past a gap instead of reusing a taken name", () => {
+    const store = new Store(selection);
+    store.createBot({ name: "Panko" });
+    store.createBot({ name: "Panko 2" });
+    expect(store.createBot({ name: "Panko" }).name).toBe("Panko 3");
+  });
+
+  it("still auto-names when no name was asked for", () => {
+    const store = new Store(selection);
+    const auto = store.createBot();
+    expect(auto.name.trim()).not.toBe("");
+  });
+});

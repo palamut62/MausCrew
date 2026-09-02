@@ -8,7 +8,7 @@ import { writeFileAtomic } from "./atomic.js";
 import { peerAllowKey } from "./peer-approval-key.js";
 import { DATA_DIR } from "./config.js";
 import { newId } from "./contracts.js";
-import { pickBotName } from "./names.js";
+import { pickBotName, uniqueBotName } from "./names.js";
 /** What a task is called before its first message names it. */
 export const UNTITLED_TASK = "New task";
 /** A task's name, taken from the first thing you asked it to do. */
@@ -421,7 +421,11 @@ export class Store {
         return this.bots.find((b) => b.threadId === threadId || b.tasks?.some((t) => t.threadId === threadId)) ?? null;
     }
     createBot(profile = {}) {
-        const name = profile.name?.trim() || pickBotName(this.bots.map((b) => b.name));
+        // Every path that names a bot goes through here — import, an approved
+        // Chief proposal, the API. A duplicate makes @mentions ambiguous, so the
+        // collision is resolved once, at the source, rather than per caller.
+        const existing = this.bots.map((b) => b.name);
+        const name = profile.name?.trim() ? uniqueBotName(profile.name, existing) : pickBotName(existing);
         const bot = {
             id: newId(),
             threadId: newId(),

@@ -9,7 +9,7 @@ import { writeFileAtomic } from "./atomic.ts";
 import { peerAllowKey, type PeerAction } from "./peer-approval-key.ts";
 import { DATA_DIR } from "./config.ts";
 import { newId, type ModelSelection, type SubagentActivity, type ThreadId } from "./contracts.ts";
-import { pickBotName } from "./names.ts";
+import { pickBotName, uniqueBotName } from "./names.ts";
 
 export type MausColor =
   | "green"
@@ -690,7 +690,11 @@ export class Store {
       Pick<BotRecord, "name" | "title" | "description" | "color" | "shape" | "modelSelection">
     > = {},
   ): BotRecord {
-    const name = profile.name?.trim() || pickBotName(this.bots.map((b) => b.name));
+    // Every path that names a bot goes through here — import, an approved
+    // Chief proposal, the API. A duplicate makes @mentions ambiguous, so the
+    // collision is resolved once, at the source, rather than per caller.
+    const existing = this.bots.map((b) => b.name);
+    const name = profile.name?.trim() ? uniqueBotName(profile.name, existing) : pickBotName(existing);
     const bot: BotRecord = {
       id: newId(),
       threadId: newId(),

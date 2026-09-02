@@ -115,6 +115,20 @@ export function EngineSetup({
     );
   }
 
+  // Found on this machine, answered `--version`, and still refused: the
+  // driver knows exactly why — too old for the flags this app drives it with,
+  // most often — and "isn't installed" would send the user to reinstall
+  // something they already have. Its own sentence is the actionable one, and
+  // the install command stays because updating in place is the fix.
+  if (!signInOnly && instance.snapshot.version && instance.snapshot.reason) {
+    return (
+      <div className={cn("text-[12.5px] leading-relaxed text-ink-secondary", className)}>
+        <p>{instance.snapshot.reason}</p>
+        {command && <CommandRow command={command} />}
+      </div>
+    );
+  }
+
   return (
     <div className={cn("text-[12.5px] leading-relaxed text-ink-secondary", className)}>
       {signInOnly ? (

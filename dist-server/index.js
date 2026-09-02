@@ -41,7 +41,7 @@ import { CONTENT_SECURITY_POLICY } from "./csp.js";
 import { digestSystemBlock } from "./summarization/digest.js";
 import { memoryBlock } from "./memory/store.js";
 import { deterministicEntry, journalDate, planDistil, planHarvest, recordDistil, recordJournal } from "./memory/harvest.js";
-import { readJournal, readProfile } from "./memory/store.js";
+import { readJournal, readProfile, writeProfile } from "./memory/store.js";
 import { partitionThread } from "./summarization/partition.js";
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.js";
 import { describeBaseUrl } from "./drivers/deepseek/config.js";
@@ -179,6 +179,36 @@ function agentsIntegration(botId, threadId, depth) {
 function skillsWorkspaceFor(bot) {
     return defaultWorkspaceFor(bot.modelSelection.instanceId, bot.threadId);
 }
+/** Where this bot's `SKILL.md` files live — the same resolution the Skill
+ * Center uses, so a shared package installs into the folder the user can then
+ * open and edit. */
+function skillsHomeFor(bot) {
+    return bot.workspacePath || cfg.sharedWorkspacePath || skillsWorkspaceFor(bot);
+}
+/** The bot's skills as a shared file carries them.
+ *
+ * A skill whose document failed to parse is dropped rather than exported
+ * broken: the receiving side would refuse it anyway, and a package that
+ * cannot be installed is worse than one that admits it has fewer skills.
+ */
+function portableSkillsFor(bot) {
+    try {
+        return listWorkspaceSkills(skillsHomeFor(bot))
+            .skills.filter((skill) => skill.valid)
+            .map((skill) => ({
+            name: skill.id,
+            description: skill.description,
+            ...(skill.whenToUse ? { whenToUse: skill.whenToUse } : {}),
+            instructions: skill.instructions,
+        }));
+    }
+    catch {
+        // No workspace yet is the common case for a fresh bot, and it means
+        // exactly "no skills" — not a failed export.
+        return [];
+    }
+}
+const isRecord = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 function skillsSystemPrompt(bot) {
     return skillIndexPrompt(bot.workspacePath || cfg.sharedWorkspacePath || skillsWorkspaceFor(bot));
 }
@@ -3294,13 +3324,26 @@ const server = createServer(async (req, res) => {
                 new Set(rawMemberIds).size !== rawMemberIds.length) {
                 return json(res, 400, { error: "team members are invalid" });
             }
+            // What a bot IS travels by default; what it KNOWS does not. Skills are
+            // procedures the sender wrote on purpose, so they ride along unless
+            // asked otherwise. The memory profile is the one field likely to hold
+            // something about the user's own life, so it only travels when the
+            // export screen says so out loud.
+            const include = isRecord(body.include) ? body.include : {};
+            const withSkills = include.skills !== false;
+            const withMemory = include.memory === true;
             try {
+                const exportable = store.bots.map((bot) => ({
+                    ...bot,
+                    ...(withSkills ? { skills: portableSkillsFor(bot) } : {}),
+                    ...(withMemory ? { memory: readProfile(bot.id) } : {}),
+                }));
                 return json(res, 200, createTeamManifest({
                     name,
                     memberIds: rawMemberIds,
                     bulletin: "",
                     defaultResponder: { kind: "everyone" },
-                }, store.bots));
+                }, exportable));
             }
             catch (error) {
                 return json(res, 400, { error: error instanceof Error ? error.message : "Team could not be exported" });
@@ -3317,6 +3360,10 @@ const server = createServer(async (req, res) => {
             }
             const importedBots = [];
             let importedGroupId = null;
+            // Written outside the store, so the store's own rollback cannot undo
+            // them. Tracked here and removed by hand if anything later fails.
+            const installedSkills = [];
+            const installed = { skills: 0, memories: 0 };
             try {
                 const selection = await defaultSelection();
                 for (const member of manifest.team.members) {
@@ -3328,6 +3375,30 @@ const server = createServer(async (req, res) => {
                         modelSelection: selection,
                     }));
                 }
+                // The package's own contents, installed exactly as previewed: the
+                // file says what the bot knows and can do, and this writes that and
+                // nothing else. No turn is run, so a bot cannot talk its way into a
+                // skill the sender never wrote — what you reviewed is what exists.
+                manifest.team.members.forEach((member, index) => {
+                    const bot = importedBots[index];
+                    if (member.memory) {
+                        writeProfile(bot.id, member.memory);
+                        installed.memories += 1;
+                    }
+                    if (!member.skills?.length)
+                        return;
+                    const workspacePath = skillsHomeFor(bot);
+                    for (const skill of member.skills) {
+                        createWorkspaceSkill(workspacePath, {
+                            name: skill.name,
+                            description: skill.description,
+                            whenToUse: skill.whenToUse ?? "",
+                            instructions: skill.instructions,
+                        });
+                        installedSkills.push({ workspacePath, name: skill.name });
+                        installed.skills += 1;
+                    }
+                });
                 const idByKey = new Map(manifest.team.members.map((member, index) => [member.key, importedBots[index].id]));
                 const group = store.createGroup(manifest.team.room.name, importedBots.map((bot) => bot.id));
                 importedGroupId = group.id;
@@ -3350,6 +3421,9 @@ const server = createServer(async (req, res) => {
                 return json(res, 201, {
                     bots: publicBots,
                     group: { ...configuredGroup, messages: [] },
+                    // What actually landed, so the window can say it rather than
+                    // implying the package's promise was kept.
+                    installed,
                 });
             }
             catch (error) {
@@ -3357,6 +3431,17 @@ const server = createServer(async (req, res) => {
                     store.deleteGroup(importedGroupId);
                 for (const bot of importedBots)
                     store.deleteBot(bot.id);
+                // A half-installed package is the one outcome worth ruling out: the
+                // bots are gone, so their skill files would be orphans nobody can
+                // reach through the Skill Center.
+                for (const { workspacePath, name } of installedSkills) {
+                    try {
+                        deleteWorkspaceSkill(workspacePath, name);
+                    }
+                    catch {
+                        // Best effort: the bot it belonged to no longer exists either way.
+                    }
+                }
                 throw error;
             }
         }
