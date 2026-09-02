@@ -656,7 +656,7 @@ const MessagesList = memo(function MessagesList({
             case "screen":
               return m.png ? <ScreenFrame png={m.png} mime={m.mime} /> : null;
             case "structured":
-              return <StructuredResult message={m} />;
+              return <StructuredResult message={m} botId={bot.id} />;
             default:
               return (
                 <Bubble

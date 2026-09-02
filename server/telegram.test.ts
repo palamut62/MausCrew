@@ -17,20 +17,27 @@ const notification: Notification = {
 };
 
 describe("Telegram notifications", () => {
-  it("formats the originating MausCrew bot profile", () => {
+  it("names the bot and marks the kind without asserting a language", () => {
+    // The report underneath is written in whatever language the user writes
+    // in, so a fixed Turkish or English label would be wrong half the time.
     expect(telegramNotificationText(notification)).toBe(
-      "🟡 Waffle · Research lead\nGörev tamamlandı\n\nThe report is ready.",
+      "🟡 Waffle · Research lead ✅\n\nThe report is ready.",
     );
+    expect(telegramNotificationText({ ...notification, kind: "approval" })).toContain("🔐");
+    expect(telegramNotificationText({ ...notification, kind: "question" })).toContain("❓");
+    expect(telegramNotificationText({ ...notification, kind: "routine-failed" })).toContain("⚠️");
   });
 
   it("delivers a long report in complete ordered Telegram messages", () => {
     const report = `${"x".repeat(4_050)}\n${"y".repeat(4_050)}`;
     const messages = telegramNotificationTexts({ ...notification, detail: report });
-    expect(messages).toHaveLength(3);
+    // What matters is that every part fits and nothing is lost — not how many
+    // parts it takes, which moves whenever the header changes length.
+    expect(messages.length).toBeGreaterThan(1);
     expect(messages.every((message) => message.length <= 4096)).toBe(true);
     expect(messages.join("\n").match(/x/g)).toHaveLength(4_050);
     expect(messages.join("\n").match(/y/g)).toHaveLength(4_050);
-    expect(messages[1]).toContain("Devamı (2)");
+    expect(messages[1]).toContain("· 2");
   });
 
   it("accepts numeric chats and channel usernames only", () => {

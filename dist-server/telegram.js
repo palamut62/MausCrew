@@ -132,3 +132,51 @@ export function enqueueTelegramNotification(cfg, notification) {
         console.warn(`[telegram] ${error instanceof Error ? error.message : String(error)}`);
     });
 }
+/**
+ * Post a message to the paired chat.
+ *
+ * Returns the sent message id, which is what lets a later reply be traced
+ * back to the work it is about. Null when Telegram is not configured or the
+ * response did not carry one — the message still went out; only threading is
+ * lost.
+ */
+export async function sendTelegramMessage(cfg, text, options = {}, fetcher = fetch) {
+    const { token, chatId, enabled } = settings(cfg);
+    if (!enabled || !token || !chatId)
+        return null;
+    const body = {
+        chat_id: chatId,
+        text: text.slice(0, TELEGRAM_MESSAGE_LIMIT),
+    };
+    if (options.replyTo) {
+        // The reply may be gone by the time we answer; Telegram would otherwise
+        // reject the whole message rather than send it unthreaded.
+        body.reply_to_message_id = options.replyTo;
+        body.allow_sending_without_reply = true;
+    }
+    if (options.buttons?.length) {
+        body.reply_markup = {
+            inline_keyboard: options.buttons.map((row) => row.map((button) => ({ text: button.label.slice(0, 64), callback_data: button.data.slice(0, 64) }))),
+        };
+    }
+    const sent = await callTelegram(token, "sendMessage", body, fetcher);
+    return typeof sent.message_id === "number" ? sent.message_id : null;
+}
+/** Stop the spinner on a tapped button, with an optional toast. */
+export async function answerTelegramCallback(cfg, callbackId, text, fetcher = fetch) {
+    const { token, enabled } = settings(cfg);
+    if (!enabled || !token)
+        return;
+    await callTelegram(token, "answerCallbackQuery", { callback_query_id: callbackId, ...(text ? { text: text.slice(0, 200) } : {}) }, fetcher).catch(() => undefined);
+}
+/** The buttons for a card with a short, fixed set of answers. Long or
+ * free-text questions get no keyboard — the person types the answer as an
+ * ordinary reply, which the conversation map routes to the same task. */
+export function telegramAnswerButtons(requestId, options) {
+    const usable = options
+        .map((option) => String(option ?? "").trim())
+        .filter(Boolean)
+        .filter((option) => `a:${requestId}:${option}`.length <= 64)
+        .slice(0, 6);
+    return usable.length ? usable.map((option) => [{ label: option, data: `a:${requestId}:${option}` }]) : [];
+}

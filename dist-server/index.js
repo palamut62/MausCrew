@@ -26,7 +26,9 @@ import { normalizePermissionAction } from "./governance/action.js";
 import { GovernanceGateway } from "./governance/gateway.js";
 import { ensureDefaultPolicy, loadPolicy, savePolicy } from "./governance/policy-loader.js";
 import { buildNotification } from "./notify.js";
-import { discoverTelegramChat, enqueueTelegramNotification, sendTelegramNotification, validTelegramChatId, verifyTelegramBot, } from "./telegram.js";
+import { discoverTelegramChat, answerTelegramCallback, enqueueTelegramNotification, sendTelegramMessage, sendTelegramNotification, telegramAnswerButtons, validTelegramChatId, verifyTelegramBot, } from "./telegram.js";
+import { TelegramInbox } from "./telegram-inbox.js";
+import { TelegramAgent } from "./telegram-agent.js";
 import { buildReplyQuote, replyQuotePrefix } from "./reply-quote.js";
 import { controlCommand, parseControlInput } from "./computer-control.js";
 import { hostCuaStatus, installHostCua, startHostCua, stopHostCua } from "./host-cua.js";
@@ -571,6 +573,14 @@ function publishReview(item) {
     }
     broadcast({ kind: "review", item });
 }
+/** Attach the answers a card offers, so a durable channel can show them as
+ * buttons. Refused for secrets: a credential must be typed where it is
+ * stored, not tapped into a chat. */
+function withAnswerButtons(notification, requestId, options, secret = false) {
+    if (!notification || !requestId || secret || !options.length)
+        return notification;
+    return { ...notification, answerable: { requestId, options: [...options] } };
+}
 /** Put a notification on the wire. Clients decide what to do with it — a
  * desktop notification now, a push to a paired phone later. */
 function notify(notification) {
@@ -578,6 +588,19 @@ function notify(notification) {
     // exactly like {kind:"message", message} and {kind:"bot", bot}
     if (notification) {
         broadcast({ kind: "notify", notification });
+        // A card that can be answered goes to Telegram as buttons, so the person
+        // there can decide without opening the app; everything else goes as the
+        // plain report it always was.
+        if (notification.answerable && cfg.telegram?.inbound === true) {
+            const buttons = telegramAnswerButtons(notification.answerable.requestId, notification.answerable.options);
+            if (buttons.length) {
+                void sendTelegramMessage(cfg, `${notification.title}
+
+${notification.detail || notification.body}`, { buttons })
+                    .catch((error) => console.warn(`[telegram] ${error instanceof Error ? error.message : String(error)}`));
+                return;
+            }
+        }
         enqueueTelegramNotification(cfg, notification);
     }
 }
@@ -896,7 +919,7 @@ bus.subscribe((event) => {
                             },
                         });
                         askMessageByRequest.set(`${event.threadId}:${requestId}`, message.id);
-                        notify(buildNotification("approval", asker, event.threadId, event.summary));
+                        notify(withAnswerButtons(buildNotification("approval", asker, event.threadId, event.summary), requestId, ["Allow", "Deny"]));
                     }
                     catch (error) {
                         const message = error instanceof Error ? error.message : String(error);
@@ -964,7 +987,9 @@ bus.subscribe((event) => {
             // this is the branch where a card actually reached a human. Anything
             // auto mode answered took the early return above and never buzzes.
             if (asker) {
-                notify(buildNotification(permission ? "approval" : "question", asker, event.threadId, event.summary));
+                notify(withAnswerButtons(buildNotification(permission ? "approval" : "question", asker, event.threadId, event.summary), event.requestId, event.choices?.length ? event.choices : permission ? ["Allow", "Deny"] : [], 
+                // A credential belongs in the app, never in a chat message.
+                event.secret === true));
             }
             break;
         }
@@ -1217,6 +1242,47 @@ function isSecretRequest(threadId, requestId) {
     if (!messageId)
         return false;
     return store.messagesFor(threadId).find((m) => m.id === messageId)?.card?.secret === true;
+}
+/**
+ * Answer a waiting card from a Telegram button.
+ *
+ * The same steps the HTTP route takes, reached from a different surface: the
+ * thread is found from the pending-request map rather than supplied, and a
+ * request that is no longer waiting returns false so the tap can be answered
+ * with "already handled" instead of silently doing nothing.
+ *
+ * A button can only carry an answer to a card MausCrew itself raised —
+ * `requestId` is a capability, and one that is not pending is refused here as
+ * it is over HTTP.
+ */
+async function answerCardFromTelegram(requestId, answer) {
+    const suffix = `:${requestId}`;
+    const key = [...askMessageByRequest.keys()].find((candidate) => candidate.endsWith(suffix))
+        ?? [...pendingGovernance.keys()].find((candidate) => candidate.endsWith(suffix));
+    if (!key)
+        return false;
+    const threadId = key.slice(0, -suffix.length);
+    if (resolvePeerComms(approvalBus, requestId, answer === "Allow" ? "allow" : "deny"))
+        return true;
+    if (resolveBotCreation(requestId, answer === "Allow" ? "allow" : "deny"))
+        return true;
+    if (!hasPendingRequest(requestId))
+        return false;
+    const group = store.groupByThread(threadId);
+    const owner = group ? (group.busyBotId ? store.bot(group.busyBotId) : undefined) : store.botByThread(threadId);
+    const instance = owner ? registry.get(owner.modelSelection.instanceId) : null;
+    if (!instance)
+        return false;
+    // Same mapping the in-app card uses: the two standard labels are a
+    // decision, anything else is the answer to a question.
+    const behavior = answer === "Allow" ? "allow" : answer === "Deny" ? "deny" : "answer";
+    await recordGovernanceResponse(threadId, requestId, behavior);
+    rememberAnswerText(threadId, requestId, behavior, behavior === "answer" ? answer : undefined, isSecretRequest(threadId, requestId));
+    await instance.adapter.respondToRequest(threadId, requestId, {
+        behavior,
+        ...(behavior === "answer" ? { message: answer } : {}),
+    });
+    return true;
 }
 function interruptPendingTurn(threadId) {
     const pending = pendingTurnDispatches.get(threadId);
@@ -1807,6 +1873,37 @@ routines = new RoutineManager({
         return task;
     },
     startTurn: (botId, threadId, prompt, runOn, triggerSource, onDispatchError) => startTurn(botId, prompt, { threadId, runOn, automationSource: triggerSource, onDispatchError }),
+    // Room routines: the work is addressed to the room the way a person does
+    // it, so the room's own routing, transcript, mentions and approvals apply
+    // unchanged and the crew sees the result where they already look.
+    room: {
+        state: (groupId) => {
+            const group = store.group(groupId);
+            if (!group)
+                return "missing";
+            return group.busyBotId ? "busy" : "ready";
+        },
+        threadId: (groupId) => store.group(groupId)?.threadId ?? null,
+        startTurn: async (groupId, botId, prompt, _triggerSource, onDispatchError) => {
+            const group = store.group(groupId);
+            if (!group)
+                throw new Error("the room no longer exists");
+            const bot = store.bot(botId);
+            // The named member must still be in the room — a routine outlives a
+            // membership change, and a mention of someone who left would silently
+            // fall through to whoever answers by default.
+            if (!bot || !group.memberIds.includes(botId)) {
+                onDispatchError(bot ? `${bot.name} is no longer in this room` : "the assigned MAUS no longer exists");
+                return;
+            }
+            try {
+                startGroupTurn(groupId, `@${bot.name} ${prompt}`);
+            }
+            catch (error) {
+                onDispatchError(error instanceof Error ? error.message : String(error));
+            }
+        },
+    },
     interruptTurn: async (botId, threadId, runOn) => {
         const bot = store.bot(botId);
         const instance = runOn === "cloud"
@@ -1819,6 +1916,131 @@ routines = new RoutineManager({
     },
 });
 routines.start();
+// ── Telegram, inbound ────────────────────────────────────────────────
+// The outbound half has always existed: a bot finishes and the report goes
+// to Telegram. This is the other direction — a message from the paired chat
+// becomes work, staffed by the Chief, queued on the same durable queue every
+// other unattended run uses.
+//
+// Off unless the user switches it on. Outbound is a report; inbound is a
+// control surface for the machine, and that is a different decision.
+let telegramInbox = null;
+let telegramAgent = null;
+/** Ask an available engine one question, outside any bot's transcript. Used
+ * for the staffing decision, which is a judgement about the team rather than
+ * a turn anybody should have to read. */
+async function askAnEngine(prompt) {
+    const chief = store.bots.find((bot) => bot.chiefOfStaff && !bot.hidden);
+    const candidates = [
+        ...(chief ? [registry.get(chief.modelSelection.instanceId)] : []),
+        ...registry.instances(),
+    ];
+    for (const instance of candidates) {
+        if (!instance?.generateText)
+            continue;
+        try {
+            return await instance.generateText(prompt);
+        }
+        catch {
+            // Try the next engine: a rate-limited Chief must not stop the request.
+        }
+    }
+    throw new Error("no engine is available to make the call");
+}
+function telegramRoster() {
+    return store.bots
+        .filter((bot) => !bot.hidden)
+        .map((bot) => ({
+        id: bot.id,
+        name: bot.name,
+        title: bot.title ?? "",
+        description: bot.description ?? "",
+        busy: bot.busy === true,
+        chief: bot.chiefOfStaff === true,
+    }));
+}
+function startTelegramInbox() {
+    if (telegramInbox)
+        return;
+    telegramAgent = new TelegramAgent({
+        roster: telegramRoster,
+        ask: askAnEngine,
+        canCreate: () => cfg.telegram?.autoCreateBots === true,
+        createBot: async (profile) => {
+            const created = store.createBot({
+                name: profile.name,
+                title: profile.title,
+                description: profile.description,
+                modelSelection: await defaultSelection(),
+            });
+            // Visible in the app the moment it exists: a MAUS that appeared while
+            // the user was in Telegram must not be a surprise in the sidebar later.
+            broadcast({ kind: "bot", bot: publicBot(created) });
+            return { id: created.id, name: created.name };
+        },
+        startWork: async ({ botId, text, deliveryId, threadId }) => {
+            const bot = store.bot(botId);
+            if (!bot)
+                throw new Error("that MAUS no longer exists");
+            // A reply continues the task it replies to, so it goes to that
+            // conversation rather than onto the queue as a fresh job. A Telegram
+            // run activates its task as the MAUS's live chat, so the bot's current
+            // thread *is* that task — which is also what makes the follow-up land
+            // where the user is watching in the app.
+            if (threadId) {
+                if (!bot.busy) {
+                    await startTurn(bot.id, text);
+                    return { threadId: store.bot(bot.id)?.threadId ?? threadId };
+                }
+                // Busy: same redirect queue as typing into the composer mid-turn.
+                const queue = steerQueues.get(bot.threadId) ?? [];
+                if (queue.length >= 10)
+                    throw new Error("too many pending follow-ups for this MAUS");
+                queue.push(text);
+                steerQueues.set(bot.threadId, queue);
+                if (queue.length === 1) {
+                    interruptPendingTurn(bot.threadId);
+                    await registry.get(bot.modelSelection.instanceId)?.adapter.interruptTurn(bot.threadId).catch(() => { });
+                }
+                return { threadId: bot.threadId };
+            }
+            // A new request joins the same durable queue as a webhook: ordered
+            // behind a busy MAUS, with a receipt on the Automations calendar and
+            // no second run if the same message is ever delivered twice.
+            routines.enqueueWebhook({
+                webhookId: `telegram:${botId}`,
+                webhookName: "Telegram",
+                prompt: text,
+                botId,
+                runOn: "maus",
+                deliveryId,
+                receivedAt: Date.now(),
+            });
+            return { threadId: bot.threadId };
+        },
+        answerCard: async (requestId, answer) => answerCardFromTelegram(requestId, answer),
+        send: async (text, options) => sendTelegramMessage(cfg, text, options).catch(() => null),
+        ackCallback: async (callbackId, text) => answerTelegramCallback(cfg, callbackId, text),
+    });
+    telegramInbox = new TelegramInbox({
+        settings: () => ({
+            token: cfg.telegram?.botToken?.trim() ?? "",
+            chatId: cfg.telegram?.chatId?.trim() ?? "",
+            // Both switches must be on: `enabled` is Telegram at all, `inbound` is
+            // this direction of it.
+            enabled: cfg.telegram?.enabled !== false && cfg.telegram?.inbound === true,
+            allowedUserIds: cfg.telegram?.allowedUserIds ?? [],
+        }),
+        onUpdate: (update) => telegramAgent.handle(update),
+        onProblem: (problem) => {
+            if (problem)
+                console.warn(`[telegram] listener: ${problem}`);
+            broadcast({ kind: "config", ...configStatus() });
+        },
+    });
+    telegramInbox.start();
+}
+startTelegramInbox();
 // Webhook definitions are independent from calendar schedules, but every
 // delivery joins the same RoutineManager queue. That keeps unattended work
 // ordered behind a busy MAUS and gives webhook runs the same durable receipts.
@@ -2020,6 +2242,21 @@ spoken = new Set()) {
         }
     }
 }
+/** A room routine names both a room and one of its members. Checked here
+ * rather than in the manager: membership lives in the store, and a routine
+ * that quietly runs somewhere else is worse than one refused at creation. */
+function validateRoutineRoom(body) {
+    const groupId = typeof body.groupId === "string" ? body.groupId.trim() : "";
+    if (!groupId)
+        return null;
+    const group = store.group(groupId);
+    if (!group)
+        return "no such room";
+    const botId = typeof body.botId === "string" ? body.botId.trim() : "";
+    if (!group.memberIds.includes(botId))
+        return "choose a MAUS that is in this room";
+    return null;
+}
 function startGroupTurn(groupId, text) {
     const group = store.group(groupId);
     if (!group)
@@ -2106,6 +2343,12 @@ function configStatus() {
             enabled: cfg.telegram?.enabled !== false,
             chatId: cfg.telegram?.chatId ?? "",
             botUsername: cfg.telegram?.botUsername ?? "",
+            inbound: cfg.telegram?.inbound === true,
+            autoCreateBots: cfg.telegram?.autoCreateBots === true,
+            allowedUserIds: cfg.telegram?.allowedUserIds ?? [],
+            // Whether the listener is actually up, and why not when it is not —
+            // a revoked token otherwise reads as "nothing ever arrives".
+            listener: telegramInbox?.status ?? { running: false, offset: 0, problem: null },
         },
         // not a secret — the sidebar shows it
         profile: { name: cfg.profile?.name ?? "", email: cfg.profile?.email ?? "" },
@@ -2886,7 +3129,11 @@ const server = createServer(async (req, res) => {
             });
         }
         if (path === "/api/routines" && method === "POST") {
-            return json(res, 201, { routine: routines.create(await readBody(req)) });
+            const body = await readBody(req);
+            const roomError = validateRoutineRoom(body);
+            if (roomError)
+                return json(res, 400, { error: roomError });
+            return json(res, 201, { routine: routines.create(body) });
         }
         let routineMatch = path.match(/^\/api\/routines\/([\w-]+)\/run$/);
         if (routineMatch && method === "POST") {
@@ -2895,7 +3142,13 @@ const server = createServer(async (req, res) => {
         }
         routineMatch = path.match(/^\/api\/routines\/([\w-]+)$/);
         if (routineMatch && method === "PATCH") {
-            const routine = routines.update(routineMatch[1], await readBody(req));
+            const body = await readBody(req);
+            // Same check as creation: an edit that repoints a routine at a room the
+            // MAUS is not in produces the same broken routine, only later.
+            const roomError = validateRoutineRoom(body);
+            if (roomError)
+                return json(res, 400, { error: roomError });
+            const routine = routines.update(routineMatch[1], body);
             return routine ? json(res, 200, { routine }) : json(res, 404, { error: "no such routine" });
         }
         if (routineMatch && method === "DELETE") {
@@ -4734,9 +4987,20 @@ const server = createServer(async (req, res) => {
                         return json(res, 400, { error: `telegram.${field} must be a string` });
                     }
                 }
-                if (Object.prototype.hasOwnProperty.call(rawTelegram, "enabled")
-                    && typeof rawTelegram.enabled !== "boolean") {
-                    return json(res, 400, { error: "telegram.enabled must be true or false" });
+                for (const flag of ["enabled", "inbound", "autoCreateBots"]) {
+                    if (Object.prototype.hasOwnProperty.call(rawTelegram, flag)
+                        && typeof rawTelegram[flag] !== "boolean") {
+                        return json(res, 400, { error: `telegram.${flag} must be true or false` });
+                    }
+                }
+                // Who may give orders. Ids only: a username can be changed by its
+                // owner, so it is not an identity worth granting anything to.
+                if (Object.prototype.hasOwnProperty.call(rawTelegram, "allowedUserIds")) {
+                    const ids = rawTelegram.allowedUserIds;
+                    if (!Array.isArray(ids) || ids.some((id) => !Number.isInteger(id) || Number(id) <= 0)) {
+                        return json(res, 400, { error: "telegram.allowedUserIds must be a list of numeric Telegram user ids" });
+                    }
+                    rawTelegram.allowedUserIds = [...new Set(ids)].slice(0, 25);
                 }
                 if (typeof rawTelegram.chatId === "string" && rawTelegram.chatId.trim() && !validTelegramChatId(rawTelegram.chatId)) {
                     return json(res, 400, { error: "telegram.chatId must be a numeric chat id or @channel username" });

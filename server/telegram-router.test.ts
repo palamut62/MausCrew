@@ -17,6 +17,24 @@ describe("telegram routing prompt", () => {
     expect(prompt).toContain("research competitor pricing");
   });
 
+  it("asks for the acknowledgement in the language the person wrote in", () => {
+    // A phrase table here would answer two languages; the model answers the
+    // one it was written to.
+    const prompt = routingPrompt("rakiplerin fiyatlarını araştır", roster, true);
+    expect(prompt).toContain("same language as their request");
+    expect(prompt).toContain('"reply"');
+  });
+
+  it("carries the Chief's own line back with the decision", () => {
+    const answer = '{"botId":"b1","why":"research","reply":"Researcher bakıyor."}';
+    expect(parseRouting(answer, roster, true)).toMatchObject({ kind: "existing", reply: "Researcher bakıyor." });
+  });
+
+  it("leaves the line absent when the model skipped it", () => {
+    // The caller falls back to English rather than inventing a translation.
+    expect(parseRouting('{"botId":"b1","why":"x"}', roster, true)).not.toHaveProperty("reply");
+  });
+
   it("states that busy is not a reason to create, and hides creation when it is off", () => {
     expect(routingPrompt("x", roster, true)).toContain("busy is still the right answer");
     const locked = routingPrompt("x", roster, false);

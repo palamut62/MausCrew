@@ -793,6 +793,39 @@ describe("harness HTTP API", () => {
     expect(disk).toHaveProperty("fallbackChain", []);
   });
 
+  it("offers a produced file for download, and refuses one outside the workspace", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    const workspace = join(home, "download-workspace");
+    mkdirSync(workspace, { recursive: true });
+    writeFileSync(join(workspace, "report.xlsx"), "spreadsheet");
+    writeFileSync(join(home, "outside.key"), "PRIVATE KEY");
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { workspacePath: workspace })).status).toBe(200);
+
+    const offered = await api("POST", "/api/downloads", {
+      botId: bot.id,
+      path: join(workspace, "report.xlsx"),
+      name: "report.xlsx",
+    });
+    expect(offered.status).toBe(200);
+    expect(offered.body.url).toMatch(/^\/downloads\//);
+
+    const download = await fetch(`${BASE}${offered.body.url}`);
+    expect(download.status).toBe(200);
+    expect(download.headers.get("content-disposition")).toContain('filename="report.xlsx"');
+    expect(await download.text()).toBe("spreadsheet");
+
+    // The path comes from model output, so this is the case that matters: a
+    // bot naming a file outside its workspace gets a refusal, not the file.
+    const refused = await api("POST", "/api/downloads", { botId: bot.id, path: join(home, "outside.key") });
+    expect(refused.status).toBe(403);
+    expect(refused.body.error).toContain("outside this MAUS's workspace");
+
+    const missing = await fetch(`${BASE}/downloads/not-a-real-id`);
+    expect(missing.status).toBe(404);
+    expect((await api("POST", "/api/downloads", { botId: "nope", path: join(workspace, "report.xlsx") })).status).toBe(404);
+    expect((await api("DELETE", `/api/bots/${bot.id}`)).status).toBe(200);
+  });
+
   it("guards the browser profile and host driver endpoints", async () => {
     const profile = await api("GET", "/api/browser-profile");
     expect(profile.status).toBe(200);

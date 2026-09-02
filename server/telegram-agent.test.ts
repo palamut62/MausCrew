@@ -72,6 +72,18 @@ describe("telegram agent", () => {
     expect(h.sent[0]).toEqual({ text: "Researcher is on it.", replyTo: 100 });
   });
 
+  it("answers in the language the Chief replied in", async () => {
+    const h = harness({ ask: async () => '{"botId":"b1","why":"research","reply":"Researcher bakıyor, sonucu ileteceğim."}' });
+    await h.agent.handle(message({ text: "rakiplerin fiyatlarını araştır" }));
+    expect(h.sent[0]!.text).toBe("Researcher bakıyor, sonucu ileteceğim.");
+  });
+
+  it("falls back to English only when the Chief wrote no line", async () => {
+    const h = harness({ ask: async () => '{"botId":"b1","why":"research"}' });
+    await h.agent.handle(message());
+    expect(h.sent[0]!.text).toBe("Researcher is on it.");
+  });
+
   it("queues behind a busy MAUS rather than creating one", async () => {
     // The rule that matters: busy is not a reason to make a second bot.
     const h = harness({ ask: async () => '{"botId":"b2","why":"code"}', canCreate: () => true });

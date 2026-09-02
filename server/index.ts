@@ -3,6 +3,7 @@
 // folds one SSE event stream; every provider process runs here.
 import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { isIP } from "node:net";
 import { homedir } from "node:os";
@@ -59,6 +60,8 @@ import {
   discoverTelegramChat,
   answerTelegramCallback,
   enqueueTelegramNotification,
+  sendTelegramDocument,
+  TELEGRAM_DOCUMENT_LIMIT,
   sendTelegramMessage,
   sendTelegramNotification,
   telegramAnswerButtons,
@@ -142,6 +145,7 @@ import { teachDraftFromRecording, teachDraftFromTask } from "./teach/draft.ts";
 import * as recording from "./teach/recording.ts";
 import { ensureTailscaleServe } from "./tailscale-serve.ts";
 import { extractStructuredUi } from "./ui-runtime/schema.ts";
+import { fileListItems, resolveProducedFile } from "./produced-files.ts";
 import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./webhook-ingress.ts";
 import { WebhookManager } from "./webhooks.ts";
 
@@ -484,6 +488,21 @@ const STREAM_ID = randomUUID().slice(0, 8);
  * desktop, so they should not outlive the moment they were opened. */
 const parkedFrames = new Map<string, { mime: string; bytes: Buffer; at: number }>();
 const PARKED_FRAME_TTL_MS = 10 * 60 * 1000;
+/** Downloads a client has asked for, by opaque id.
+ *
+ * The path deliberately never becomes a URL parameter: a `?path=` endpoint is
+ * a file server over the user's disk with a containment check as its only
+ * door. Instead the check runs once, when the download is requested, and what
+ * the browser receives is an id that expires. */
+const parkedDownloads = new Map<string, { path: string; name: string; at: number }>();
+const PARKED_DOWNLOAD_TTL_MS = 10 * 60 * 1000;
+
+/** A filename safe to put in a Content-Disposition header — quotes and
+ * newlines removed, because either one injects a second header. */
+function sanitizeDownloadName(requested: string, fallbackPath: string): string {
+  const cleaned = requested.trim().replace(/["\r\n]/g, "").slice(0, 200);
+  return cleaned || fallbackPath.split(/[\\/]/).pop() || "download";
+}
 const REPLAY_MAX = 500;
 let lastSeq = 0;
 const replayBuffer: Array<{ seq: number; kind: string; frame: string | null }> = [];
@@ -680,6 +699,62 @@ function withAnswerButtons(
 ): Notification | null {
   if (!notification || !requestId || secret || !options.length) return notification;
   return { ...notification, answerable: { requestId, options: [...options] } };
+}
+
+/** Every directory a turn by this bot was legitimately working in. Anything a
+ * `file-list` announces outside these is refused rather than sent. */
+function workspaceRootsFor(bot: { id: string; workspacePath?: string; modelSelection: { instanceId: string }; threadId: string }): string[] {
+  // A project owns rooms rather than members, so its workspace counts when
+  // one of its rooms has this bot in it.
+  const botRoomIds = new Set(store.groups.filter((group) => group.memberIds.includes(bot.id)).map((group) => group.id));
+  const projectRoots = projects
+    .list()
+    .filter((project) => project.roomIds.some((roomId) => botRoomIds.has(roomId)))
+    .map((project) => project.workspacePath ?? "");
+  return [bot.workspacePath ?? "", cfg.sharedWorkspacePath ?? "", skillsWorkspaceFor(bot), ...projectRoots]
+    .filter((root): root is string => Boolean(root));
+}
+
+/** At most this many per turn: a bot that writes forty intermediate files
+ * should not turn the chat into a folder listing. */
+const TELEGRAM_MAX_FILES_PER_TURN = 5;
+
+/**
+ * Send the files a finished turn produced to the paired chat.
+ *
+ * Read out of the turn's own `file-list` block, so this only ever carries
+ * what the bot itself offered as a result — and only after produced-files.ts
+ * confirms each one really sits inside a workspace this bot works in. A
+ * failure is reported in the chat rather than thrown: the turn already
+ * succeeded, and a file that could not be sent is news, not a crash.
+ */
+async function deliverProducedFilesToTelegram(
+  bot: NonNullable<ReturnType<typeof store.bot>>,
+  reply: string,
+): Promise<void> {
+  if (cfg.telegram?.enabled === false || !cfg.telegram?.botToken || !cfg.telegram?.chatId) return;
+  const rendered = extractStructuredUi(reply);
+  const items = fileListItems("ui" in rendered ? rendered.ui : null);
+  if (!items.length) return;
+
+  const roots = workspaceRootsFor(bot);
+  for (const item of items.slice(0, TELEGRAM_MAX_FILES_PER_TURN)) {
+    const file = resolveProducedFile(item.path, roots, { maxBytes: TELEGRAM_DOCUMENT_LIMIT });
+    // Silent for the ordinary miss: a path outside the workspace is usually
+    // the bot naming something it read, not a result it produced, and the
+    // report already mentions it.
+    if (!file) continue;
+    try {
+      await sendTelegramDocument(
+        cfg,
+        { path: file.path, name: item.name, bytes: await readFile(file.path) },
+        { caption: `${bot.name} · ${item.name}` },
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await sendTelegramMessage(cfg, `${item.name} could not be sent: ${message}`).catch(() => null);
+    }
+  }
 }
 
 /** Put a notification on the wire. Clients decide what to do with it — a
@@ -1203,7 +1278,13 @@ bus.subscribe((event: RuntimeEvent) => {
         store.patchBot(bot.id, { busy: false, unread: true });
         broadcast({ kind: "bot", bot: wireBot(store.bot(bot.id)!) });
         if (steerQueues.has(event.threadId)) runNextSteer(event.threadId);
-        else notify(buildNotification("done", bot, event.threadId, reply));
+        else {
+          notify(buildNotification("done", bot, event.threadId, reply));
+          // A report the bot wrote as a PDF or a spreadsheet used to be
+          // announced in Telegram and then left sitting on disk. Send the
+          // file itself — but only the ones written inside its workspace.
+          void deliverProducedFilesToTelegram(bot, reply);
+        }
         if (screenPollers.has(bot.id)) {
           // the last live frame becomes a settled inline screen message —
           // the screenshot-in-chat moment. One fresh capture first, so the
@@ -1670,6 +1751,13 @@ async function startTurn(
     `You are ${bot.name}, a personal bot in MausCrew.`,
     bot.title && `Role: ${bot.title}.`,
     bot.description && `About: ${bot.description}`,
+    // Everything else in this prompt is English, and a model with no
+    // instruction answers in the language it was addressed in — so someone
+    // writing Turkish got English back. The language is the user's to set, by
+    // writing in it, and it can change mid-conversation.
+    "Answer in the language the user writes to you in, and follow them when they switch."
+      + " This applies wherever the answer is read, including Telegram."
+      + " Quoted material, code, identifiers, paths and command output stay exactly as they are.",
   ]
     .filter(Boolean)
     .join(" ");
@@ -4678,6 +4766,53 @@ const server = createServer(async (req, res) => {
     // URL to the browser — Electron routes window.open through
     // shell.openExternal, and no browser will open a blob or data URL from
     // another process — so the frame is parked here and opened by real URL.
+    // ── downloading a file a bot produced ──────────────────────────────
+    // Two steps on purpose. The containment check runs here, once, against
+    // the workspaces the named MAUS actually works in; the browser only ever
+    // holds an opaque id that expires. The one-step alternative — a GET with
+    // the path in the query string — is a file server over the user's disk.
+    if (method === "POST" && path === "/api/downloads") {
+      const body = await readBody(req);
+      const bot = store.bot(String(body.botId ?? ""));
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      const file = resolveProducedFile(String(body.path ?? ""), workspaceRootsFor(bot));
+      if (!file) {
+        return json(res, 403, {
+          error: "that file is outside this MAUS's workspace, so it is not offered for download",
+        });
+      }
+      const id = randomUUID();
+      parkedDownloads.set(id, { path: file.path, name: sanitizeDownloadName(String(body.name ?? ""), file.path), at: Date.now() });
+      for (const [key, parked] of parkedDownloads) {
+        if (parkedDownloads.size <= 32 && Date.now() - parked.at < PARKED_DOWNLOAD_TTL_MS) break;
+        parkedDownloads.delete(key);
+      }
+      return json(res, 200, { url: `/downloads/${id}`, bytes: file.bytes });
+    }
+    if (method === "GET" && path.startsWith("/downloads/")) {
+      const parked = parkedDownloads.get(path.slice("/downloads/".length));
+      if (!parked || Date.now() - parked.at > PARKED_DOWNLOAD_TTL_MS) {
+        res.writeHead(404, { "content-type": "text/plain" });
+        return res.end("this download has expired — ask for it again from the message");
+      }
+      let bytes: Buffer;
+      try {
+        // Re-read at serve time rather than held in memory: a spreadsheet is
+        // not a screenshot, and it may have been rewritten since.
+        bytes = await readFile(parked.path);
+      } catch {
+        res.writeHead(410, { "content-type": "text/plain" });
+        return res.end("that file is no longer on disk");
+      }
+      res.writeHead(200, {
+        "content-type": "application/octet-stream",
+        "content-length": bytes.byteLength,
+        "content-disposition": `attachment; filename="${parked.name}"`,
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+      });
+      return res.end(bytes);
+    }
     if (method === "POST" && path === "/api/frames") {
       const body = await readBody(req);
       const dataUrl = typeof body.dataUrl === "string" ? body.dataUrl : "";

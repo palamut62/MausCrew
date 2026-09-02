@@ -178,11 +178,14 @@ export class TelegramAgent {
     }
 
     if (decision.kind === "none") {
+      // The Chief writes in the language it was written to; the fallback is
+      // English only when it did not.
       await this.reply(
         update,
-        canCreate
-          ? `I did not start this: ${decision.why}.`
-          : `I did not start this: ${decision.why}. Turn on automatic MAUS creation in Settings → Telegram if you want me to make one.`,
+        decision.reply
+          ?? (canCreate
+            ? `I did not start this: ${decision.why}.`
+            : `I did not start this: ${decision.why}. Turn on automatic MAUS creation in Settings → Telegram if you want me to make one.`),
       );
       return;
     }
@@ -195,7 +198,8 @@ export class TelegramAgent {
         const created = await this.options.createBot(decision.profile);
         botId = created.id;
         botName = created.name;
-        opening = `No one on the team fitted, so I created ${created.name} (${decision.profile.title || "new MAUS"}) and gave it the job.`;
+        opening = decision.reply
+          ?? `No one on the team fitted, so I created ${created.name} (${decision.profile.title || "new MAUS"}) and gave it the job.`;
       } catch (error) {
         await this.reply(update, `I could not create a MAUS for this: ${error instanceof Error ? error.message : String(error)}`);
         return;
@@ -205,9 +209,10 @@ export class TelegramAgent {
       botId = entry.id;
       botName = entry.name;
       // Busy is worth saying out loud: the answer is coming, just not yet.
-      opening = entry.busy
-        ? `${entry.name} is mid-task — this is queued behind it.`
-        : `${entry.name} is on it.`;
+      // The Chief's own line already carries that when it wrote one, and it
+      // is in the person's language; the fallbacks are the English default.
+      opening = decision.reply
+        ?? (entry.busy ? `${entry.name} is mid-task — this is queued behind it.` : `${entry.name} is on it.`);
     }
 
     try {

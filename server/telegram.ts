@@ -99,18 +99,24 @@ const COLOR_DOT: Record<string, string> = {
   yellow: "🟡",
 };
 
+/** What kind of event this is, said without a language.
+ *
+ * The header used to assert Turkish — "Onay gerekiyor" — above a report the
+ * bot wrote in whatever language the conversation is in. So an English user
+ * got a Turkish label, and a Turkish user got an English one the moment the
+ * bot was addressed in English. A symbol reads the same in every language,
+ * and the bot's own text underneath carries the meaning. */
+const KIND_MARK: Record<Notification["kind"], string> = {
+  approval: "🔐",
+  question: "❓",
+  "routine-failed": "⚠️",
+  done: "✅",
+};
+
 function telegramHeader(notification: Notification): string {
   const dot = COLOR_DOT[notification.botColor ?? ""] ?? "🤖";
   const profile = [notification.botName, notification.botTitle].filter(Boolean).join(" · ");
-  const status =
-    notification.kind === "approval"
-      ? "Onay gerekiyor"
-      : notification.kind === "question"
-        ? "Yanıt bekliyor"
-        : notification.kind === "routine-failed"
-          ? "Otomasyon başarısız"
-          : "Görev tamamlandı";
-  return `${dot} ${profile}\n${status}`.trim();
+  return `${dot} ${profile} ${KIND_MARK[notification.kind] ?? ""}`.trim();
 }
 
 /** The desktop banner gets a compact summary, while Telegram receives the
@@ -124,7 +130,9 @@ export function telegramNotificationTexts(notification: Notification): string[] 
   let index = 1;
 
   do {
-    const prefix = index === 1 ? `${header}\n\n` : `${header}\nDevamı (${index})\n\n`;
+    // Also language-neutral: "Devamı (2)" told an English reader nothing, and
+    // a long report is exactly where a wrong-language label is loudest.
+    const prefix = index === 1 ? `${header}\n\n` : `${header} · ${index}\n\n`;
     const capacity = TELEGRAM_MESSAGE_LIMIT - prefix.length;
     let end = Math.min(remaining.length, capacity);
     if (end < remaining.length) {
@@ -244,4 +252,60 @@ export function telegramAnswerButtons(requestId: string, options: readonly strin
     .filter((option) => `a:${requestId}:${option}`.length <= 64)
     .slice(0, 6);
   return usable.length ? usable.map((option) => [{ label: option, data: `a:${requestId}:${option}` }]) : [];
+}
+
+/** Telegram refuses a bot upload above this, and says so in a way nobody
+ * reads — so the caller checks first and reports it as what it is.
+ * https://core.telegram.org/bots/api#senddocument */
+export const TELEGRAM_DOCUMENT_LIMIT = 50 * 1024 * 1024;
+
+/**
+ * Send a file the bot produced to the paired chat.
+ *
+ * Multipart rather than a URL: the file is on the user's own machine and
+ * there is nothing to link to. The caller is responsible for having checked
+ * that this path is inside a workspace the turn was working in — see
+ * produced-files.ts; this function trusts what it is handed.
+ */
+export async function sendTelegramDocument(
+  cfg: AppConfig,
+  file: { path: string; name: string; bytes: Buffer },
+  options: { caption?: string; replyTo?: number } = {},
+  fetcher: typeof fetch = fetch,
+): Promise<number | null> {
+  const { token, chatId, enabled } = settings(cfg);
+  if (!enabled || !token || !chatId) return null;
+  if (file.bytes.byteLength > TELEGRAM_DOCUMENT_LIMIT) {
+    throw new Error(`${file.name} is larger than Telegram's 50 MB limit for bots`);
+  }
+  const form = new FormData();
+  form.append("chat_id", chatId);
+  // `new Uint8Array(...)` rather than the Buffer itself: a Buffer may be a
+  // view on a SharedArrayBuffer, which Blob's types refuse.
+  form.append("document", new Blob([new Uint8Array(file.bytes)]), file.name);
+  // Telegram truncates a caption at 1024 characters and rejects nothing, so
+  // trimming here keeps the visible text the one we chose.
+  if (options.caption) form.append("caption", options.caption.slice(0, 1_024));
+  if (options.replyTo) {
+    form.append("reply_to_message_id", String(options.replyTo));
+    form.append("allow_sending_without_reply", "true");
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 120_000);
+  timer.unref?.();
+  try {
+    const response = await fetcher(`${TELEGRAM_API}/bot${token}/sendDocument`, {
+      method: "POST",
+      body: form,
+      signal: controller.signal,
+    });
+    const payload = (await response.json().catch(() => ({}))) as TelegramResponse<{ message_id?: number }>;
+    if (!response.ok || payload.ok !== true) {
+      throw new Error(payload.description?.slice(0, 240) || `Telegram sendDocument failed with HTTP ${response.status}`);
+    }
+    return typeof payload.result?.message_id === "number" ? payload.result.message_id : null;
+  } finally {
+    clearTimeout(timer);
+  }
 }

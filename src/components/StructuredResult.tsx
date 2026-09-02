@@ -1,7 +1,29 @@
-import { Check, Circle, Clock, Copy, FileText, FolderOpen, PaperPlaneTilt, Pause, Play, WarningCircle, X } from "@phosphor-icons/react";
+import { Check, Circle, Clock, Copy, DownloadSimple, FileText, FolderOpen, PaperPlaneTilt, Pause, Play, WarningCircle, X } from "@phosphor-icons/react";
 import { Spin } from "./Spin";
 
-import { useStore, type Message } from "@/state/store";
+import { api, useStore, type Message } from "@/state/store";
+
+/**
+ * Download a file the bot produced.
+ *
+ * Two steps because the path came from model output: the harness checks that
+ * it really sits inside this MAUS's workspace and hands back a short-lived
+ * id, and only that id is fetched. Nothing here trusts the path — which is
+ * also why this works in the browser and on a paired phone, where the
+ * reveal-in-folder button cannot.
+ */
+async function downloadProducedFile(botId: string, path: string, name: string): Promise<void> {
+  const { url } = (await api("/api/downloads", {
+    method: "POST",
+    body: JSON.stringify({ botId, path, name }),
+  })) as { url: string };
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
 
 const record = (value: unknown) => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {};
 
@@ -20,7 +42,7 @@ function fileSize(bytes: unknown): string {
   return `${size < 10 ? size.toFixed(1) : Math.round(size)} ${units[unit]}`;
 }
 
-export function StructuredResult({ message }: { message: Message }) {
+export function StructuredResult({ message, botId }: { message: Message; botId?: string }) {
   const { dispatch } = useStore();
   if (!message.ui) return null;
   const props = record(message.ui.props);
@@ -57,6 +79,19 @@ export function StructuredResult({ message }: { message: Message }) {
                 </div>
                 {item.path && (
                   <div className="flex shrink-0 items-center gap-1">
+                    {/* The one action that works everywhere the transcript is
+                        read — the desktop app, a browser, a paired phone. */}
+                    {botId && (
+                      <button
+                        onClick={() => void downloadProducedFile(botId, String(item.path), String(item.name))
+                          .catch((error) => dispatch({ type: "error", message: error instanceof Error ? error.message : String(error) }))}
+                        className="rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink"
+                        title="Download"
+                        aria-label={`Download ${item.name}`}
+                      >
+                        <DownloadSimple size={14} />
+                      </button>
+                    )}
                     <button
                       onClick={() => void navigator.clipboard?.writeText(String(item.path))}
                       className="rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink"

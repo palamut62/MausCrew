@@ -31,9 +31,9 @@ export interface NewBotProfile {
 }
 
 export type RoutingDecision =
-  | { kind: "existing"; botId: string; why: string }
-  | { kind: "create"; profile: NewBotProfile; why: string }
-  | { kind: "none"; why: string };
+  | { kind: "existing"; botId: string; why: string; reply?: string }
+  | { kind: "create"; profile: NewBotProfile; why: string; reply?: string }
+  | { kind: "none"; why: string; reply?: string };
 
 const NAME_LIMIT = 64;
 const TITLE_LIMIT = 200;
@@ -61,10 +61,17 @@ export function routingPrompt(request: string, roster: readonly RosterEntry[], c
       ? "If nobody on the team plausibly fits, propose one new MAUS for this kind of work — a durable specialist, not a one-off."
       : "If nobody fits, say so. You may not propose a new MAUS.",
     "",
+    // The acknowledgement comes back from the model rather than from a
+    // phrase table here: the person may write in any language, and a table
+    // would answer two of them.
+    "Write `reply` as one short sentence addressed to the person, in the same language as their request.",
+    "",
     "Answer with JSON and nothing else, in one of these shapes:",
-    '{"botId":"<id from the list>","why":"<short reason>"}',
-    canCreate ? '{"create":{"name":"<short name>","title":"<role>","description":"<what it owns, second person>"},"why":"<short reason>"}' : "",
-    '{"none":true,"why":"<short reason>"}',
+    '{"botId":"<id from the list>","why":"<short reason>","reply":"<one line to the person, their language>"}',
+    canCreate
+      ? '{"create":{"name":"<short name>","title":"<role>","description":"<what it owns, second person>"},"why":"<short reason>","reply":"<one line to the person, their language>"}'
+      : "",
+    '{"none":true,"why":"<short reason>","reply":"<one line to the person, their language>"}',
   ]
     .filter(Boolean)
     .join("\n");
@@ -103,13 +110,17 @@ export function parseRouting(raw: string, roster: readonly RosterEntry[], canCre
   }
   const answer = parsed as Record<string, unknown>;
   const why = text(answer.why, 300) || "no reason given";
+  // Optional: a model that skips it leaves the caller on its English
+  // fallback, which is worse than the user's language but better than
+  // nothing at all.
+  const reply = text(answer.reply, 400);
 
   const botId = text(answer.botId, 100);
   if (botId) {
     // Must be a MAUS that was actually on the list. A hallucinated id would
     // otherwise become a 404 the user sees as "nothing happened".
     return roster.some((entry) => entry.id === botId)
-      ? { kind: "existing", botId, why }
+      ? { kind: "existing", botId, why, ...(reply ? { reply } : {}) }
       : { kind: "none", why: "the Chief named a MAUS that is not on the team" };
   }
 
@@ -131,8 +142,9 @@ export function parseRouting(raw: string, roster: readonly RosterEntry[], canCre
         description: text(record.description, DESCRIPTION_LIMIT),
       },
       why,
+      ...(reply ? { reply } : {}),
     };
   }
 
-  return { kind: "none", why };
+  return { kind: "none", why, ...(reply ? { reply } : {}) };
 }
