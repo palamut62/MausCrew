@@ -2,7 +2,7 @@ import { track } from "@/lib/analytics";
 import { Spin } from "./Spin";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowClockwise, ArrowLineDown, BellRinging, CalendarDots, CaretDown, CaretRight, Check, ClipboardText, Copy, Crown, EyeSlash, FileArrowUp, FolderPlus, Gear, MagnifyingGlass, Pencil, Plus, PushPin, PushPinSlash, PuzzlePiece, Robot as BotIcon, ShareNetwork, Trash, TreeStructure, Users, UsersThree, X } from "@phosphor-icons/react";
+import { ArrowClockwise, ArrowLineDown, BellRinging, CalendarDots, CaretDown, CaretRight, Check, ClipboardText, Copy, Crown, EyeSlash, FileArrowUp, FolderPlus, Gear, MagnifyingGlass, Pencil, Plus, PushPin, PushPinSlash, PuzzlePiece, Robot as BotIcon, ShareNetwork, Trash, TreeStructure, Users, UsersThree, X, type Icon as PhosphorIcon } from "@phosphor-icons/react";
 import { api, useStore, formatTime, visibleMessages, type Bot, type Group, type Message, type Project } from "@/state/store";
 import { MausAvatar, InitialsAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot-motion";
@@ -102,6 +102,60 @@ function UpdateButton() {
       {status === "downloaded" && (
         <span className="absolute right-1.5 top-1.5 size-2 rounded-full bg-accent" />
       )}
+    </button>
+  );
+}
+
+/**
+ * One destination in the footer's icon row.
+ *
+ * These five places used to be five full-width labelled rows, which spent a
+ * third of the sidebar on views you open occasionally and pushed the bot list
+ * — the thing you actually work in — up against the fold. A dropdown would be
+ * smaller still, but it would cost a click on every visit and, worse, hide the
+ * badges: a pending approval nobody can see is the one thing this row must
+ * never do. So the labels move into tooltips and the badges stay on screen.
+ */
+function FooterLink({
+  icon: Glyph,
+  label,
+  active,
+  count,
+  dot,
+  onClick,
+}: {
+  icon: PhosphorIcon;
+  label: string;
+  active?: boolean;
+  /** Pending items worth a number rather than a dot. */
+  count?: number;
+  dot?: "accent" | "danger";
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      aria-current={active ? "page" : undefined}
+      className={cn(
+        "relative flex h-9 flex-1 items-center justify-center rounded-lg transition-colors",
+        active ? "bg-raised text-accent" : "text-ink-secondary hover:bg-raised/60 hover:text-ink",
+      )}
+    >
+      <Glyph size={19} weight={active ? "fill" : "bold"} />
+      {count ? (
+        <span className="absolute right-1 top-0.5 min-w-[16px] rounded-full bg-accent px-1 text-center font-mono text-[10px] font-semibold leading-4 text-app">
+          {count > 99 ? "99+" : count}
+        </span>
+      ) : dot ? (
+        <span
+          className={cn(
+            "absolute right-1.5 top-1.5 size-1.5 rounded-full",
+            dot === "danger" ? "bg-danger" : "bg-accent",
+          )}
+        />
+      ) : null}
     </button>
   );
 }
@@ -1401,81 +1455,65 @@ export function Sidebar({ open, onClose, onOpenDirectory }: { open: boolean; onC
       {/* Footer */}
       <div className="border-t border-hairline/70 px-3 pb-[max(0.75rem,var(--safe-bottom))] pt-2">
         <SidebarUpdateCard />
-        <button
-          onClick={() => dispatch({ type: "showReviews" })}
-          className={cn(
-            "flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors",
-            state.activeView === "reviews" ? "bg-raised text-ink" : "text-ink hover:bg-raised/50",
-          )}
-        >
-          <ClipboardText size={20} weight={state.activeView === "reviews" ? "fill" : "bold"} className={state.activeView === "reviews" ? "text-accent" : "text-ink-secondary"} />
-          <span className="flex-1 text-[14px]">Review queue</span>
-          {state.reviews.filter((item) => item.status === "pending").length > 0 && (
-            <span className="rounded-full bg-accent px-1.5 py-0.5 font-mono text-[10px] font-semibold text-app">{state.reviews.filter((item) => item.status === "pending").length}</span>
-          )}
-        </button>
-        <button
-          onClick={() => dispatch({ type: "showWorkflows" })}
-          className={cn(
-            "flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors",
-            state.activeView === "workflows" ? "bg-raised text-ink" : "text-ink hover:bg-raised/50",
-          )}
-        >
-          <TreeStructure size={20} weight={state.activeView === "workflows" ? "fill" : "bold"} className={state.activeView === "workflows" ? "text-accent" : "text-ink-secondary"} />
-          <span className="flex-1 text-[14px]">Workflows</span>
-          {state.workflows.some((workflow) => workflow.status === "active" || workflow.status === "blocked") && (
-            <span className="size-2 rounded-full bg-accent" />
-          )}
-        </button>
-        <button
-          onClick={() => dispatch({ type: "showOrgChart" })}
-          className={cn(
-            "flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors",
-            state.activeView === "org" ? "bg-raised text-ink" : "text-ink hover:bg-raised/50",
-          )}
-        >
-          <UsersThree size={20} weight={state.activeView === "org" ? "fill" : "bold"} className={state.activeView === "org" ? "text-accent" : "text-ink-secondary"} />
-          <span className="flex-1 text-[14px]">Org chart</span>
-        </button>
-        <button
-          onClick={() => dispatch({ type: "showRoutines" })}
-          className={cn(
-            "flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors",
-            state.activeView === "routines" ? "bg-raised text-ink" : "text-ink hover:bg-raised/50",
-          )}
-        >
-          <CalendarDots size={20} weight={state.activeView === "routines" ? "fill" : "bold"} className={state.activeView === "routines" ? "text-accent" : "text-ink-secondary"} />
-          <span className="flex-1 text-[14px]">Automations</span>
-          {state.routineRuns.some((run) => ["failed", "missed"].includes(run.status) && !run.seenAt) && (
-            <span className="size-2 rounded-full bg-danger" />
-          )}
-        </button>
-        <button
-          onClick={() => dispatch({ type: "togglePlugins", open: true })}
-          className="flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left hover:bg-raised/50"
-        >
-          <PuzzlePiece size={20} weight="bold" className="text-ink-secondary" />
-          <span className="text-[14px] text-ink">Plugins</span>
-        </button>
-        <div className="flex items-center">
+        <nav aria-label="Views" className="flex items-center gap-0.5 pb-0.5">
+          <FooterLink
+            icon={ClipboardText}
+            label="Review queue"
+            active={state.activeView === "reviews"}
+            count={state.reviews.filter((item) => item.status === "pending").length}
+            onClick={() => dispatch({ type: "showReviews" })}
+          />
+          <FooterLink
+            icon={TreeStructure}
+            label="Workflows"
+            active={state.activeView === "workflows"}
+            dot={
+              state.workflows.some((workflow) => workflow.status === "active" || workflow.status === "blocked")
+                ? "accent"
+                : undefined
+            }
+            onClick={() => dispatch({ type: "showWorkflows" })}
+          />
+          <FooterLink
+            icon={UsersThree}
+            label="Org chart"
+            active={state.activeView === "org"}
+            onClick={() => dispatch({ type: "showOrgChart" })}
+          />
+          <FooterLink
+            icon={CalendarDots}
+            label="Automations"
+            active={state.activeView === "routines"}
+            dot={
+              state.routineRuns.some((run) => ["failed", "missed"].includes(run.status) && !run.seenAt)
+                ? "danger"
+                : undefined
+            }
+            onClick={() => dispatch({ type: "showRoutines" })}
+          />
+          <FooterLink
+            icon={PuzzlePiece}
+            label="Plugins"
+            onClick={() => dispatch({ type: "togglePlugins", open: true })}
+          />
+        </nav>
+        {/* The name and the gear beside it opened the same dialog — two
+            controls for one action, in the row that had least room to spare.
+            They are one control now, with the gear kept as the glyph people
+            look for when they want settings. */}
+        <div className="flex items-center gap-0.5">
           <button
             onClick={() => dispatch({ type: "toggleAppSettings" })}
-            className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-2 py-2 text-left hover:bg-raised/50"
+            title="App settings"
+            className="flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-1.5 text-left transition-colors hover:bg-raised/60"
           >
-            <InitialsAvatar initials={profileInitials(state.config?.profile)} size={28} />
-            <span className="truncate text-[14px] text-ink">
+            <InitialsAvatar initials={profileInitials(state.config?.profile)} size={26} />
+            <span className="min-w-0 flex-1 truncate text-[13px] text-ink">
               {state.config?.profile?.name?.trim() || state.config?.profile?.email?.trim() || "You"}
             </span>
+            <Gear size={16} weight="bold" className="shrink-0 text-ink-secondary" />
           </button>
           <UpdateButton />
-          <button
-            onClick={() => dispatch({ type: "toggleAppSettings" })}
-            className="flex size-10 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink"
-            title="App settings"
-            aria-label="App settings"
-          >
-            <Gear size={18} weight="bold" />
-          </button>
         </div>
       </div>
 
