@@ -27,6 +27,10 @@ export interface Notification {
    * icon. Grouping notifications per bot is only legible when they are also
    * told apart at a glance; a name in the title is not enough on a phone. */
   botColor?: string;
+  /** An answerable card behind this notification. Carried so a durable
+   * channel can offer the answers as buttons rather than telling someone to
+   * go and open the app. */
+  answerable?: { requestId: string; options: string[] };
 }
 
 /** One line, short enough for a lock screen, with the newlines and code

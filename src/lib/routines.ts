@@ -23,6 +23,9 @@ export interface Routine {
   name: string;
   prompt: string;
   botId: string;
+  /** Set when the routine belongs to a room: its result is delivered there
+   * rather than into the MAUS's own task thread. */
+  groupId?: string;
   runOn: RoutineRunOn;
   enabled: boolean;
   schedule: RoutineSchedule;
@@ -36,6 +39,9 @@ export interface Routine {
 }
 
 export interface RoutineRun {
+  /** Set when this run was delivered into a room rather than a task thread;
+   * `threadId` is then the room's transcript. */
+  groupId?: string;
   id: string;
   routineId: string;
   routineName: string;
@@ -67,6 +73,8 @@ export interface RoutineInput {
   name: string;
   prompt: string;
   botId: string;
+  /** Deliver the work into this room instead of the MAUS's own thread. */
+  groupId?: string;
   runOn?: RoutineRunOn;
   enabled?: boolean;
   schedule: RoutineSchedule;

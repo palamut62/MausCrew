@@ -33,6 +33,16 @@ export interface Routine {
   name: string;
   prompt: string;
   botId: string;
+  /**
+   * Deliver this routine's work into a room instead of the bot's own thread.
+   *
+   * A room is where a crew's work is visible to each other; a routine that
+   * lands in one member's private task thread is the same work with the team
+   * cut out of it. When set, the run is addressed to the room the way a
+   * person addresses it — the named member is @mentioned — so the room's own
+   * routing, transcript and approvals apply unchanged.
+   */
+  groupId?: string;
   runOn: RoutineRunOn;
   enabled: boolean;
   schedule: RoutineSchedule;
@@ -57,6 +67,8 @@ export interface RoutineRun {
   /** A watch run that found nothing. Kept as a receipt, shown as a whisper. */
   quiet?: boolean;
   botId: string;
+  /** The room this run is delivered into, when the routine names one. */
+  groupId?: string;
   runOn: RoutineRunOn;
   scheduledFor: number;
   status: RoutineRunStatus;
@@ -80,6 +92,7 @@ export interface RoutineInput {
   name: string;
   prompt: string;
   botId: string;
+  groupId?: string;
   runOn?: RoutineRunOn;
   enabled?: boolean;
   schedule: RoutineSchedule;
@@ -110,6 +123,21 @@ export interface RoutineManagerOptions {
     onDispatchError: (message: string) => void,
   ) => Promise<void>;
   interruptTurn?: (botId: string, threadId: string, runOn: RoutineRunOn) => Promise<void>;
+  /** Delivering a routine into a room rather than a bot's own task thread.
+   * Absent in tests that never use room routines; a routine that names a room
+   * with no room support fails loudly rather than running somewhere else. */
+  room?: {
+    state: (groupId: string) => "ready" | "busy" | "missing";
+    /** The room's transcript, for receipts and interrupts. */
+    threadId: (groupId: string) => string | null;
+    startTurn: (
+      groupId: string,
+      botId: string,
+      prompt: string,
+      triggerSource: RoutineRunTrigger,
+      onDispatchError: (message: string) => void,
+    ) => Promise<void>;
+  };
 }
 
 const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
@@ -182,10 +210,13 @@ function sanitizeInput(input: RoutineInput): Omit<Routine, "id" | "createdAt" | 
   if (!botId) throw invalid("Choose a bot");
   const runOn = input.runOn ?? "maus";
   if (runOn !== "maus" && runOn !== "cloud") throw invalid("Choose where this routine runs");
+  const groupId = String(input.groupId ?? "").trim();
+  if (groupId && !/^[\w-]{1,100}$/.test(groupId)) throw invalid("That room id is not valid");
   return {
     name,
     prompt,
     botId,
+    ...(groupId ? { groupId } : {}),
     runOn,
     enabled: input.enabled !== false,
     schedule: cleanSchedule(input.schedule),
@@ -487,6 +518,45 @@ export class RoutineManager {
           this.emitRun(run);
           continue;
         }
+        // A room routine bypasses the per-bot task entirely: its work belongs
+        // in the room's transcript, where the rest of the crew can see it.
+        if (run.groupId) {
+          const room = this.options.room;
+          const roomState = room ? room.state(run.groupId) : "missing";
+          if (roomState === "busy") continue;
+          const roomThread = roomState === "ready" ? room!.threadId(run.groupId) : null;
+          if (!roomThread) {
+            run.status = "failed";
+            run.error = room ? "The room no longer exists" : "This build cannot run room routines";
+            run.finishedAt = this.now();
+            this.save();
+            this.emitRun(run);
+            continue;
+          }
+          run.threadId = roomThread;
+          run.startedAt = this.now();
+          run.status = "running";
+          this.save();
+          this.emitRun(run);
+          try {
+            const roomPrompt = run.prompt ?? this.routines.find((r) => r.id === run.routineId)?.prompt;
+            if (!roomPrompt) {
+              this.failThread(roomThread, "The routine was deleted before it could start");
+              continue;
+            }
+            await room!.startTurn(
+              run.groupId,
+              run.botId,
+              run.watch ? this.watchPrompt(roomPrompt, run.routineId, run.id) : roomPrompt,
+              run.triggerSource ?? (run.manual ? "manual" : "schedule"),
+              (message) => this.failThread(roomThread, message),
+            );
+          } catch (error) {
+            this.failThread(roomThread, error instanceof Error ? error.message : String(error));
+          }
+          continue;
+        }
+
         // A webhook is an incoming message, so make its task the bot's live
         // chat immediately. Scheduled work remains detached and unobtrusive.
         const task = this.options.createTask(run.botId, run.routineName, run.triggerSource === "webhook");
@@ -617,6 +687,9 @@ export class RoutineManager {
       durationMinutes: routine.durationMinutes,
       ...(routine.watch ? { watch: true } : {}),
       botId: routine.botId,
+      // Snapshot alongside the prompt: a routine re-pointed at another room
+      // must not move a run that is already queued for this one.
+      ...(routine.groupId ? { groupId: routine.groupId } : {}),
       runOn: routine.runOn ?? "maus",
       scheduledFor,
       status: "queued",

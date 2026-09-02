@@ -7,6 +7,7 @@ import { api, useStore, formatTime, visibleMessages, type Bot, type Group, type 
 import { MausAvatar, InitialsAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot-motion";
 import { botShareLink } from "@/lib/share-bot";
+import { projectActivity } from "@/lib/project-activity";
 import { useUpdaterState } from "@/lib/updater";
 import { cn } from "@/lib/cn";
 import { downloadSelectedTeam } from "@/lib/team-files";
@@ -1347,13 +1348,27 @@ export function Sidebar({ open, onClose, onOpenDirectory }: { open: boolean; onC
           {state.projects.map((project) => {
             const rooms = visibleGroups.filter((group) => project.roomIds.includes(group.id));
             if (!rooms.length && q) return null;
+            // Computed from every room the project owns, not the filtered
+            // list: a search that hides a room must not also hide the fact
+            // that something happened in it.
+            const activity = projectActivity(project, state.groups, state.bots);
             return (
               <div key={project.id} className="mb-1 rounded-lg border border-hairline/60 bg-inset/20 p-1">
                 <div className="flex items-center gap-1.5 px-2 py-1 text-[10.5px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
                   <FolderPlus size={12} weight="bold" />
                   <span className="min-w-0 flex-1 truncate">{project.name}</span>
+                  {activity.at > 0 && <span className="shrink-0 font-mono text-[9.5px] tracking-normal normal-case">{formatTime(activity.at)}</span>}
                   <button onClick={() => { setNewRoomProjectId(project.id); setNewRoom(true); }} aria-label={`Add room to ${project.name}`} className="rounded p-1 hover:bg-raised hover:text-ink"><Plus size={11} weight="bold" /></button>
                   <button onClick={() => setEditProjectId(project.id)} aria-label={`Edit ${project.name}`} className="rounded p-1 hover:bg-raised hover:text-ink"><Pencil size={11} weight="bold" /></button>
+                </div>
+                {/* Who moved last across the whole project. Without it a
+                    heading over four rooms is the one row in the sidebar that
+                    never says anything. */}
+                <div className="flex items-center gap-1.5 px-2 pb-1 text-[11.5px] normal-case tracking-normal">
+                  <span className={cn("min-w-0 flex-1 truncate", activity.working ? "text-accent" : "text-ink-secondary")}>
+                    {activity.preview}
+                  </span>
+                  {activity.unread && <span className="size-1.5 shrink-0 rounded-full bg-accent" role="img" aria-label="Unread messages in this project" />}
                 </div>
                 {rooms.map((group) => <GroupListItem key={group.id} group={group} onMenu={setRoomMenu} />)}
               </div>

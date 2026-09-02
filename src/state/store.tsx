@@ -299,7 +299,21 @@ export interface ConfigStatus {
   tts?: { configured: boolean; ready: boolean; voice: string };
   /** Telegram BotFather token stays write-only; the destination and public
    * bot username are safe to show in Settings. */
-  telegram?: { configured: boolean; enabled: boolean; chatId: string; botUsername: string };
+  telegram?: {
+    configured: boolean;
+    enabled: boolean;
+    chatId: string;
+    botUsername: string;
+    /** Listening for incoming messages and turning them into work. */
+    inbound: boolean;
+    /** The Chief may create a MAUS when nobody on the team fits. */
+    autoCreateBots: boolean;
+    /** Telegram user ids allowed to give orders; empty means anyone in the
+     * paired chat. */
+    allowedUserIds: number[];
+    /** Whether the listener is up, and why not when it is not. */
+    listener: { running: boolean; offset: number; problem: string | null };
+  };
   /** who's using the app — collected in onboarding, shown in the sidebar */
   profile?: { name: string; email: string };
   /** Product usage analytics. `enabled` gates whether PostHog is loaded at

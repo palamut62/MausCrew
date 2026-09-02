@@ -3,7 +3,7 @@
 // does not become a wall of competing motion. Plain messages go to the room's
 // default responder; @mentions override that routing.
 import { memo, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, CaretDown, PushPin } from "@phosphor-icons/react";
+import { ArrowDown, CalendarDots, CaretDown, PushPin } from "@phosphor-icons/react";
 import {
   useStore,
   useStreaming,
@@ -20,6 +20,7 @@ import { Composer } from "./Composer";
 import { GroupCallButton, GroupCallOverlay } from "./GroupCallView";
 import { ReactionBar, ReactionChips } from "./Reactions";
 import { ApprovalCard } from "./ApprovalCard";
+import { RoutineEditor } from "./RoutinesPage";
 import { cn } from "@/lib/cn";
 
 function dayLabel(at: number): string {
@@ -199,6 +200,7 @@ export function GroupView({ group }: { group: Group }) {
   const touchY = useRef(0);
   const [bulletinOpen, setBulletinOpen] = useState(false);
   const [bulletinDraft, setBulletinDraft] = useState(group.bulletin);
+  const [schedulingRoom, setSchedulingRoom] = useState(false);
 
   const members = useMemo(
     () => group.memberIds.map((id) => state.bots.find((b) => b.id === id)).filter((b): b is Bot => Boolean(b)),
@@ -246,6 +248,19 @@ export function GroupView({ group }: { group: Group }) {
       >
         <span className="min-w-0 truncate text-[15px] font-semibold text-ink">{group.name}</span>
         <div className="flex shrink-0 items-center gap-1.5" style={noDrag}>
+          {/* Recurring work for the room. Routines were reachable only from a
+              single MAUS's computer panel, which put the result in that one
+              bot's private task thread — the opposite of what a room is for. */}
+          {!group.dm && members.length > 0 && (
+            <button
+              onClick={() => setSchedulingRoom(true)}
+              title="Schedule recurring work for this room"
+              aria-label="Schedule recurring work for this room"
+              className="rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink"
+            >
+              <CalendarDots size={16} weight="bold" />
+            </button>
+          )}
           <GroupCallButton group={group} members={members} />
           {!group.dm && <DefaultResponderSelect group={group} members={members} />}
           {/* Every member's face plus a lead picker plus a call button does
@@ -384,6 +399,14 @@ export function GroupView({ group }: { group: Group }) {
         >
           <ArrowDown size={13} weight="bold" /> Jump to latest
         </button>
+      )}
+
+      {schedulingRoom && (
+        <RoutineEditor
+          bots={members}
+          room={{ id: group.id, name: group.name }}
+          onClose={() => setSchedulingRoom(false)}
+        />
       )}
 
       <Composer key={group.id} group={group} members={members} />

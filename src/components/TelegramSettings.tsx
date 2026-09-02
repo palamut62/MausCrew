@@ -10,6 +10,8 @@ export function TelegramSettings() {
   const [token, setToken] = useState("");
   const [chatId, setChatId] = useState("");
   const [enabled, setEnabled] = useState(true);
+  const [inbound, setInbound] = useState(false);
+  const [autoCreateBots, setAutoCreateBots] = useState(false);
   const [working, setWorking] = useState<"save" | "discover" | "test" | "disconnect" | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -19,6 +21,8 @@ export function TelegramSettings() {
     queueMicrotask(() => {
       setChatId(status.chatId);
       setEnabled(status.enabled);
+      setInbound(status.inbound === true);
+      setAutoCreateBots(status.autoCreateBots === true);
     });
   }, [status]);
 
@@ -35,7 +39,7 @@ export function TelegramSettings() {
     setError("");
     setMessage("");
     try {
-      const telegram: Record<string, unknown> = { chatId: chatId.trim(), enabled };
+      const telegram: Record<string, unknown> = { chatId: chatId.trim(), enabled, inbound, autoCreateBots };
       if (token.trim()) telegram.botToken = token.trim();
       const config = await api("/api/config", { method: "PUT", body: JSON.stringify({ telegram }) }) as ConfigStatus;
       finish(config, "Telegram settings saved.");
@@ -85,7 +89,7 @@ export function TelegramSettings() {
     try {
       const config = await api("/api/config", {
         method: "PUT",
-        body: JSON.stringify({ telegram: { botToken: "", chatId: "", enabled: false } }),
+        body: JSON.stringify({ telegram: { botToken: "", chatId: "", enabled: false, inbound: false, autoCreateBots: false } }),
       }) as ConfigStatus;
       setChatId("");
       finish(config, "Telegram disconnected.");
@@ -143,6 +147,46 @@ export function TelegramSettings() {
         Send each bot&apos;s full completion report, question, and approval request with its own name, role, and colour
         <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} className="size-4 accent-[var(--accent)]" />
       </label>
+
+      <div className="rounded-lg border border-hairline bg-inset/40 p-3">
+        <label className="flex items-start justify-between gap-4 text-[13px] text-ink">
+          <span className="min-w-0">
+            <span className="block font-medium">Accept work from this chat</span>
+            <span className="mt-0.5 block text-[11.5px] leading-[1.5] text-ink-secondary">
+              A message you send becomes a task: the Chief reads it, picks the MAUS whose role fits, and queues the work
+              behind whatever that MAUS is already doing. Reply to an answer here to continue the same task. Only the
+              paired chat is accepted — and only while MausCrew is running on this computer.
+            </span>
+          </span>
+          <input type="checkbox" checked={inbound} onChange={(event) => setInbound(event.target.checked)} className="mt-0.5 size-4 shrink-0 accent-[var(--accent)]" />
+        </label>
+
+        {inbound && (
+          <label className="mt-3 flex items-start justify-between gap-4 border-t border-hairline pt-3 text-[13px] text-ink">
+            <span className="min-w-0">
+              <span className="block font-medium">Let the Chief create a MAUS when nobody fits</span>
+              <span className="mt-0.5 block text-[11.5px] leading-[1.5] text-ink-secondary">
+                Off by default, and separate on purpose: this is the larger permission. A MAUS that is merely busy never
+                triggers it — that work is queued. Whatever gets created still asks you before it runs a risky tool.
+              </span>
+            </span>
+            <input type="checkbox" checked={autoCreateBots} onChange={(event) => setAutoCreateBots(event.target.checked)} className="mt-0.5 size-4 shrink-0 accent-[var(--accent)]" />
+          </label>
+        )}
+
+        {inbound && status.listener && (
+          <div className="mt-3 flex items-center gap-2 border-t border-hairline pt-3 text-[11.5px]">
+            <span className={`size-1.5 shrink-0 rounded-full ${status.listener.running && !status.listener.problem ? "bg-success" : "bg-warning"}`} />
+            <span className={status.listener.problem ? "text-warning" : "text-ink-secondary"}>
+              {status.listener.problem
+                ? `Listener: ${status.listener.problem}`
+                : status.listener.running
+                  ? "Listening for messages."
+                  : "Listener starts once the token and chat are saved."}
+            </span>
+          </div>
+        )}
+      </div>
 
       <div className="flex flex-wrap gap-2">
         <button

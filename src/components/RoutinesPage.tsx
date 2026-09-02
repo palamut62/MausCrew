@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Spin } from "./Spin";
-import { ArrowSquareOut, CalendarDot, CalendarDots, CaretLeft, CaretRight, CheckCircle, Cloud, Laptop, Pause, Play, Plus, Trash, WarningCircle, WebhooksLogo, X } from "@phosphor-icons/react";
+import { ArrowSquareOut, CalendarDot, CalendarDots, CaretLeft, CaretRight, CheckCircle, Cloud, Laptop, Pause, Play, Plus, Trash, Users, WarningCircle, WebhooksLogo, X } from "@phosphor-icons/react";
 
 import { MausAvatar } from "@/components/Avatar";
 import { WebhooksPanel } from "@/components/WebhooksPanel";
@@ -308,12 +308,16 @@ export function RoutineEditor({
   bots,
   lockedBotId,
   defaultRunOn,
+  room,
   onClose,
 }: {
   routine?: Routine;
   bots: Bot[];
   lockedBotId?: string;
   defaultRunOn?: RoutineRunOn;
+  /** Opened from a room: the work lands in that room's transcript instead of
+   * the MAUS's own task thread, and `bots` is already its members. */
+  room?: { id: string; name: string };
   onClose: () => void;
 }) {
   const { state, dispatch } = useStore();
@@ -346,6 +350,7 @@ export function RoutineEditor({
       name,
       prompt,
       botId,
+      ...(room ? { groupId: room.id } : {}),
       runOn,
       enabled: routine ? undefined : true,
       durationMinutes,
@@ -381,7 +386,11 @@ export function RoutineEditor({
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-hairline bg-panel/95 px-5 py-4 backdrop-blur">
           <div>
             <div className="text-[17px] font-semibold text-ink">{routine ? "Edit schedule" : "New schedule"}</div>
-            <div className="mt-0.5 text-[12px] text-ink-secondary">Give a MAUS scheduled work with a calendar you can trust.</div>
+            <div className="mt-0.5 text-[12px] text-ink-secondary">
+              {room
+                ? `Recurring work for ${room.name}. The answer lands in the room, where the rest of the crew can see it.`
+                : "Give a MAUS scheduled work with a calendar you can trust."}
+            </div>
           </div>
           <button onClick={onClose} className="rounded-lg p-2 text-ink-secondary hover:bg-raised hover:text-ink"><X size={18} weight="bold" /></button>
         </div>
@@ -508,7 +517,7 @@ export function RoutineEditor({
 }
 
 function RoutineDetails({ item, bot, onClose, onEdit }: { item: CalendarItem; bot: Bot; onClose: () => void; onEdit: (routine: Routine) => void }) {
-  const { dispatch } = useStore();
+  const { state, dispatch } = useStore();
   const routine = item.routine;
   const run = item.run;
   const [working, setWorking] = useState(false);
@@ -555,6 +564,9 @@ function RoutineDetails({ item, bot, onClose, onEdit }: { item: CalendarItem; bo
               <div className="rounded-xl bg-inset p-3"><div className="font-mono text-[10px] uppercase tracking-wider text-ink-secondary">Schedule</div><div className="mt-1 text-[13px] text-ink">{scheduleLabel(routine)}</div></div>
               <div className="rounded-xl bg-inset p-3"><div className="font-mono text-[10px] uppercase tracking-wider text-ink-secondary">Runs on</div><div className="mt-1 flex items-center gap-1.5 text-[13px] text-ink">{routine.runOn === "cloud" ? <Cloud size={13} weight="bold" /> : <Laptop size={13} weight="bold" />}{routine.runOn === "cloud" ? "Cloud VM" : "MAUS setup"}</div></div>
               <div className="rounded-xl bg-inset p-3"><div className="font-mono text-[10px] uppercase tracking-wider text-ink-secondary">Duration</div><div className="mt-1 text-[13px] text-ink">{routine.durationMinutes} minutes</div></div>
+              {routine.groupId && (
+                <div className="rounded-xl bg-inset p-3"><div className="font-mono text-[10px] uppercase tracking-wider text-ink-secondary">Lands in</div><div className="mt-1 flex items-center gap-1.5 text-[13px] text-ink"><Users size={13} weight="bold" />{state.groups.find((group) => group.id === routine.groupId)?.name ?? "a room that no longer exists"}</div></div>
+              )}
             </div>
           )}
           {run?.triggerSource === "webhook" && (
@@ -573,7 +585,9 @@ function RoutineDetails({ item, bot, onClose, onEdit }: { item: CalendarItem; bo
         </div>
         <div className="flex flex-wrap items-center gap-2 border-t border-hairline px-5 py-4">
           {routine && <button disabled={working} onClick={() => void invoke(`/api/routines/${routine.id}/run`)} className="flex items-center gap-2 rounded-xl bg-accent px-3.5 py-2 text-[13px] font-medium text-app hover:brightness-110 disabled:opacity-40"><Play size={14} weight="bold" />Run now</button>}
-          {run?.threadId && <button onClick={() => { dispatch({ type: "select", id: bot.id }); dispatch({ type: "switchTask", botId: bot.id, threadId: run.threadId! }); onClose(); }} className="flex items-center gap-2 rounded-xl bg-raised px-3.5 py-2 text-[13px] text-ink hover:bg-raised-hover"><ArrowSquareOut size={14} weight="bold" />Open task</button>}
+          {run?.groupId
+            ? <button onClick={() => { dispatch({ type: "select", id: run.groupId! }); onClose(); }} className="flex items-center gap-2 rounded-xl bg-raised px-3.5 py-2 text-[13px] text-ink hover:bg-raised-hover"><ArrowSquareOut size={14} weight="bold" />Open room</button>
+            : run?.threadId && <button onClick={() => { dispatch({ type: "select", id: bot.id }); dispatch({ type: "switchTask", botId: bot.id, threadId: run.threadId! }); onClose(); }} className="flex items-center gap-2 rounded-xl bg-raised px-3.5 py-2 text-[13px] text-ink hover:bg-raised-hover"><ArrowSquareOut size={14} weight="bold" />Open task</button>}
           {run && ["queued", "running", "waiting"].includes(run.status) && <button disabled={working} onClick={() => void invoke(`/api/routine-runs/${run.id}/cancel`)} className="flex items-center gap-2 rounded-xl bg-raised px-3.5 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-40"><X size={14} weight="bold" />Cancel run</button>}
           <div className="flex-1" />
           {routine && canToggleRoutine(routine) && <button disabled={working} onClick={async () => { setWorking(true); setError(""); try { const response = await api(`/api/routines/${routine.id}`, { method: "PATCH", body: JSON.stringify({ enabled: !routine.enabled }) }); dispatch({ type: "routinePatched", routine: response.routine }); } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); } finally { setWorking(false); } }} className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40">{routine.enabled ? <Pause size={14} weight="bold" /> : <Play size={14} weight="bold" />}{routine.enabled ? "Pause" : "Resume"}</button>}

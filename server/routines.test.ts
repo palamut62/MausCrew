@@ -22,6 +22,8 @@ function harness(start = new Date(2026, 7, 17, 8, 0, 0).getTime()) {
   const triggerSources: string[] = [];
   const taskActivations: boolean[] = [];
   const emitted: any[] = [];
+  let room: "ready" | "busy" | "missing" = "ready";
+  const roomTurns: Array<{ groupId: string; botId: string; prompt: string }> = [];
   const options: RoutineManagerOptions = {
     file: tempFile(),
     now: () => now,
@@ -36,6 +38,13 @@ function harness(start = new Date(2026, 7, 17, 8, 0, 0).getTime()) {
       runOns.push(runOn);
       triggerSources.push(triggerSource);
     },
+    room: {
+      state: () => room,
+      threadId: (groupId) => (room === "missing" ? null : `room-thread-${groupId}`),
+      startTurn: async (groupId, botId, prompt) => {
+        roomTurns.push({ groupId, botId, prompt });
+      },
+    },
   };
   const manager = new RoutineManager(options);
   return {
@@ -46,8 +55,10 @@ function harness(start = new Date(2026, 7, 17, 8, 0, 0).getTime()) {
     runOns,
     triggerSources,
     taskActivations,
+    roomTurns,
     setNow: (value: number) => (now = value),
     setBot: (value: typeof bot) => (bot = value),
+    setRoom: (value: typeof room) => (room = value),
   };
 }
 
@@ -448,5 +459,85 @@ describe("watches", () => {
     await h.manager.tick();
 
     expect(h.started[1]!.prompt).toBe("Write the report.");
+  });
+});
+
+describe("room routines", () => {
+  const roomRoutine = {
+    name: "Monday review",
+    prompt: "Review what shipped last week",
+    botId: "bot-1",
+    groupId: "room-9",
+    schedule: { type: "daily" as const, time: "09:00", weekdays: [1] },
+  };
+
+  it("delivers the work into the room, addressed to the named member", async () => {
+    const h = harness();
+    const routine = h.manager.create(roomRoutine);
+    h.setNow(routine.nextRunAt!);
+    await h.manager.tick();
+
+    // The point of the feature: it lands in the room's transcript, not in a
+    // task thread only one bot can see.
+    expect(h.roomTurns).toEqual([{ groupId: "room-9", botId: "bot-1", prompt: "Review what shipped last week" }]);
+    expect(h.started).toEqual([]);
+    expect(h.taskActivations).toEqual([]);
+    expect(h.manager.listRuns()[0]).toMatchObject({
+      status: "running",
+      groupId: "room-9",
+      threadId: "room-thread-room-9",
+    });
+  });
+
+  it("waits while the room is busy instead of talking over it", async () => {
+    const h = harness();
+    const routine = h.manager.create(roomRoutine);
+    h.setRoom("busy");
+    h.setNow(routine.nextRunAt!);
+    await h.manager.tick();
+    expect(h.roomTurns).toEqual([]);
+    expect(h.manager.listRuns()[0]!.status).toBe("queued");
+
+    h.setRoom("ready");
+    await h.manager.tick();
+    expect(h.roomTurns).toHaveLength(1);
+  });
+
+  it("fails the run when the room is gone rather than running somewhere else", async () => {
+    const h = harness();
+    const routine = h.manager.create(roomRoutine);
+    h.setRoom("missing");
+    h.setNow(routine.nextRunAt!);
+    await h.manager.tick();
+    expect(h.roomTurns).toEqual([]);
+    expect(h.started).toEqual([]);
+    expect(h.manager.listRuns()[0]).toMatchObject({ status: "failed", error: "The room no longer exists" });
+  });
+
+  it("keeps a queued run pointed at the room it was queued for", async () => {
+    const h = harness();
+    const routine = h.manager.create(roomRoutine);
+    h.setRoom("busy");
+    h.setNow(routine.nextRunAt!);
+    await h.manager.tick();
+    // Re-pointing the definition must not move work that is already queued.
+    h.manager.update(routine.id, { ...roomRoutine, groupId: "room-other" });
+    h.setRoom("ready");
+    await h.manager.tick();
+    expect(h.roomTurns[0]!.groupId).toBe("room-9");
+  });
+
+  it("leaves ordinary routines on their own task thread", async () => {
+    const h = harness();
+    const routine = h.manager.create({
+      name: "Morning brief",
+      prompt: "Summarise the inbox",
+      botId: "bot-1",
+      schedule: { type: "daily", time: "09:00", weekdays: [1] },
+    });
+    h.setNow(routine.nextRunAt!);
+    await h.manager.tick();
+    expect(h.roomTurns).toEqual([]);
+    expect(h.started).toHaveLength(1);
   });
 });

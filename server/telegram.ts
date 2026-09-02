@@ -171,3 +171,77 @@ export function enqueueTelegramNotification(cfg: AppConfig, notification: Notifi
       console.warn(`[telegram] ${error instanceof Error ? error.message : String(error)}`);
     });
 }
+
+export interface TelegramButton {
+  /** Shown on the button. */
+  label: string;
+  /** Round-trips back as `callback_query.data`; Telegram caps it at 64 bytes,
+   * which is why the answer is carried by index rather than by its text. */
+  data: string;
+}
+
+/**
+ * Post a message to the paired chat.
+ *
+ * Returns the sent message id, which is what lets a later reply be traced
+ * back to the work it is about. Null when Telegram is not configured or the
+ * response did not carry one — the message still went out; only threading is
+ * lost.
+ */
+export async function sendTelegramMessage(
+  cfg: AppConfig,
+  text: string,
+  options: { replyTo?: number; buttons?: TelegramButton[][] } = {},
+  fetcher: typeof fetch = fetch,
+): Promise<number | null> {
+  const { token, chatId, enabled } = settings(cfg);
+  if (!enabled || !token || !chatId) return null;
+  const body: Record<string, unknown> = {
+    chat_id: chatId,
+    text: text.slice(0, TELEGRAM_MESSAGE_LIMIT),
+  };
+  if (options.replyTo) {
+    // The reply may be gone by the time we answer; Telegram would otherwise
+    // reject the whole message rather than send it unthreaded.
+    body.reply_to_message_id = options.replyTo;
+    body.allow_sending_without_reply = true;
+  }
+  if (options.buttons?.length) {
+    body.reply_markup = {
+      inline_keyboard: options.buttons.map((row) =>
+        row.map((button) => ({ text: button.label.slice(0, 64), callback_data: button.data.slice(0, 64) })),
+      ),
+    };
+  }
+  const sent = await callTelegram<{ message_id?: number }>(token, "sendMessage", body, fetcher);
+  return typeof sent.message_id === "number" ? sent.message_id : null;
+}
+
+/** Stop the spinner on a tapped button, with an optional toast. */
+export async function answerTelegramCallback(
+  cfg: AppConfig,
+  callbackId: string,
+  text?: string,
+  fetcher: typeof fetch = fetch,
+): Promise<void> {
+  const { token, enabled } = settings(cfg);
+  if (!enabled || !token) return;
+  await callTelegram(
+    token,
+    "answerCallbackQuery",
+    { callback_query_id: callbackId, ...(text ? { text: text.slice(0, 200) } : {}) },
+    fetcher,
+  ).catch(() => undefined);
+}
+
+/** The buttons for a card with a short, fixed set of answers. Long or
+ * free-text questions get no keyboard — the person types the answer as an
+ * ordinary reply, which the conversation map routes to the same task. */
+export function telegramAnswerButtons(requestId: string, options: readonly string[]): TelegramButton[][] {
+  const usable = options
+    .map((option) => String(option ?? "").trim())
+    .filter(Boolean)
+    .filter((option) => `a:${requestId}:${option}`.length <= 64)
+    .slice(0, 6);
+  return usable.length ? usable.map((option) => [{ label: option, data: `a:${requestId}:${option}` }]) : [];
+}

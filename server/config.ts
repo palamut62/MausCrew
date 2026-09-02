@@ -128,7 +128,24 @@ export interface AppConfig {
   tts?: { key?: string; voice?: string };
   /** Outbound Telegram notifications. The BotFather token is write-only;
    * chatId and botUsername are non-secret connection metadata. */
-  telegram?: { botToken?: string; chatId?: string; botUsername?: string; enabled?: boolean };
+  telegram?: {
+    botToken?: string;
+    chatId?: string;
+    botUsername?: string;
+    enabled?: boolean;
+    /** Listen for incoming messages and turn them into work. Off by default:
+     * outbound notifications are a report, inbound is a control surface, and
+     * the second is a decision the user makes on purpose. */
+    inbound?: boolean;
+    /** Let the Chief create a MAUS when nobody on the team fits. Separate
+     * from `inbound` because it is the larger of the two permissions — tool
+     * approvals still apply to whatever it creates. */
+    autoCreateBots?: boolean;
+    /** Telegram user ids allowed to give orders. Empty means anyone in the
+     * paired chat, which is one person in a private chat and everybody in a
+     * group — which is why it can be narrowed. */
+    allowedUserIds?: number[];
+  };
   /** The person using the app (collected in onboarding, shown in the
    * sidebar). Not a secret — echoed back by GET /api/config. */
   profile?: { name?: string; email?: string };

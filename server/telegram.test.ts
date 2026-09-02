@@ -2,14 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { AppConfig } from "./config.ts";
 import type { Notification } from "./notify.ts";
-import {
-  discoverTelegramChat,
-  sendTelegramNotification,
-  telegramNotificationText,
-  telegramNotificationTexts,
-  validTelegramChatId,
-  verifyTelegramBot,
-} from "./telegram.ts";
+import { discoverTelegramChat, sendTelegramMessage, sendTelegramNotification, telegramAnswerButtons, telegramNotificationText, telegramNotificationTexts, validTelegramChatId, verifyTelegramBot } from "./telegram.ts";
 
 const notification: Notification = {
   kind: "done",
@@ -101,5 +94,47 @@ describe("Telegram notifications", () => {
       id: "987",
       label: "Umut",
     });
+  });
+});
+
+describe("telegram outbound", () => {
+  const cfg = { telegram: { botToken: "t", chatId: "12345", enabled: true } };
+  const reply = (result: unknown) =>
+    new Response(JSON.stringify({ ok: true, result }), { status: 200, headers: { "content-type": "application/json" } });
+
+  it("returns the sent message id so replies can be traced back", async () => {
+    const fetcher = vi.fn(async () => reply({ message_id: 77 })) as unknown as typeof fetch;
+    expect(await sendTelegramMessage(cfg, "hello", {}, fetcher)).toBe(77);
+  });
+
+  it("threads a reply but never fails the send when the parent is gone", async () => {
+    let body: any;
+    const fetcher = vi.fn(async (_url: string, init: RequestInit) => {
+      body = JSON.parse(String(init.body));
+      return reply({ message_id: 78 });
+    }) as unknown as typeof fetch;
+    await sendTelegramMessage(cfg, "hi", { replyTo: 12 }, fetcher);
+    expect(body.reply_to_message_id).toBe(12);
+    expect(body.allow_sending_without_reply).toBe(true);
+  });
+
+  it("sends nothing when Telegram is not configured", async () => {
+    const fetcher = vi.fn() as unknown as typeof fetch;
+    expect(await sendTelegramMessage({ telegram: { botToken: "", chatId: "" } }, "x", {}, fetcher)).toBeNull();
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("builds one button per answer, carrying the request id", () => {
+    expect(telegramAnswerButtons("req-1", ["Allow", "Deny"])).toEqual([
+      [{ label: "Allow", data: "a:req-1:Allow" }],
+      [{ label: "Deny", data: "a:req-1:Deny" }],
+    ]);
+  });
+
+  it("offers no buttons when the answers would not fit Telegram's 64-byte payload", () => {
+    // The person types the answer instead; a truncated callback would answer
+    // the wrong thing.
+    expect(telegramAnswerButtons("req-1", ["x".repeat(80)])).toEqual([]);
+    expect(telegramAnswerButtons("req-1", [])).toEqual([]);
   });
 });
