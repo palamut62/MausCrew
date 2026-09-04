@@ -35,21 +35,27 @@ function stateWord(bot: Bot): string {
   return "boşta";
 }
 
+/** A feed row is a glance, not a transcript — raw tool payloads get cut. */
+function line(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > 110 ? `${flat.slice(0, 109)}…` : flat;
+}
+
 /** The bot's work as one column: what it did, what you said, what it is on now. */
 function feedRows(bot: Bot): Row[] {
   const rows: Row[] = [];
   for (const message of visibleMessages(bot).slice(-14)) {
     if (message.role === "user" && message.text) {
-      rows.push({ st: "sen", text: message.text, tone: "you" });
+      rows.push({ st: "sen", text: line(message.text), tone: "you" });
     } else if (message.kind === "activity") {
-      rows.push({ st: "bitti", text: message.tool?.spoken || message.tool?.name || "Adım", tone: "ok" });
+      rows.push({ st: "bitti", text: line(message.tool?.spoken || message.tool?.name || "Adım"), tone: "ok" });
     } else if (message.kind === "text" && message.text) {
-      rows.push({ st: "bitti", text: message.text, tone: "ok" });
+      rows.push({ st: "bitti", text: line(message.text), tone: "ok" });
     } else if (message.kind === "options" && message.card && !message.card.answered) {
-      rows.push({ st: "karar", text: message.card.title || "Senden karar bekliyor", tone: "now" });
+      rows.push({ st: "karar", text: line(message.card.title || "Senden karar bekliyor"), tone: "now" });
     }
   }
-  if (bot.busy) rows.push({ st: "şimdi", text: currentActivity(bot) || "Çalışıyor", tone: "now" });
+  if (bot.busy) rows.push({ st: "şimdi", text: line(currentActivity(bot) || "Çalışıyor"), tone: "now" });
   if (!rows.length) rows.push({ st: "sırada", text: "Henüz bir adım yok", tone: "next" });
   return rows.slice(-12);
 }
