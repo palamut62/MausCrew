@@ -30,22 +30,41 @@ Do not replace Serve with a public router port-forward.
 
 ## Phone interface
 
-On browser screens below 768px, Remote opens the light, green-accented
-**Sade Kumanda** dashboard. The Electron app keeps its existing interface.
+On browser screens below 768px, Remote opens the cream and brown
+**06 Hızlı Komut** dashboard. The Electron app keeps its existing interface.
 
-- **Ana ekran** shows running agents and requests waiting for your answer.
-- **Yeni görev başlat** lets you select an idle agent and describe a task.
+- **Başlat** puts the task input and agent selector directly on the home screen,
+  followed by compact running-task and pending-answer rows.
+- **Araştır / Özetle** insert editable prompts without sending them automatically.
+- **Görevi başlat** sends the request to the selected idle agent.
   It creates a separate conversation before sending the request. Failed sends
-  retain the text and reuse that context on retry.
-- **Görevler** opens current and previous conversations. In a conversation,
+  retain the text and reuse that context on retry. Drafts also survive tab changes.
+- **Geçmiş** opens current and previous conversations. In a conversation,
   send follow-up instructions, answer questions or permissions, and stop work.
-- **Agent'lar** lists the team and provides a direct task entry point.
-- **Ayarlar** links to automations, workflows, outbound review and app settings.
+- **Ayarlar → Agent'ları yönet** lists the team and provides a task entry point.
+- **Ayarlar** also links to automations, workflows, outbound review and app settings.
 
 The connected computer must stay on with MausCrew running. New task submission
 is disabled while disconnected. If another device changes the active task
 between creation and submission, the server rejects the stale submission so it
 cannot land in a different conversation.
+
+## Choosing a layout
+
+The phone ships three interfaces for the same data. Open **Ayarlar → Görünüm**
+on the phone and pick one; the choice is stored on that device and changes
+nothing on the desktop or on any other paired phone.
+
+- **Karar rayı** (default) — opens on the single decision waiting for you, with
+  the crew behind it as a rail of strips: filled while a bot works, capped dark
+  while it waits on you. No tab bar.
+- **Monospace zen** — a dark console: live counters, a process roster, a stream
+  of what actually happened, and one command line that accepts `@bot komut`.
+  Approvals are decided in place.
+- **Sade kumanda** — the original view with a bottom navigation bar.
+
+Every layout answers approvals and questions itself, so a decision can be
+settled without opening the chat.
 
 ## Security boundary
 

@@ -10,7 +10,7 @@ import { NoEngines } from "@/components/NoEngines";
 import { useDeepLinkBotImport } from "@/lib/deep-link";
 import { waitingBots } from "@/lib/tray";
 import { useMediaQuery } from "@/lib/use-media";
-import { MobileDashboard } from "@/components/MobileDashboard";
+import { MobileShell } from "@/components/MobileShell";
 
 // Chat is the launch path; secondary workspaces and modal surfaces are loaded
 // only when opened. Keeping them out of the startup chunk removes hundreds of
@@ -95,7 +95,7 @@ function Shell() {
 
   if (mobile) return (
     <Suspense fallback={<div className="p-5 text-ink-secondary">Yükleniyor…</div>}>
-      <MobileDashboard onBrowseDirectory={() => setDirectoryOpen(true)}>
+      <MobileShell onBrowseDirectory={() => setDirectoryOpen(true)}>
         {state.activeView === "routines" ? <RoutinesPage />
           : state.activeView === "reviews" ? <ReviewQueuePage />
           : state.activeView === "workflows" ? <WorkflowsPage />
@@ -104,7 +104,7 @@ function Shell() {
           : group ? <GroupView key={group.id} group={group} />
           : bot ? <ChatView bot={bot} />
           : <NoBots onBrowseDirectory={() => setDirectoryOpen(true)} />}
-      </MobileDashboard>
+      </MobileShell>
       {state.settingsOpen && bot && <SettingsPanel bot={bot} />}
       {state.computerOpen && bot && <ComputerPanel bot={bot} />}
       {state.appSettingsOpen && <SettingsModal />}
