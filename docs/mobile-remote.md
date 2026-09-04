@@ -58,9 +58,12 @@ nothing on the desktop or on any other paired phone.
 - **Karar rayı** (default) — opens on the single decision waiting for you, with
   the crew behind it as a rail of strips: filled while a bot works, capped dark
   while it waits on you. No tab bar.
-- **Monospace zen** — a dark console: live counters, a process roster, a stream
-  of what actually happened, and one command line that accepts `@bot komut`.
-  Approvals are decided in place.
+- **Monospace zen** — a dark console. `ACTIVE` / `AWAITING` / `LATENCY` counters
+  (the latency is a measured round trip to the local harness), a process roster
+  sorted blocked-first with idle bots folded behind `[+N IDLE]`, a timestamped
+  stream of what actually happened, and one command line that accepts
+  `@bot komut`. Approvals carry inline `ALLOW` / `DENY`, and the line above the
+  prompt reports the targeted bot's state and current step while it works.
 - **Sade kumanda** — the original view with a bottom navigation bar.
 
 Every layout answers approvals and questions itself, so a decision can be

@@ -90,63 +90,105 @@
 .rail-sheet-in .rail-pair { margin-top:14px; }
 .rail-sheet-in .rail-error { padding:8px 0 0; }
 
-/* ---- Monospace zen ---- */
-.mz { --color-app:#0b0b0d; --color-panel:#131419; --color-raised:#1a1c22; --color-raised-hover:#22242b; --color-card:#131419; --color-inset:#0f1014; --color-hairline:#2a2d36; --color-ink:#e8e8e6; --color-ink-secondary:#9a9ba4; --color-accent:#4bbd8b; --color-accent-border:#4bbd8b; --color-bubble-user:#1a1c22; --color-success:#4bbd8b; --color-danger:#ef7d78; --color-warning:#e0a33c; font-family:ui-monospace,SFMono-Regular,Menlo,"Cascadia Mono",monospace; }
+/* ---- Monospace zen ----
+   A console skin. It re-scopes the phone theme's own variables to a dark
+   palette so the chat view it wraps comes along, then layers bracket tokens,
+   dashed section rules and per-process state tags on top. */
+.mz {
+  --color-app:#0a0a0c; --color-panel:#121318; --color-raised:#171922; --color-raised-hover:#1e202a;
+  --color-card:#121318; --color-inset:#0d0e12; --color-hairline:#22242d;
+  --color-ink:#ededed; --color-ink-secondary:#8b90a0;
+  --color-accent:#10b981; --color-accent-border:#10b981; --color-bubble-user:#171922;
+  --color-success:#10b981; --color-danger:#f43f5e; --color-warning:#f59e0b;
+  --mz-cyan:#06b6d4;
+  font-family:ui-monospace,SFMono-Regular,Menlo,"Cascadia Mono",Consolas,monospace;
+  letter-spacing:.01em;
+}
 .mz-sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
 .mz :focus-visible { outline:2px solid var(--color-accent); outline-offset:2px; }
-.mz button:disabled { opacity:.45; cursor:wait; }
-.mz-bar { display:flex; align-items:center; justify-content:space-between; gap:10px; flex:none; padding:8px 14px; font-size:13px; border-bottom:1px solid var(--color-hairline); background:var(--color-inset); }
-.mz-brand { letter-spacing:.06em; }
-.mz-bar-end { display:flex; align-items:center; gap:14px; }
+.mz button:disabled { opacity:.4; cursor:wait; }
 .mz-on { color:var(--color-success); }
 .mz-off { color:var(--color-danger); }
 .mz-dim { color:var(--color-ink-secondary); }
 .mz-warn { color:var(--color-warning); }
-.mz-link { min-height:44px; font-size:13px; color:var(--color-accent); background:none; border:0; display:inline-flex; align-items:center; gap:6px; }
-.mz-scroll { flex:1; min-height:0; overflow-y:auto; padding:12px 14px 0; }
+
+.mz-bar { display:flex; align-items:center; justify-content:space-between; gap:10px; flex:none;
+  padding:10px 14px; font-size:12.5px; border-bottom:1px solid var(--color-hairline); background:var(--color-inset); }
+.mz-brand { color:var(--color-ink); letter-spacing:.04em; }
+.mz-bar-end { display:flex; align-items:center; gap:12px; }
+.mz-link { min-height:44px; padding:0 2px; font:inherit; font-size:12.5px; color:var(--color-accent);
+  background:none; border:0; display:inline-flex; align-items:center; gap:5px; }
+.mz-scroll { flex:1; min-height:0; overflow-y:auto; padding:12px 14px 14px; }
+
 .mz-counters { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
-.mz-counters>div { padding:10px 8px; border:1px solid var(--color-hairline); border-radius:6px; background:var(--color-panel); text-align:center; }
-.mz-counters span { display:block; font-size:12px; color:var(--color-ink-secondary); }
-.mz-counters strong { display:block; margin-top:4px; font-size:17px; font-weight:500; }
-.mz-block { margin-top:18px; }
-.mz-block h2 { font-size:13px; font-weight:400; color:var(--color-ink-secondary); letter-spacing:.08em; margin-bottom:8px; }
-.mz-decision { border:1px solid var(--color-warning); border-radius:6px; background:var(--color-panel); padding:12px; margin-bottom:10px; }
-.mz-decision-top { display:flex; justify-content:space-between; gap:10px; font-size:13px; margin:0; }
-.mz-decision-title { font-size:14px; line-height:1.5; margin:8px 0 0; overflow-wrap:anywhere; }
-.mz-decision pre { max-height:140px; overflow:auto; margin:8px 0 0; padding:9px 10px; border-radius:5px; background:var(--color-inset); font-size:12.5px; line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere; }
-.mz-decision-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
-.mz-decision-actions button { flex:1 1 0; min-height:46px; padding:10px 8px; font-size:13px; border-radius:5px; border:1px solid; }
-.mz-deny { color:var(--color-danger); border-color:var(--color-danger); background:none; }
-.mz-allow { color:#08150f; border-color:var(--color-accent); background:var(--color-accent); }
-.mz-proc { display:flex; flex-direction:column; gap:5px; width:100%; margin-bottom:6px; padding:11px 12px; text-align:left; border:1px solid var(--color-hairline); border-left:3px solid var(--color-ink-secondary); border-radius:5px; background:var(--color-panel); color:var(--color-ink); }
+.mz-counters>div { padding:11px 6px; border:1px solid var(--color-hairline); border-radius:6px;
+  background:var(--color-panel); text-align:center; }
+.mz-counters span { display:block; font-size:12px; letter-spacing:.06em; color:var(--color-ink-secondary); }
+.mz-counters strong { display:block; margin-top:5px; font-size:16px; font-weight:500; color:var(--color-ink); }
+
+.mz-rule { display:flex; align-items:center; gap:8px; margin:20px 0 9px; font-size:12.5px;
+  letter-spacing:.05em; color:var(--color-ink-secondary); }
+.mz-rule i { flex:1; border-top:1px dashed var(--color-hairline); }
+.mz-rule-plain { margin-bottom:7px; }
+.mz-empty { font-size:12.5px; }
+
+.mz-proc { margin-bottom:7px; border:1px solid var(--color-hairline); border-left:3px solid var(--color-ink-secondary);
+  border-radius:6px; background:var(--color-panel); }
 .mz-proc.is-run { border-left-color:var(--color-success); }
-.mz-proc.is-wait { border-left-color:var(--color-warning); }
-.mz-proc-top { display:flex; justify-content:space-between; gap:10px; font-size:14px; }
-.mz-proc-state { font-size:13px; color:var(--color-ink-secondary); }
-.mz-proc.is-run .mz-proc-state { color:var(--color-success); }
+.mz-proc.is-wait { border-left-color:var(--color-warning); border-color:#3a3020; }
+.mz-proc-open { display:block; width:100%; padding:11px 12px; text-align:left; background:none; border:0;
+  color:var(--color-ink); }
+.mz-proc.is-wait .mz-proc-open { padding-bottom:8px; }
+.mz-proc-top { display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
+.mz-proc-name { font-size:13.5px; color:var(--color-ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mz-proc-state { flex:none; font-size:12px; color:var(--color-ink-secondary); }
+.mz-proc.is-run .mz-proc-state { color:var(--mz-cyan); }
 .mz-proc.is-wait .mz-proc-state { color:var(--color-warning); }
-.mz-proc-sub { font-size:13px; color:var(--color-ink-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.mz-stream { border:1px solid var(--color-hairline); border-radius:6px; background:var(--color-inset); padding:10px 11px; }
-.mz-line { display:flex; gap:9px; margin:0 0 5px; font-size:12.5px; line-height:1.5; overflow-wrap:anywhere; }
-.mz-line:last-child { margin-bottom:0; }
-.mz-line>span:last-child { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.mz-time { flex:none; color:var(--color-ink-secondary); }
-.mz-who { flex:none; color:var(--color-ink-secondary); }
-.mz-line.is-run .mz-who { color:var(--color-success); }
-.mz-line.is-wait .mz-who { color:var(--color-warning); }
-.mz-line.is-you .mz-who { color:var(--color-ink); }
-.mz-error { margin:0; padding:8px 14px; font-size:13px; color:var(--color-danger); }
-.mz-footer { flex:none; padding:8px 14px max(12px,env(safe-area-inset-bottom)); border-top:1px solid var(--color-hairline); background:var(--color-inset); }
-.mz-prompt { display:flex; align-items:center; gap:9px; padding:0 10px; border:1px solid var(--color-hairline); border-radius:6px; background:var(--color-panel); }
-.mz-prompt>span { color:var(--color-accent); }
-.mz-prompt input { flex:1; min-width:0; min-height:46px; border:0; background:none; font:inherit; font-size:16px; color:var(--color-ink); }
+.mz-proc-sub { display:block; margin-top:5px; font-size:12.5px; color:var(--color-ink-secondary);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mz-proc-detail { max-height:120px; overflow:auto; margin:0 12px; padding:8px 9px; border-radius:4px;
+  background:var(--color-inset); font-size:12px; line-height:1.55; color:var(--color-ink);
+  white-space:pre-wrap; overflow-wrap:anywhere; }
+.mz-proc-actions { display:flex; flex-wrap:wrap; gap:8px; padding:9px 12px 11px; }
+.mz-proc-actions button { min-height:38px; padding:7px 14px; font:inherit; font-size:12.5px; letter-spacing:.04em;
+  border-radius:4px; border:1px solid; }
+.mz-allow { color:var(--color-success); border-color:var(--color-success); background:#10b9811f; }
+.mz-deny { color:var(--color-ink-secondary); border-color:var(--color-hairline); background:none; }
+
+.mz-more { display:block; width:100%; min-height:42px; margin-top:2px; font:inherit; font-size:12.5px;
+  letter-spacing:.04em; color:var(--color-ink-secondary); background:none; border:0; text-align:left; }
+.mz-stream { border:1px solid var(--color-hairline); border-radius:6px; background:var(--color-panel); padding:11px 12px; }
+.mz-line { display:flex; gap:8px; margin:0 0 6px; font-size:12px; line-height:1.5; color:var(--color-ink-secondary); }
+.mz-line>span:last-child { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--color-ink); }
+.mz-time, .mz-who { flex:none; }
+.mz-line.is-last, .mz-line.is-last>span:last-child { color:var(--color-success); }
+.mz-line.is-wait>span:last-child { color:var(--color-warning); }
+.mz-cursor { margin:8px 0 0 18px; font-size:12px; color:var(--color-ink-secondary); }
+
+.mz-error { margin:0; padding:8px 14px; font-size:12.5px; color:var(--color-danger); }
+.mz-footer { flex:none; padding:9px 14px max(12px,env(safe-area-inset-bottom));
+  border-top:1px solid var(--color-hairline); background:var(--color-inset); }
+.mz-status { display:flex; align-items:baseline; gap:8px; margin:0 0 8px; font-size:12px;
+  color:var(--color-ink-secondary); }
+.mz-status-name { flex:none; color:var(--color-ink); }
+.mz-status-state { flex:none; }
+.mz-status-text { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mz-prompt { display:flex; align-items:center; gap:9px; padding:0 9px; border:1px solid var(--color-hairline);
+  border-radius:6px; background:var(--color-panel); }
+.mz-prompt>span { flex:none; color:var(--color-accent); }
+.mz-prompt input { flex:1; min-width:0; min-height:46px; border:0; background:none; font:inherit; font-size:16px;
+  color:var(--color-ink); }
 .mz-prompt input::placeholder { color:var(--color-ink-secondary); }
-.mz-prompt button { min-height:46px; padding:0 4px; font-size:13px; color:var(--color-accent); background:none; border:0; }
-.mz-abort { display:flex; align-items:center; gap:14px; margin-top:6px; }
-.mz-abort>button:first-child { min-height:44px; font-size:13px; color:var(--color-danger); background:none; border:0; }
+.mz-exec { flex:none; min-height:34px; padding:6px 11px; font:inherit; font-size:12px; letter-spacing:.06em;
+  color:var(--color-ink); background:var(--color-raised); border:1px solid var(--color-hairline); border-radius:4px; }
+.mz-abort { display:flex; align-items:center; gap:14px; margin-top:8px; }
+.mz-abort>button:first-child { min-height:44px; font:inherit; font-size:12.5px; color:var(--color-danger);
+  background:none; border:0; }
 .mz-abort-armed { text-decoration:underline; text-underline-offset:4px; }
-.mz-settings { display:flex; flex-direction:column; margin-top:20px; }
-.mz-settings button { min-height:52px; padding:8px 0; text-align:left; font-size:14px; background:none; border:0; border-bottom:1px solid var(--color-hairline); color:var(--color-ink); }
-.mz-owner { font-size:13px; line-height:1.9; color:var(--color-ink-secondary); margin:20px 0 10px; }
+
+.mz-settings { display:flex; flex-direction:column; }
+.mz-settings button { min-height:52px; padding:8px 0; text-align:left; font:inherit; font-size:13.5px;
+  background:none; border:0; border-bottom:1px solid var(--color-hairline); color:var(--color-ink); }
+.mz-owner { font-size:12.5px; line-height:1.9; color:var(--color-ink-secondary); margin:20px 0 10px; }
 .mz-owner span { display:flex; gap:14px; }
 .mz-owner a { color:var(--color-ink); }

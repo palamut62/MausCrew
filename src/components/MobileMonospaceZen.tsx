@@ -1,7 +1,7 @@
-// Monospace zen — the crew as processes. A console skin: counters that hold
-// real numbers, a roster of attached agents, a stream of what actually
-// happened, and one command line. Every figure on this screen comes from
-// live state; nothing here is decorative telemetry.
+// Monospace zen — the crew as processes. A console skin: bracket tokens, a
+// process roster with its decision inline, and a timestamped stream. Every
+// figure comes from live state — the latency counter is a measured round trip
+// to the local harness, not decoration.
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft } from "@phosphor-icons/react";
 import { api, useStore, visibleMessages, type Bot } from "@/state/store";
@@ -10,8 +10,23 @@ import { botWaiting, collectDecisions, currentActivity, taskTitle, type MobileDe
 
 type Pane = "console" | "settings";
 
+// Console tokens are cased invariantly: Turkish casing would print SKILL as
+// SKILL with a dotted capital, and the same rule runs on both sides of an
+// "@name" match so what you read is what you can type.
+const proc = (name: string) => name.toUpperCase().replace(/\s+/g, "_");
+const tag = (name: string) => name.toLowerCase().replace(/\s+/g, "_");
+
 function clock(at: number): string {
   return new Date(at).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+/** How long ago, in the console's own shorthand: 4m12s, 1h04m. */
+function elapsed(at: number): string {
+  const seconds = Math.max(0, Math.round((Date.now() - at) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m${String(seconds % 60).padStart(2, "0")}s`;
+  return `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, "0")}m`;
 }
 
 interface StreamLine {
@@ -24,8 +39,19 @@ interface StreamLine {
 
 /** A console line is one line — long prompts are cut, not allowed to flood. */
 function line(text: string): string {
-  const flat = text.replace(/\s+/g, " ").trim();
-  return flat.length > 120 ? `${flat.slice(0, 119)}…` : flat;
+  const flat = text.replace(/\*\*|__/g, "").replace(/\s+/g, " ").trim();
+  return flat.length > 110 ? `${flat.slice(0, 109)}…` : flat;
+}
+
+/** waiting first, then running, then idle */
+function rank(bot: Bot): number {
+  if (botWaiting(bot)) return 0;
+  if (bot.busy) return 1;
+  return 2;
+}
+
+function lastAt(bot: Bot): number | undefined {
+  return visibleMessages(bot).at(-1)?.at;
 }
 
 /** The last things that happened, across the whole crew, newest last. */
@@ -33,7 +59,7 @@ function stream(bots: Bot[]): StreamLine[] {
   const lines: StreamLine[] = [];
   for (const bot of bots) {
     for (const message of visibleMessages(bot).slice(-8)) {
-      const who = bot.name.toUpperCase();
+      const who = tag(bot.name);
       if (message.kind === "activity") {
         lines.push({ key: message.id, at: message.at, who, tone: "run", text: line(message.tool?.spoken || message.tool?.name || "adım") });
       } else if (message.kind === "options" && message.card && !message.card.answered) {
@@ -44,6 +70,45 @@ function stream(bots: Bot[]): StreamLine[] {
     }
   }
   return lines.sort((a, b) => a.at - b.at).slice(-9);
+}
+
+/** Re-renders once a second while anything is running, so elapsed counters
+ * advance instead of freezing until the next server event. */
+function useTick(running: boolean): void {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!running) return;
+    const timer = setInterval(() => setTick((value) => value + 1), 1000);
+    return () => clearInterval(timer);
+  }, [running]);
+}
+
+/** The bot's last spoken reply, for the status line after a turn settles. */
+function lastReply(bot: Bot): string | undefined {
+  const message = visibleMessages(bot).filter((item) => item.role === "bot" && item.kind === "text" && item.text).at(-1);
+  return message?.text ? line(message.text) : undefined;
+}
+
+/** Round trip to the local harness, sampled so the counter is a real number. */
+function useLatency(connected: boolean): number | null {
+  const [ms, setMs] = useState<number | null>(null);
+  useEffect(() => {
+    if (!connected) return;
+    let live = true;
+    const sample = async () => {
+      const started = performance.now();
+      try {
+        await fetch("/api/health", { cache: "no-store" });
+        if (live) setMs(Math.round(performance.now() - started));
+      } catch {
+        if (live) setMs(null);
+      }
+    };
+    void sample();
+    const timer = setInterval(() => void sample(), 10_000);
+    return () => { live = false; clearInterval(timer); };
+  }, [connected]);
+  return connected ? ms : null;
 }
 
 export function MobileMonospaceZen({ children, onBrowseDirectory }: {
@@ -58,6 +123,7 @@ export function MobileMonospaceZen({ children, onBrowseDirectory }: {
   const [sending, setSending] = useState(false);
   const [confirmAbort, setConfirmAbort] = useState(false);
   const [chat, setChat] = useState(false);
+  const [showIdle, setShowIdle] = useState(false);
   const inFlight = useRef(false);
   const input = useRef<HTMLInputElement>(null);
 
@@ -68,6 +134,17 @@ export function MobileMonospaceZen({ children, onBrowseDirectory }: {
   const selected = bots.find((bot) => bot.id === target) ?? bots.find((bot) => !bot.busy) ?? bots[0];
   const externalView = state.activeView !== "chat";
   const showChat = chat || externalView;
+  const latency = useLatency(state.connected);
+  const watched = bots.find((bot) => bot.id === target) ?? selected;
+  // A roster is for processes that are doing something. Anything blocked or
+  // running stays on screen; idle bots fold away so the stream below them is
+  // still reachable on a phone with a large crew.
+  const ranked = [...bots].sort((a, b) => rank(a) - rank(b));
+  const active = ranked.filter((bot) => rank(bot) < 2);
+  const idle = ranked.filter((bot) => rank(bot) === 2);
+  const shown = showIdle ? ranked : [...active, ...idle.slice(0, Math.max(0, 3 - active.length))];
+  const hidden = ranked.length - shown.length;
+  useTick(busy.length > 0 || sending);
 
   useEffect(() => {
     document.documentElement.classList.add("mobile-remote-theme");
@@ -96,9 +173,9 @@ export function MobileMonospaceZen({ children, onBrowseDirectory }: {
     setConfirmAbort(false);
   }
 
-  // "@ada komut" targets a bot by name; otherwise the picked one runs it. A
-  // busy bot is steered on its live thread instead of being forked onto a new
-  // one, so a follow-up instruction lands where the work is.
+  // "@ad komut" targets a bot by name; otherwise the picked one runs it. A busy
+  // bot is steered on its live thread instead of being forked onto a new one,
+  // so a follow-up instruction lands where the work is.
   async function exec() {
     const raw = command.trim();
     if (inFlight.current) return;
@@ -108,10 +185,10 @@ export function MobileMonospaceZen({ children, onBrowseDirectory }: {
     let bot = selected;
     let text = raw;
     if (raw.startsWith("@")) {
-      const [tag, ...rest] = raw.split(" ");
-      const name = tag.slice(1).toLocaleLowerCase("tr");
-      const matched = bots.find((item) => item.name.toLocaleLowerCase("tr").startsWith(name));
-      if (!matched) { setError(`@${name} adında bot yok`); return; }
+      const [name, ...rest] = raw.split(" ");
+      const wanted = name.slice(1).toLowerCase();
+      const matched = bots.find((item) => tag(item.name).startsWith(wanted));
+      if (!matched) { setError(`@${wanted} adında bot yok`); return; }
       bot = matched;
       text = rest.join(" ").trim();
       if (!text) { setError("Komut boş. Bot adından sonra ne yapacağını yaz."); return; }
@@ -148,9 +225,9 @@ export function MobileMonospaceZen({ children, onBrowseDirectory }: {
       <div className="mobile-dashboard mz">
         <header className="mz-bar">
           <button className="mz-link" onClick={() => { dispatch({ type: "select", id: state.selectedId }); setChat(false); }}>
-            <ArrowLeft size={14} /> geri
+            <ArrowLeft size={13} /> [GERİ]
           </button>
-          <span className={state.connected ? "mz-on" : "mz-off"}>{state.connected ? "host bağlı" : "host yok"}</span>
+          <span className={state.connected ? "mz-on" : "mz-off"}>HOST: {state.connected ? "ONLINE" : "OFFLINE"}</span>
         </header>
         <div className="mobile-workspace">{children}</div>
       </div>
@@ -161,11 +238,12 @@ export function MobileMonospaceZen({ children, onBrowseDirectory }: {
     return (
       <div className="mobile-dashboard mz">
         <header className="mz-bar">
-          <button className="mz-link" onClick={() => setPane("console")}><ArrowLeft size={14} /> konsol</button>
-          <span className="mz-dim">ayarlar</span>
+          <button className="mz-link" onClick={() => setPane("console")}><ArrowLeft size={13} /> [KONSOL]</button>
+          <span className="mz-dim">CONFIG</span>
         </header>
         <div className="mz-scroll">
-          <MobileLayoutPicker className="mz-picker" />
+          <MobileLayoutPicker />
+          <p className="mz-rule"><span>-- SYSTEM</span><i /></p>
           <div className="mz-settings">
             <button onClick={onBrowseDirectory}>bot ekle</button>
             <button onClick={() => dispatch({ type: "showRoutines" })}>otomasyonlar</button>
@@ -188,103 +266,114 @@ export function MobileMonospaceZen({ children, onBrowseDirectory }: {
   return (
     <div className="mobile-dashboard mz">
       <header className="mz-bar">
-        <span className="mz-brand">mauscrew</span>
+        <span className="mz-brand">[MAUSCREW::REMOTE]</span>
         <span className="mz-bar-end">
-          <span className={state.connected ? "mz-on" : "mz-off"}>{state.connected ? "host bağlı" : "host yok"}</span>
-          <button className="mz-link" onClick={() => setPane("settings")}>ayarlar</button>
+          <span className={state.connected ? "mz-on" : "mz-off"}>HOST: {state.connected ? "ONLINE" : "OFFLINE"}</span>
+          <button className="mz-link" onClick={() => setPane("settings")}>[CFG]</button>
         </span>
       </header>
 
       <div className="mz-scroll">
         <div className="mz-counters">
-          <div><span>çalışan</span><strong>{busy.length}/{bots.length}</strong></div>
-          <div><span>bekleyen karar</span><strong className={decisions.length ? "mz-warn" : ""}>{decisions.length}</strong></div>
-          <div><span>okunmamış</span><strong>{bots.filter((bot) => bot.unread).length}</strong></div>
+          <div>
+            <span>ACTIVE</span>
+            <strong>{busy.length} BOTS</strong>
+          </div>
+          <div>
+            <span>AWAITING</span>
+            <strong className={decisions.length ? "mz-warn" : "mz-dim"}>{decisions.length} REQ</strong>
+          </div>
+          <div>
+            <span>LATENCY</span>
+            <strong className={latency === null ? "mz-dim" : "mz-on"}>{latency === null ? "--" : `${latency}ms`}</strong>
+          </div>
         </div>
 
-        {decisions.length > 0 && (
-          <section className="mz-block" aria-label="Bekleyen kararlar">
-            <h2>karar bekliyor</h2>
-            {decisions.map((item) => {
-              const submitting = state.pendingDecisions[`${item.bot.threadId}:${item.requestId}`];
-              return (
-                <div className="mz-decision" key={item.id}>
-                  <p className="mz-decision-top">
-                    <span>&gt; {item.bot.name.toLocaleLowerCase("tr")}</span>
-                    <span className="mz-dim">{item.tool ?? "soru"}</span>
-                  </p>
-                  <p className="mz-decision-title">{item.title}</p>
-                  {item.detail && <pre>{item.detail}</pre>}
-                  {item.held && <p className="mz-warn">{item.held}</p>}
-                  {item.kind === "approval" ? (
-                    <div className="mz-decision-actions">
-                      <button className="mz-deny" disabled={Boolean(submitting)} onClick={() => decide(item, "deny")}>
-                        {submitting === "deny" ? "[reddediliyor]" : "[reddet]"}
-                      </button>
-                      <button className="mz-allow" disabled={Boolean(submitting) || !state.connected} onClick={() => decide(item, "allow")}>
-                        {submitting === "allow" ? "[izin veriliyor]" : "[izin ver]"}
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="mz-decision-actions">
-                      {item.options.map((option) => (
-                        <button
-                          key={option}
-                          className="mz-allow"
-                          disabled={Boolean(submitting) || !state.connected}
-                          onClick={() => dispatch({ type: "answerCard", botId: item.bot.id, messageId: item.messageId, answer: option })}
-                        >
-                          [{option.toLocaleLowerCase("tr")}]
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  <button className="mz-link" onClick={() => openChat(item.bot.id)}>sohbette aç</button>
-                </div>
-              );
-            })}
-          </section>
-        )}
-
-        <section className="mz-block" aria-label="Botlar">
-          <h2>roster</h2>
-          {!bots.length && <p className="mz-dim">henüz bot yok. ayarlardan ekle.</p>}
-          {bots.map((bot) => {
-            const waits = botWaiting(bot);
-            const status = waits ? "bekliyor" : bot.busy ? "çalışıyor" : "boşta";
-            return (
-              <button
-                key={bot.id}
-                className={`mz-proc is-${waits ? "wait" : bot.busy ? "run" : "idle"}`}
-                onClick={() => { setTarget(bot.id); setCommand(`@${bot.name.toLocaleLowerCase("tr")} `); input.current?.focus(); }}
-              >
+        <p className="mz-rule"><span>-- PROCESS_ROSTER</span><i /></p>
+        {!bots.length && <p className="mz-dim mz-empty">henüz bot yok. [CFG] menüsünden ekle.</p>}
+        {shown.map((bot) => {
+          const pending = decisions.filter((item) => item.bot.id === bot.id);
+          const waits = pending.length > 0 || botWaiting(bot);
+          const at = lastAt(bot);
+          const status = waits ? "[WAIT_PROMPT]" : bot.busy ? `[BUSY: ${at ? elapsed(at) : "--"}]` : "[IDLE]";
+          return (
+            <div className={`mz-proc is-${waits ? "wait" : bot.busy ? "run" : "idle"}`} key={bot.id}>
+              <button className="mz-proc-open" onClick={() => openChat(bot.id)}>
                 <span className="mz-proc-top">
-                  <span>&gt; {bot.name.toLocaleLowerCase("tr")}</span>
+                  <span className="mz-proc-name">&gt; {proc(bot.name)}</span>
                   <span className="mz-proc-state">{status}</span>
                 </span>
-                <span className="mz-proc-sub">{bot.busy ? currentActivity(bot) || taskTitle(bot) : taskTitle(bot)}</span>
+                <span className="mz-proc-sub">
+                  {waits && pending[0]
+                    ? `needs: ${pending[0].title.toLowerCase()}${pending[0].tool ? ` — ${pending[0].tool}` : ""}`
+                    : bot.busy
+                      ? currentActivity(bot) || taskTitle(bot)
+                      : taskTitle(bot)}
+                </span>
               </button>
-            );
-          })}
-        </section>
+              {pending[0] && (() => {
+                const item = pending[0];
+                const submitting = state.pendingDecisions[`${item.bot.threadId}:${item.requestId}`];
+                if (item.detail) {
+                  return (
+                    <>
+                      <pre className="mz-proc-detail">{item.detail}</pre>
+                      <div className="mz-proc-actions">{actions(item, submitting)}</div>
+                    </>
+                  );
+                }
+                return <div className="mz-proc-actions">{actions(item, submitting)}</div>;
+              })()}
+            </div>
+          );
+        })}
 
-        <section className="mz-block" aria-label="Akış">
-          <h2>akış</h2>
-          <div className="mz-stream">
-            {!lines.length && <p className="mz-dim">henüz kayıt yok.</p>}
-            {lines.map((line) => (
-              <p key={line.key} className={`mz-line is-${line.tone}`}>
-                <span className="mz-time">{clock(line.at)}</span>
-                <span className="mz-who">{line.who}</span>
-                <span>{line.text}</span>
-              </p>
-            ))}
-          </div>
-        </section>
+        {hidden > 0 && (
+          <button className="mz-more" onClick={() => setShowIdle(true)}>[+{hidden} IDLE]</button>
+        )}
+        {showIdle && idle.length > 0 && (
+          <button className="mz-more" onClick={() => setShowIdle(false)}>[- BOŞTAKİLERİ GİZLE]</button>
+        )}
+
+        <p className="mz-rule mz-rule-plain"><span># LIVE STREAM:</span></p>
+        <div className="mz-stream">
+          {!lines.length && <p className="mz-dim">henüz kayıt yok.</p>}
+          {lines.map((entry, index) => (
+            <p key={entry.key} className={`mz-line${index === lines.length - 1 ? " is-last" : ""} is-${entry.tone}`}>
+              <span className="mz-time">[{clock(entry.at)}]</span>
+              <span className="mz-who">{entry.who}:</span>
+              <span>{entry.text}</span>
+            </p>
+          ))}
+          <p className="mz-cursor">&gt; cursor waiting…</p>
+        </div>
       </div>
 
       {error && <p className="mz-error" role="alert">{error}</p>}
       <footer className="mz-footer">
+        {watched && (
+          <p className="mz-status" role="status" aria-live="polite">
+            <span className="mz-status-name">&gt; {proc(watched.name)}</span>
+            {sending ? (
+              <span className="mz-status-state mz-on">[TX…]</span>
+            ) : (
+              <span className={`mz-status-state ${botWaiting(watched) ? "mz-warn" : watched.busy ? "mz-on" : "mz-dim"}`}>
+                {botWaiting(watched)
+                  ? "[WAIT_PROMPT]"
+                  : watched.busy
+                    ? `[BUSY: ${lastAt(watched) ? elapsed(lastAt(watched)!) : "--"}]`
+                    : "[IDLE]"}
+              </span>
+            )}
+            <span className="mz-status-text">
+              {sending
+                ? "komut gönderiliyor"
+                : watched.busy
+                  ? currentActivity(watched) || "çalışıyor"
+                  : lastReply(watched) || taskTitle(watched)}
+            </span>
+          </p>
+        )}
         <form className="mz-prompt" onSubmit={(event) => { event.preventDefault(); void exec(); }}>
           <span aria-hidden>&gt;</span>
           <label className="mz-sr" htmlFor="mz-command">Komut</label>
@@ -294,20 +383,45 @@ export function MobileMonospaceZen({ children, onBrowseDirectory }: {
             value={command}
             autoComplete="off"
             disabled={sending || !bots.length}
-            placeholder={selected ? `@${selected.name.toLocaleLowerCase("tr")} yeni görev` : "önce bot ekle"}
+            placeholder={selected ? `@${tag(selected.name)} yeni görev…` : "önce bot ekle"}
             onChange={(event) => { setCommand(event.target.value); setError(""); }}
           />
-          <button type="submit" disabled={sending || !bots.length}>{sending ? "gidiyor" : "çalıştır"}</button>
+          <button type="submit" className="mz-exec" disabled={sending || !bots.length}>{sending ? "TX…" : "EXEC"}</button>
         </form>
         {busy.length > 0 && (
           <div className="mz-abort">
             <button onClick={abort} className={confirmAbort ? "mz-abort-armed" : ""}>
-              {confirmAbort ? `[${busy.length} botu gerçekten durdur]` : "[çalışanları durdur]"}
+              {confirmAbort ? `[■ ${busy.length} PROSESİ DURDUR]` : "[■ ABORT]"}
             </button>
-            {confirmAbort && <button className="mz-link" onClick={() => setConfirmAbort(false)}>vazgeç</button>}
+            {confirmAbort && <button className="mz-link" onClick={() => setConfirmAbort(false)}>[vazgeç]</button>}
           </div>
         )}
       </footer>
     </div>
   );
+
+  function actions(item: MobileDecision, submitting: string | undefined) {
+    if (item.kind === "approval") {
+      return (
+        <>
+          <button className="mz-allow" disabled={Boolean(submitting) || !state.connected} onClick={() => decide(item, "allow")}>
+            {submitting === "allow" ? "ALLOWING…" : "ALLOW"}
+          </button>
+          <button className="mz-deny" disabled={Boolean(submitting)} onClick={() => decide(item, "deny")}>
+            {submitting === "deny" ? "DENYING…" : "DENY"}
+          </button>
+        </>
+      );
+    }
+    return item.options.map((option) => (
+      <button
+        key={option}
+        className="mz-allow"
+        disabled={Boolean(submitting) || !state.connected}
+        onClick={() => dispatch({ type: "answerCard", botId: item.bot.id, messageId: item.messageId, answer: option })}
+      >
+        {option.toUpperCase()}
+      </button>
+    ));
+  }
 }
