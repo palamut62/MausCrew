@@ -9,6 +9,8 @@ import { DesktopCapabilitiesProvider } from "@/components/DesktopCapabilities";
 import { NoEngines } from "@/components/NoEngines";
 import { useDeepLinkBotImport } from "@/lib/deep-link";
 import { waitingBots } from "@/lib/tray";
+import { useMediaQuery } from "@/lib/use-media";
+import { MobileDashboard } from "@/components/MobileDashboard";
 
 // Chat is the launch path; secondary workspaces and modal surfaces are loaded
 // only when opened. Keeping them out of the startup chunk removes hundreds of
@@ -28,6 +30,8 @@ const Onboarding = lazy(() => import("@/components/Onboarding").then((m) => ({ d
 
 function Shell() {
   const { state, dispatch } = useStore();
+  const compactScreen = useMediaQuery("(max-width: 767px)");
+  const mobile = compactScreen && !window.mauscrew;
   // Mobile-only drawer state. Above md, none of these properties are emitted
   // at all — Sidebar scopes every mobile class with max-md: rather than
   // cancelling them with md:, which would still emit a translate value and
@@ -88,6 +92,27 @@ function Shell() {
   useEffect(() => {
     queueMicrotask(() => setDrawerOpen(false));
   }, [state.selectedId, state.activeView, state.pluginsOpen, state.settingsOpen]);
+
+  if (mobile) return (
+    <Suspense fallback={<div className="p-5 text-ink-secondary">Yükleniyor…</div>}>
+      <MobileDashboard onBrowseDirectory={() => setDirectoryOpen(true)}>
+        {state.activeView === "routines" ? <RoutinesPage />
+          : state.activeView === "reviews" ? <ReviewQueuePage />
+          : state.activeView === "workflows" ? <WorkflowsPage />
+          : state.activeView === "org" ? <OrgChartPage />
+          : noEngines ? <NoEngines />
+          : group ? <GroupView key={group.id} group={group} />
+          : bot ? <ChatView bot={bot} />
+          : <NoBots onBrowseDirectory={() => setDirectoryOpen(true)} />}
+      </MobileDashboard>
+      {state.settingsOpen && bot && <SettingsPanel bot={bot} />}
+      {state.computerOpen && bot && <ComputerPanel bot={bot} />}
+      {state.appSettingsOpen && <SettingsModal />}
+      {state.pluginsOpen && <PluginsPanel />}
+      {directoryOpen && <BotDirectoryPanel onClose={() => setDirectoryOpen(false)} />}
+      {deepLinkBot && <ImportBotDialog bot={deepLinkBot} onClose={clearDeepLinkBot} />}
+    </Suspense>
+  );
 
   return (
     <div className="flex h-full flex-col">

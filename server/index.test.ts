@@ -172,6 +172,27 @@ afterAll(async () => {
 });
 
 describe("harness HTTP API", () => {
+  it("rejects a phone message when another device changed the active task", async () => {
+    const created = await api("POST", "/api/bots");
+    const botId = created.body.bot.id;
+    try {
+      const first = await api("POST", `/api/bots/${botId}/tasks`, {});
+      const second = await api("POST", `/api/bots/${botId}/tasks`, {});
+      const response = await api("POST", `/api/bots/${botId}/messages`, {
+        text: "Must stay in the phone task",
+        expectedThreadId: first.body.bot.threadId,
+      });
+      expect(response.status).toBe(409);
+      expect(response.body.error).toContain("başka bir cihazda");
+      const snapshot = await api("GET", "/api/bots");
+      const bot = snapshot.body.bots.find((item: { id: string }) => item.id === botId);
+      expect(bot.threadId).toBe(second.body.bot.threadId);
+      expect(bot.messages.some((message: { text?: string }) => message.text === "Must stay in the phone task")).toBe(false);
+    } finally {
+      await api("DELETE", `/api/bots/${botId}`);
+    }
+  });
+
   it("rejects non-loopback authorities while accepting IPv4 and IPv6 loopback forms", async () => {
     expect(await statusWithHeaders({ host: "example.com" })).toBe(403);
     expect(await statusWithHeaders({ origin: "https://example.com" })).toBe(403);

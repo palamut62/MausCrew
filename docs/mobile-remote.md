@@ -28,6 +28,25 @@ current syntax and HTTPS behavior are documented in the official
 [Tailscale Serve CLI reference](https://tailscale.com/docs/reference/tailscale-cli/serve).
 Do not replace Serve with a public router port-forward.
 
+## Phone interface
+
+On browser screens below 768px, Remote opens the light, green-accented
+**Sade Kumanda** dashboard. The Electron app keeps its existing interface.
+
+- **Ana ekran** shows running agents and requests waiting for your answer.
+- **Yeni görev başlat** lets you select an idle agent and describe a task.
+  It creates a separate conversation before sending the request. Failed sends
+  retain the text and reuse that context on retry.
+- **Görevler** opens current and previous conversations. In a conversation,
+  send follow-up instructions, answer questions or permissions, and stop work.
+- **Agent'lar** lists the team and provides a direct task entry point.
+- **Ayarlar** links to automations, workflows, outbound review and app settings.
+
+The connected computer must stay on with MausCrew running. New task submission
+is disabled while disconnected. If another device changes the active task
+between creation and submission, the server rejects the stale submission so it
+cannot land in a different conversation.
+
 ## Security boundary
 
 - The harness remains bound to `127.0.0.1`; remote access does not open a LAN

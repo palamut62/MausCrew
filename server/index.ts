@@ -4384,6 +4384,9 @@ const server = createServer(async (req, res) => {
       const text = String(body.text ?? "").trim();
       if (!text) return json(res, 400, { error: "text required" });
       const replyToId = typeof body.replyTo === "string" && /^[\w-]{1,100}$/.test(body.replyTo) ? body.replyTo : undefined;
+      if (body.expectedThreadId !== undefined && store.bot(m[1])?.threadId !== body.expectedThreadId) {
+        return json(res, 409, { error: "Aktif görev başka bir cihazda değişti. Görevler ekranından doğru sohbeti açıp tekrar gönder." });
+      }
       await startTurn(m[1], text, replyToId ? { replyToId } : undefined);
       return json(res, 202, { ok: true });
     }

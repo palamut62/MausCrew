@@ -57,6 +57,8 @@ export function Composer({
   // Touch, not width: a soft keyboard is what changes what Enter should do,
   // and a narrow desktop window still has a real one.
   const touchKeyboard = useMediaQuery("(pointer: coarse)");
+  const compactScreen = useMediaQuery("(max-width: 767px)");
+  const mobileRemote = compactScreen && !window.mauscrew;
   // Unified target: a 1:1 bot thread or a room. In a room the @ picker
   // offers members plus @everyone; explicit mentions override the room's
   // configured default responder.
@@ -158,6 +160,7 @@ export function Composer({
   // a chip on its own is a message: the send control has to appear for it
   const hasContent = Boolean(text.trim()) || attachments.length > 0;
   const send = () => {
+    if (mobileRemote && !state.connected) return;
     const t = composeMessage(text, attachments);
     if (!t) return;
     if (question && bot) {
@@ -440,7 +443,12 @@ export function Composer({
           }}
           disabled={Boolean(approval)}
           placeholder={
-            approval
+            mobileRemote
+              ? approval ? "Devam etmek için yukarıdaki isteği yanıtla"
+                : question ? `Yanıtın: ${question.card?.title ?? ""}`
+                : busy ? "Ek talimat yaz; gönderince mevcut çalışma yönlendirilir"
+                : "Ne yapmasını istiyorsun?"
+              : approval
               ? "Answer the approval above to continue"
               : question
                 ? `Answering: ${question.card?.title ?? "the question above"}`
@@ -454,7 +462,7 @@ export function Composer({
                   ? `Message ${group.name} — ${groupComposerHint(group, members ?? [])}`
                   : `Message ${bot?.name ?? ""}`
           }
-          aria-label={`Message ${group ? group.name : (bot?.name ?? "")}`}
+          aria-label={mobileRemote ? "Agent'a istek gönder" : `Message ${group ? group.name : (bot?.name ?? "")}`}
           // 16px below md is not a style choice: iOS Safari zooms the whole
           // page whenever a focused field is smaller, and never zooms back.
           className="max-h-40 w-full resize-none self-center bg-transparent py-1 text-[16px] leading-6 text-ink placeholder:text-ink-secondary focus:outline-none md:text-[15px]"
@@ -466,9 +474,9 @@ export function Composer({
               if (group) dispatch({ type: "interruptGroup", groupId: group.id });
               else if (bot) dispatch({ type: "interrupt", botId: bot.id });
             }}
-            aria-label="Stop this turn"
+            aria-label={mobileRemote ? "Görevi durdur" : "Stop this turn"}
             className="flex size-10 shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink md:size-8"
-            title="Stop"
+            title={mobileRemote ? "Görevi durdur" : "Stop"}
           >
             <Square size={14} weight="fill" />
           </button>
@@ -491,7 +499,8 @@ export function Composer({
         {hasContent && (
           <button
             onClick={send}
-            aria-label={busy ? (bot ? "Redirect task" : "Queue message") : "Send message"}
+            aria-label={mobileRemote ? (busy ? "Ek talimat gönder" : "İsteği gönder") : busy ? (bot ? "Redirect task" : "Queue message") : "Send message"}
+            disabled={mobileRemote && !state.connected}
             title={busy ? (bot ? "Redirect — stops the current turn and applies this instruction" : "Queue — sends when the bot finishes") : "Send"}
             className={cn(
               "flex size-10 shrink-0 items-center justify-center rounded-md md:size-8",
