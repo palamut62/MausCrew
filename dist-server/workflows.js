@@ -1,6 +1,5 @@
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { writeFileAtomic } from "./atomic.js";
+import { validRecords, readManagedJson, writeManagedJson } from "./recovery.js";
 import { DATA_DIR } from "./config.js";
 import { newId } from "./contracts.js";
 const WORKFLOWS_FILE = join(DATA_DIR, "workflows.json");
@@ -115,7 +114,7 @@ export class WorkflowManager {
     constructor(file = WORKFLOWS_FILE) {
         this.file = file;
         try {
-            const rows = JSON.parse(readFileSync(file, "utf8"));
+            const rows = readManagedJson(file, [], (v) => validRecords(v) && v.every((row) => normalizeWorkflow(row) !== null));
             this.workflows = Array.isArray(rows)
                 ? rows.map((row) => normalizeWorkflow(row)).filter((row) => Boolean(row))
                 : [];
@@ -210,7 +209,40 @@ export class WorkflowManager {
         this.save();
         return structuredClone(workflow);
     }
+    recoverInterrupted() {
+        let recovered = 0;
+        for (const workflow of this.workflows) {
+            if (workflow.status === "cancelled")
+                continue;
+            for (const step of workflow.steps) {
+                if (step.status !== "running")
+                    continue;
+                step.status = "blocked";
+                step.output = `${step.output ?? ""}\n\n` + "Uygulama yeniden başlatıldı. Bu adım kesintiye uğradı; devam etmek için yeniden başlatın veya devredin.";
+                step.updatedAt = Date.now();
+                workflow.updatedAt = step.updatedAt;
+                recovered++;
+            }
+            workflow.status = statusFor(workflow.steps, workflow.status);
+        }
+        if (recovered)
+            this.save();
+        return recovered;
+    }
+    reassign(workflowId, stepId, botId) {
+        const workflow = this.workflows.find((row) => row.id === workflowId);
+        const step = workflow?.steps.find((row) => row.id === stepId);
+        if (!workflow || !step || workflow.status === "cancelled" || (step.status === "running" || step.status === "done"))
+            return null;
+        step.assigneeBotId = botId;
+        step.status = "pending";
+        step.updatedAt = Date.now();
+        workflow.updatedAt = step.updatedAt;
+        workflow.status = statusFor(workflow.steps, workflow.status);
+        this.save();
+        return structuredClone(workflow);
+    }
     save() {
-        writeFileAtomic(this.file, JSON.stringify(this.workflows, null, 2));
+        writeManagedJson(this.file, this.workflows);
     }
 }

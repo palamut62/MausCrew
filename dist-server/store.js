@@ -2,9 +2,9 @@
 // thread→instance binding and per-instance resume cursors — upstream's
 // ProviderSessionDirectory, recipe step 6: persist the binding from day
 // one). messages-<threadId>.json holds the folded transcript.
-import { readFileSync, mkdirSync, unlinkSync } from "node:fs";
+import { mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { writeFileAtomic } from "./atomic.js";
+import { validRecords, readManagedJson, writeManagedJson, needsRecovery } from "./recovery.js";
 import { peerAllowKey } from "./peer-approval-key.js";
 import { DATA_DIR } from "./config.js";
 import { newId } from "./contracts.js";
@@ -125,13 +125,13 @@ export class Store {
         this.defaultSelection = defaultSelection;
         mkdirSync(DATA_DIR, { recursive: true });
         try {
-            this.bots = JSON.parse(readFileSync(BOTS_FILE, "utf8"));
+            this.bots = readManagedJson(BOTS_FILE, [], validRecords);
         }
         catch {
             this.bots = [];
         }
         try {
-            this.groups = JSON.parse(readFileSync(GROUPS_FILE, "utf8"));
+            this.groups = readManagedJson(GROUPS_FILE, [], validRecords);
         }
         catch {
             this.groups = [];
@@ -224,10 +224,10 @@ export class Store {
             this.saveBots();
     }
     saveBots() {
-        writeFileAtomic(BOTS_FILE, JSON.stringify(this.bots, null, 2));
+        writeManagedJson(BOTS_FILE, this.bots);
     }
     saveGroups() {
-        writeFileAtomic(GROUPS_FILE, JSON.stringify(this.groups.map(({ busyBotId, ...g }) => g), null, 2));
+        writeManagedJson(GROUPS_FILE, this.groups.map(({ busyBotId, ...g }) => g));
     }
     // ── groups ────────────────────────────────────────────────────────────
     group(id) {
@@ -296,7 +296,7 @@ export class Store {
         let messages = [];
         let activeLeafId = null;
         try {
-            const raw = JSON.parse(readFileSync(messagesFile(threadId), "utf8"));
+            const raw = readManagedJson(messagesFile(threadId), [], (value) => validRecords(value) || Boolean(value && typeof value === "object" && validRecords(value.messages)));
             if (Array.isArray(raw))
                 messages = raw; // pre-branching flat file
             else {
@@ -322,7 +322,7 @@ export class Store {
     }
     saveThread(threadId) {
         const t = this.thread(threadId);
-        writeFileAtomic(messagesFile(threadId), JSON.stringify({ activeLeafId: t.activeLeafId, messages: t.messages }, null, 2));
+        writeManagedJson(messagesFile(threadId), { activeLeafId: t.activeLeafId, messages: t.messages });
     }
     messagesFor(threadId) {
         return this.thread(threadId).messages;
@@ -336,7 +336,9 @@ export class Store {
         const byId = new Map(t.messages.map((m) => [m.id, m]));
         const path = [];
         let cur = t.activeLeafId ? byId.get(t.activeLeafId) : undefined;
-        while (cur) {
+        const seen = new Set();
+        while (cur && !seen.has(cur.id)) {
+            seen.add(cur.id);
             path.push(cur);
             cur = cur.parentId ? byId.get(cur.parentId) : undefined;
         }
@@ -629,7 +631,7 @@ export class Store {
     /** First-run seed: one bot so the app never opens empty — it gets a
      * random friendly name like every other bot. */
     seedIfEmpty() {
-        if (this.bots.length)
+        if (this.bots.length || needsRecovery(BOTS_FILE))
             return;
         this.createBot();
     }

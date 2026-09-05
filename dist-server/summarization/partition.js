@@ -95,3 +95,25 @@ export function truncateFairly(input) {
     }
     return { kept, truncated };
 }
+// A message-count limit is not a size limit: forty replies can contain whole
+// files. Claude cannot compact this replay itself because it is one user turn.
+export const MAX_INLINE_HISTORY_CHARS = 60_000;
+export function inlineHistory(messages) {
+    const render = (role, text) => `${role === "user" ? "User" : "Assistant"}: ${text}`;
+    const full = messages.map((m) => render(m.role, m.text)).join("\n");
+    if (full.length <= MAX_INLINE_HISTORY_CHARS)
+        return full;
+    const notice = "[Earlier messages are excerpted to fit context. Full messages remain in MausCrew. Do not assume omitted details; ask for them if needed.]\n";
+    const marker = "\n[... excerpt omitted ...]\n";
+    // Reserve role labels, separators, and truncation markers before allocating.
+    const overhead = messages.reduce((n, m) => n + render(m.role, "").length + 1 + marker.length, 0);
+    const { kept } = truncateFairly({ messages, maxChars: Math.max(0, MAX_INLINE_HISTORY_CHARS - notice.length - overhead) });
+    return notice + kept.map(({ message, text }) => {
+        if (text === message.text)
+            return render(message.role, text);
+        const budget = Math.max(0, text.length - 1);
+        const head = Math.ceil(budget / 2);
+        const tail = budget - head;
+        return render(message.role, message.text.slice(0, head) + marker + (tail ? message.text.slice(-tail) : ""));
+    }).join("\n");
+}

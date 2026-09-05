@@ -83,7 +83,7 @@ export const CodexDriver = {
             // pipe, and an unhandled one takes the whole server down with it (same
             // guard as acp/core.ts). The child's own exit path settles the turn.
             child.stdin.on("error", () => { });
-            const state = { settled: false, lastText: "", sawStreamDelta: false };
+            const state = { settled: false, lastText: "", sawStreamDelta: false, usageSessionId: threadId };
             const asks = new Map();
             let nextId = 1;
             const rpcPending = new Map();
@@ -255,6 +255,8 @@ export const CodexDriver = {
                             emit({
                                 ...base(threadId, turnId),
                                 type: "thread.token-usage.updated",
+                                cumulative: true,
+                                usageSessionId: state.usageSessionId,
                                 input: t.inputTokens ?? 0,
                                 output: t.outputTokens ?? 0,
                             });
@@ -365,6 +367,7 @@ export const CodexDriver = {
                         codexThreadId = started?.thread?.id ?? null;
                         startedModel = started?.model ?? null;
                     }
+                    state.usageSessionId = codexThreadId ?? threadId;
                     emit({ ...base(threadId, turnId), type: "session.started", sessionId: codexThreadId, model: startedModel ?? turn.model ?? null });
                     await request("turn/start", {
                         threadId: codexThreadId,
