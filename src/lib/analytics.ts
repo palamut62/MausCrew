@@ -5,17 +5,32 @@
 // cards render model output and message previews, so it would leak fragments
 // of private conversations to a third party. Email submissions call
 // identify(), so PostHog's Persons tab doubles as the collected-email list.
-import posthog from "posthog-js";
+import type { PostHog } from "posthog-js";
 
 const TOKEN = "phc_m2hP39w8y2gLPvHgDvSXAu6xcZ3agjf4ruL56rGcMZEe";
 
 let ready = false;
+let allowed = false;
+let client: PostHog | undefined;
+let generation = 0;
 
 /** Called once the harness has reported the setting — never before. Opting out
  * has to mean PostHog is never loaded, not that it loads and is asked to stay
  * quiet: an init'd client still resolves the host and writes its own storage. */
-export function initAnalytics(enabled: boolean) {
-  if (ready || !enabled) return;
+export async function initAnalytics(enabled: boolean) {
+  allowed = enabled;
+  const current = ++generation;
+  if (!enabled) {
+    client?.opt_out_capturing();
+    return;
+  }
+  if (ready) {
+    client?.opt_in_capturing({ captureEventName: false });
+    return;
+  }
+  const { default: posthog } = await import("posthog-js");
+  if (!allowed || current !== generation) return;
+  client = posthog;
   posthog.init(TOKEN, {
     api_host: "https://us.i.posthog.com",
     autocapture: false, // never capture clicked-element text (conversation leak)
@@ -47,14 +62,14 @@ export function initAnalytics(enabled: boolean) {
 }
 
 export function track(event: string, props?: Record<string, unknown>) {
-  if (!ready) return;
-  posthog.capture(event, props);
+  if (!ready || !allowed) return;
+  client?.capture(event, props);
 }
 
 export function identifyEmail(email: string) {
-  if (!ready) return;
-  posthog.identify(email, { email });
-  posthog.capture("email_submitted");
+  if (!ready || !allowed) return;
+  client?.identify(email, { email });
+  client?.capture("email_submitted");
 }
 
 // first-run email gate state

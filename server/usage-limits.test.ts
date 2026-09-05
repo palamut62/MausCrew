@@ -1,0 +1,32 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { expect, it } from "vitest";
+import { UsageLimiter } from "./usage-limits.ts";
+import type { RuntimeEvent } from "./contracts.ts";
+const event = (input: number, eventId: string, usageSessionId = "session"): Extract<RuntimeEvent, { type: "thread.token-usage.updated" }> => ({ type: "thread.token-usage.updated", threadId: "task", provider: "codex", createdAt: new Date().toISOString(), eventId, input, output: 0, cumulative: true, usageSessionId });
+it("counts cumulative reports once, including duplicates and restart", () => {
+  const file = join(mkdtempSync(join(tmpdir(), "usage-")), "usage.json");
+  const limits = new UsageLimiter(file);
+  expect(limits.record(event(100, "a")).input).toBe(100);
+  expect(limits.record(event(150, "b")).input).toBe(50);
+  expect(limits.record(event(150, "b")).input).toBe(0);
+  const restarted = new UsageLimiter(file);
+  expect(restarted.record(event(150, "c")).input).toBe(0);
+  expect(restarted.record(event(30, "d", "new-session")).input).toBe(30);
+  expect(restarted.snapshot().today.tokens).toBe(180);
+});
+it("enforces task and daily limits while resetting only daily counters", () => {
+  const file = join(mkdtempSync(join(tmpdir(), "usage-")), "usage.json");
+  let now = new Date(2026, 8, 5);
+  const limits = new UsageLimiter(file, () => now);
+  limits.configure({ dailyTurns: 1, taskTurns: 2, dailyTokens: 150, taskTokens: 0 });
+  limits.begin("task");
+  expect(() => limits.begin("other")).toThrow();
+  now = new Date(2026, 8, 6);
+  limits.begin("task");
+  now = new Date(2026, 8, 7);
+  expect(() => limits.begin("task")).toThrow();
+  expect(limits.record(event(150, "a")).exceeded).toBe(true);
+  expect(() => limits.begin("other")).toThrow();
+});

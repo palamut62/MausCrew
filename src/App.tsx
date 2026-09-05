@@ -1,3 +1,4 @@
+import { RecoveryNotice } from "./components/RecoveryNotice";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { List } from "@phosphor-icons/react";
 import { StoreProvider, useStore } from "@/state/store";
@@ -92,6 +93,8 @@ function Shell() {
   useEffect(() => {
     queueMicrotask(() => setDrawerOpen(false));
   }, [state.selectedId, state.activeView, state.pluginsOpen, state.settingsOpen]);
+
+  if ((state.loading || state.loadError) && !state.bots.length) return <div className="flex h-full flex-col items-center justify-center gap-4 bg-app p-6 text-ink"><p role={state.loadError ? "alert" : "status"}>{state.loadError ? `Uygulama verileri yüklenemedi: ${state.loadError}` : "Veriler yükleniyor…"}</p><button className="rounded border border-hairline p-3" onClick={() => window.dispatchEvent(new Event("mauscrew:retry-load"))}>Tekrar dene</button><button onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "recovery" })}>Kurtarma merkezi</button><Suspense>{state.appSettingsOpen && <SettingsModal />}</Suspense></div>;
 
   if (mobile) return (
     <Suspense fallback={<div className="p-5 text-ink-secondary">Yükleniyor…</div>}>
@@ -197,7 +200,7 @@ function AnalyticsGate() {
   const { state } = useStore();
   const enabled = state.config?.analytics?.enabled;
   useEffect(() => {
-    if (enabled) initAnalytics(true);
+    void initAnalytics(enabled === true).catch(() => {});
   }, [enabled]);
   return null;
 }
@@ -210,6 +213,7 @@ export default function App() {
         <AnalyticsGate />
         <TrayBridge />
         <Shell />
+        <RecoveryNotice />
         <Suspense fallback={null}>
           {gated && <Onboarding onDone={() => setGated(false)} />}
         </Suspense>

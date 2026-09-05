@@ -63,6 +63,7 @@ export interface Message {
   subagent?: SubagentActivity;
   /** screen messages: a frame of the bot's computer (base64) */
   png?: string;
+  hasImage?: boolean;
   mime?: string;
   at: number;
   /** the message this one follows; null = thread root. Edited messages
@@ -98,6 +99,8 @@ export interface Group {
   dm?: boolean;
   busyBotId?: string | null;
   messages: Message[];
+  hasMore?: boolean;
+  versions?: Message[];
 }
 
 export interface ModelSelection {
@@ -160,6 +163,8 @@ export interface Bot {
   /** lifetime token/cost tally, folded server-side from runtime events */
   usage?: { inputTokens: number; outputTokens: number; costUsd: number; turns: number; since: number };
   messages: Message[];
+  hasMore?: boolean;
+  versions?: Message[];
   /** leaf of the visible conversation branch (see visibleMessages) */
   activeLeafId?: string | null;
 }
@@ -204,7 +209,9 @@ export interface ReviewItem {
   sourceBotId: string;
   sourceThreadId: string;
   projectId?: string;
-  status: "pending" | "sending" | "sent" | "failed" | "dismissed";
+  status: "pending" | "sending" | "sent" | "failed" | "unknown" | "dismissed";
+  revision?: number;
+  receipt?: { id: string; url?: string; verifiedBy: "user" | "connector"; at: number };
   deliveryThreadId?: string;
   result?: string;
   createdAt: number;
@@ -220,7 +227,9 @@ export function visibleMessages(bot: Bot): Message[] {
   if (!byId.has(leafId)) return bot.messages;
   const path: Message[] = [];
   let cur = byId.get(leafId);
-  while (cur) {
+  const seen = new Set<string>();
+  while (cur && !seen.has(cur.id)) {
+    seen.add(cur.id);
     path.push(cur);
     cur = cur.parentId ? byId.get(cur.parentId) : undefined;
   }
@@ -352,7 +361,7 @@ export interface InstanceInfo {
   gateway?: boolean;
 }
 
-export type AppSettingsSection = "general" | "connections" | "voice" | "computer" | "security" | "remote";
+export type AppSettingsSection = "general" | "connections" | "voice" | "computer" | "security" | "remote" | "recovery" | "usage" | "search";
 
 interface AppState {
   bots: Bot[];
@@ -380,12 +389,15 @@ interface AppState {
   /** bots whose cloud computer is being provisioned */
   provisioning: Record<string, boolean>;
   connected: boolean;
+  loadError?: string;
+  loading?: boolean;
   error: string | null;
   /** Approval decisions currently being sent, keyed by threadId:requestId. */
   pendingDecisions: Record<string, "allow" | "always-allow" | "deny">;
 }
 
 type Action =
+  | { type: "loadStatus"; loading: boolean; error?: string }
   | { type: "hydrate"; bots: Bot[]; groups: Group[]; projects?: Project[]; workflows?: Workflow[]; reviews?: ReviewItem[] }
   | { type: "showRoutines" }
   | { type: "showReviews" }
@@ -791,7 +803,7 @@ function reducer(state: AppState, action: Action): AppState {
         return {
           ...state,
           groups: state.groups.map((g) =>
-            g.id === group.id ? { ...g, messages: [...g.messages, action.message] } : g,
+            g.id === group.id ? { ...g, messages: [...g.messages, action.message].slice(-200), hasMore: g.hasMore || g.messages.length >= 200 } : g,
           ),
         };
       }
@@ -812,7 +824,7 @@ function reducer(state: AppState, action: Action): AppState {
             messages = messages.map((m) => (dropIds.has(m.id) ? { ...m, png: undefined } : m));
           }
         }
-        return { ...b, messages, activeLeafId: action.message.id };
+        return { ...b, messages: messages.slice(-200), hasMore: b.hasMore || messages.length > 200, activeLeafId: action.message.id };
       });
       return next;
     }
@@ -858,6 +870,8 @@ function reducer(state: AppState, action: Action): AppState {
       };
     case "setModel":
       return updateBot(state, action.botId, (b) => ({ ...b, modelSelection: action.selection }));
+    case "loadStatus":
+      return { ...state, loading: action.loading, loadError: action.error };
     case "connected":
       return { ...state, connected: action.value };
     case "error":
@@ -1016,6 +1030,7 @@ const initialState: AppState = {
   screens: {},
   provisioning: {},
   connected: false,
+  loading: true,
   error: null,
   pendingDecisions: {},
 };
@@ -1175,7 +1190,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           api(`/api/projects/${action.projectId}`, { method: "DELETE" }).catch(showError);
           break;
         case "reviewAction":
-          api(`/api/review-queue/${action.itemId}/${action.action}`, { method: "POST" })
+          api(`/api/review-queue/${action.itemId}/${action.action}`, { method: "POST", body: JSON.stringify({ revision: stateRef.current.reviews.find((item) => item.id === action.itemId)?.revision ?? 1 }) })
             .then(({ item }) => rawDispatch({ type: "reviewPatched", item }))
             .catch(showError);
           break;
@@ -1460,7 +1475,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     let alive = true;
     const loadAll = () =>
       Promise.all([
-        api("/api/bots")
+        api("/api/bots?messages=50&branch=active")
           .then(({ bots, groups, projects, workflows, reviews }) =>
             alive && rawDispatch({
               type: "hydrate",
@@ -1471,7 +1486,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               reviews: reviews ?? [],
             }),
           )
-          .catch(() => {}),
+          ,
         api("/api/instances")
           .then(({ instances }) => alive && rawDispatch({ type: "instances", instances }))
           .catch(() => {}),
@@ -1491,6 +1506,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // while the REST snapshot is in flight, then apply them on top. Otherwise
     // a late hydrate can overwrite a newer event, or an event can land between
     // an eager request and the stream opening and disappear entirely.
+    let retryTimer: ReturnType<typeof setTimeout>;
+    let retries = 0;
     let hydrated = false;
     let hydrating = false;
     let rehydrateRequested = false;
@@ -1506,7 +1523,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
       hydrating = true;
       hydrated = false;
-      void loadAll().finally(() => {
+      rawDispatch({ type: "loadStatus", loading: true });
+      void loadAll().then(() => {
+        retries = 0;
+        rawDispatch({ type: "loadStatus", loading: false });
         if (!alive) return;
         hydrating = false;
         if (rehydrateRequested) {
@@ -1527,14 +1547,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           healsLeft -= 1;
           setTimeout(() => alive && !hydrating && hydrate(), 250);
         }
+      }).catch((error) => {
+        if (!alive) return;
+        hydrating = false;
+        rawDispatch({ type: "loadStatus", loading: false, error: error instanceof Error ? error.message : "Veriler yüklenemedi." });
+        if (retries < 4) retryTimer = setTimeout(hydrate, Math.min(1000 * 2 ** retries++, 8000));
       });
     };
+    const retryLoad = () => { clearTimeout(retryTimer); retries = 0; hydrate(); };
+    window.addEventListener("mauscrew:retry-load", retryLoad);
     // If SSE is unavailable, the app should still show its saved state. A
     // later first hello hydrates again because it cannot prove there was no
     // gap before that connection opened.
     const hydrationFallback = setTimeout(hydrate, 1_000);
 
-    const es = new EventSource("/api/events");
+    const es = new EventSource("/api/events?screens=off");
     // The hydrate decision belongs to the hello frame, not to onopen: the
     // server replays what we missed when it can, and re-downloading every
     // transcript on a reconnect it already covered is pure waste.
@@ -1669,6 +1696,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           }
           break;
         }
+        case "usage.limit":
+          rawDispatch({ type: "error", message: frame.message });
+          break;
         case "screen":
           rawDispatch({
             type: "screenFrame",
@@ -1721,11 +1751,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (hydrated) handleFrame(frame);
-      else pendingFrames.push(frame);
+      else { pendingFrames.push(frame); if (pendingFrames.length > 1000) pendingFrames.shift(); }
     };
     return () => {
       alive = false;
       clearTimeout(hydrationFallback);
+      clearTimeout(retryTimer);
+      window.removeEventListener("mauscrew:retry-load", retryLoad);
       es.close();
     };
   }, []);

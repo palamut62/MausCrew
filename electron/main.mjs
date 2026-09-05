@@ -709,6 +709,12 @@ ipcMain.handle("startup:get", () => ({
   enabled: app.isPackaged ? app.getLoginItemSettings().openAtLogin : false,
 }));
 
+ipcMain.handle("app:restart", () => {
+  app.relaunch();
+  quitRequested = true;
+  app.quit();
+});
+
 ipcMain.handle("startup:set", (_event, enabled) => {
   if (!app.isPackaged || (process.platform !== "win32" && process.platform !== "darwin")) {
     return { available: false, enabled: false };

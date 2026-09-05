@@ -39,6 +39,7 @@ declare global {
 
   interface Window {
     mauscrew?: {
+      restartApp?: () => Promise<void>;
       platform: NodeJS.Platform;
       getCapabilities(): Promise<DesktopCapabilities>;
       screenFrame(): Promise<string | null>;

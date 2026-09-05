@@ -1,3 +1,4 @@
+import { useHistory } from "./MessageHistory";
 import { Component, memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Spin } from "./Spin";
 import { ArrowBendUpLeft, ArrowClockwise, ArrowDown, Brain, CaretDown, CaretLeft, CaretRight, Check, Copy, Crown, GitFork, Monitor, Pencil, Square, Warning, WebhooksLogo, X } from "@phosphor-icons/react";
@@ -285,7 +286,7 @@ function Bubble({
         // message it points at can still be edited into another version, and
         // a quote that changes afterwards is not a quote.
         <button
-          onClick={() => document.getElementById(`message-${message.replyTo!.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" })}
+          onClick={() => { const element = document.getElementById(`message-${message.replyTo!.id}`); if (element) element.scrollIntoView({ behavior: "smooth", block: "center" }); else window.dispatchEvent(new CustomEvent("mauscrew:jump-message", { detail: { threadId: bot.threadId, messageId: message.replyTo!.id } })); }}
           className={cn(
             "mb-1 flex max-w-[72%] items-start gap-1.5 rounded-lg border-l-2 border-accent/50 bg-inset/60 px-2 py-1 text-left text-[11.5px] text-ink-secondary hover:bg-inset",
             user ? "self-end" : "self-start",
@@ -543,11 +544,12 @@ function SubagentActivityCard({ message }: { message: Message }) {
   );
 }
 
-function ScreenFrame({ png, mime }: { png: string; mime?: string }) {
+function ScreenFrame({ png, mime, src }: { png?: string; mime?: string; src?: string }) {
   return (
     <div className="flex justify-start">
       <img
-        src={`data:${mime ?? "image/png"};base64,${png}`}
+        loading="lazy"
+        src={src ?? `data:${mime ?? "image/png"};base64,${png}`}
         alt="Bot's screen"
         className="max-w-[70%] rounded-xl border border-hairline"
       />
@@ -654,7 +656,7 @@ const MessagesList = memo(function MessagesList({
                 <ActivityChip message={m} />
               );
             case "screen":
-              return m.png ? <ScreenFrame png={m.png} mime={m.mime} /> : null;
+              return m.png || m.hasImage ? <ScreenFrame png={m.png} mime={m.mime} src={m.png ? undefined : `/api/threads/${bot.threadId}/messages/${m.id}/image`} /> : null;
             case "structured":
               return <StructuredResult message={m} botId={bot.id} />;
             default:
@@ -695,7 +697,9 @@ export function ChatView({ bot }: { bot: Bot }) {
   const provisioning = state.provisioning[bot.id];
 
   // only the active branch is rendered; forks stay reachable via ‹ › nav
-  const messages = useMemo(() => visibleMessages(bot), [bot]);
+  const liveMessages = useMemo(() => visibleMessages(bot), [bot]);
+  const history = useHistory(bot.threadId, liveMessages, bot.hasMore);
+  const messages = history.messages;
   const lastBotTextId = useMemo(
     () => [...messages].reverse().find((m) => m.role === "bot" && m.kind === "text")?.id,
     [messages],
@@ -740,8 +744,8 @@ export function ChatView({ bot }: { bot: Bot }) {
 
   useEffect(() => queueMicrotask(() => setFollow(true)), [bot.id]);
   useEffect(() => {
-    if (follow) scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [bot.id, messages.length, streaming, reasoning, bot.busy, follow]);
+    if (follow && !history.archived) scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+  }, [bot.id, messages.length, streaming, reasoning, bot.busy, follow, history.archived]);
 
   // keyboard is a scroll gesture too (upstream lesson): PageUp/Home break
   // follow like an upward wheel; the at-end onScroll check re-arms it
@@ -866,12 +870,13 @@ export function ChatView({ bot }: { bot: Bot }) {
           aria-live="polite"
           aria-label={`Conversation with ${bot.name}`}
         >
+          {history.controls}
           <MessagesList
-            bot={bot}
+            bot={{ ...bot, messages: [...new Map([...messages, ...(history.versions ?? bot.versions ?? [])].map((m) => [m.id, m])).values()] }}
             messages={messages}
             editingId={editingId}
             lastBotTextId={lastBotTextId}
-            canRetryLast={!bot.busy && Boolean(lastUserMessage)}
+            canRetryLast={!history.archived && !bot.busy && Boolean(lastUserMessage)}
             engine={state.instances.find((i) => i.instanceId === bot.modelSelection.instanceId)}
             onStartEdit={startEdit}
             onCancelEdit={cancelEdit}

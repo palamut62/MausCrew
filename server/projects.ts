@@ -1,7 +1,6 @@
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { writeFileAtomic } from "./atomic.ts";
+import { validRecords, readManagedJson, writeManagedJson } from "./recovery.ts";
 import { DATA_DIR } from "./config.ts";
 import { newId } from "./contracts.ts";
 
@@ -78,7 +77,7 @@ export class ProjectManager {
   constructor(file = PROJECTS_FILE) {
     this.file = file;
     try {
-      const rows = JSON.parse(readFileSync(file, "utf8"));
+      const rows = readManagedJson<ProjectRecord[]>(file, [], (v) => validRecords(v) && (v as ProjectRecord[]).every((row) => publicProject(row) !== null));
       this.projects = Array.isArray(rows)
         ? rows.map((row) => publicProject(row)).filter((row): row is ProjectRecord => Boolean(row))
         : [];
@@ -176,6 +175,6 @@ export class ProjectManager {
   }
 
   private save(): void {
-    writeFileAtomic(this.file, JSON.stringify(this.projects, null, 2));
+    writeManagedJson(this.file, this.projects);
   }
 }

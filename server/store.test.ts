@@ -3,12 +3,17 @@
 // except `busy`, which never does (no turn survives one either).
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DATA_DIR } from "./config.ts";
 import type { ModelSelection } from "./contracts.ts";
 import { peerAllowKey } from "./peer-approval-key.ts";
-import { Store, type BotRecord } from "./store.ts";
+import type { BotRecord } from "./store.ts";
+let Store: typeof import("./store.ts").Store;
+beforeEach(async () => {
+  vi.resetModules();
+  Store = (await import("./store.ts")).Store;
+});
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "claude-sonnet-5" });
 
@@ -310,13 +315,15 @@ describe("Store", () => {
     expect(reloaded.activePath(bot.threadId).map((m) => m.id)).toEqual(["m1", "m2"]);
   });
 
-  it("tolerates a corrupt bots.json by starting empty", () => {
+  it("preserves a corrupt bots.json and blocks changes until recovery", () => {
     const store = new Store(selection);
     store.createBot();
     writeFileSync(join(DATA_DIR, "bots.json"), "{not json");
 
     const reloaded = new Store(selection);
     expect(reloaded.bots).toEqual([]);
+    expect(() => reloaded.createBot()).toThrow();
+    expect(readFileSync(join(DATA_DIR, "bots.json"), "utf8")).toBe("{not json");
   });
 
   it("busy is wiped even when bots.json says otherwise", () => {

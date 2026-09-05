@@ -1,3 +1,4 @@
+import { DATA_DIR } from "./config.ts";
 // MausCrew server — the harness host. Clients hold no transports
 // (upstream rule): the React app dispatches typed commands over HTTP and
 // folds one SSE event stream; every provider process runs here.
@@ -86,7 +87,7 @@ import { digestSystemBlock } from "./summarization/digest.ts";
 import { memoryBlock } from "./memory/store.ts";
 import { deterministicEntry, journalDate, planDistil, planHarvest, recordDistil, recordJournal } from "./memory/harvest.ts";
 import { readJournal, readProfile, writeProfile } from "./memory/store.ts";
-import { partitionThread } from "./summarization/partition.ts";
+import { inlineHistory, partitionThread } from "./summarization/partition.ts";
 
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { describeBaseUrl } from "./drivers/deepseek/config.ts";
@@ -148,6 +149,9 @@ import { extractStructuredUi } from "./ui-runtime/schema.ts";
 import { fileListItems, resolveProducedFile } from "./produced-files.ts";
 import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./webhook-ingress.ts";
 import { WebhookManager } from "./webhooks.ts";
+import { recoveryIssues, restoreLastGood } from "./recovery.ts";
+import { createBackup, backupPreview, saveBackup, listBackups, readBackup, stageRestore, restorePending } from "./backups.ts";
+import { UsageLimiter } from "./usage-limits.ts";
 
 /** Kept as a literal rather than read from package.json at runtime: the
  * packaged layout copies dist-server to resources/server while package.json
@@ -178,6 +182,7 @@ const MIME: Record<string, string> = {
 };
 
 ensureDirs();
+restorePending();
 await ensureDefaultPolicy();
 const cfg = loadConfig();
 const computerSupervisor = new ComputerSupervisor([
@@ -380,10 +385,12 @@ bootSelection = await defaultSelection();
 store.seedIfEmpty();
 const projects = new ProjectManager();
 const workflows = new WorkflowManager();
+workflows.recoverInterrupted();
+const usageLimiter = new UsageLimiter();
 const reviewQueue = new ReviewQueue();
 {
   const stuck = reviewQueue.recoverStuckDeliveries();
-  if (stuck) console.log(`review queue: ${stuck} delivery(s) left mid-send by a previous run marked failed`);
+  if (stuck) console.log(`review queue: ${stuck} delivery(s) require verification after restart`);
 }
 const reviewDeliveryByThread = new Map<string, string>();
 
@@ -403,7 +410,7 @@ const wireBot = (bot: NonNullable<ReturnType<typeof store.bot>>) => {
 
 const publicBot = (bot: NonNullable<ReturnType<typeof store.bot>>) => ({
   ...wireBot(bot),
-  messages: store.messagesFor(bot.threadId),
+  ...historyWindow(bot.threadId),
   activeLeafId: store.activeLeaf(bot.threadId),
   tasks: store.tasks(bot.id).map(wireTask),
 });
@@ -458,6 +465,28 @@ function messagePage(threadId: string, limit: number | undefined, before?: strin
   const stop = end === -1 ? all.length : end;
   const start = Math.max(0, stop - limit);
   return { messages: all.slice(start, stop).map(slimMessage), hasMore: start > 0 };
+}
+
+function historyWindow(threadId: string, params = new URLSearchParams()) {
+  const all = store.messagesFor(threadId);
+  const byId = new Map(all.map((m) => [m.id, m]));
+  const around = params.get("around");
+  const leaf = params.get("leaf") || (around && !store.activePath(threadId).some((m) => m.id === around) ? around : store.activeLeaf(threadId));
+  let path: Message[] = [];
+  let cur = leaf ? byId.get(leaf) : undefined;
+  const seen = new Set<string>();
+  while (cur && !seen.has(cur.id)) { seen.add(cur.id); path.push(cur); cur = cur.parentId ? byId.get(cur.parentId) : undefined; }
+  path.reverse();
+  if (!path.length) path = all;
+  let end = path.length;
+  const before = params.get("before"), after = params.get("after");
+  if (before) { const i = path.findIndex((m) => m.id === before); if (i < 0) throw Object.assign(new Error("Mesaj bulunamadı."), { status: 404 }); end = i; }
+  if (after) { const i = path.findIndex((m) => m.id === after); if (i < 0) throw Object.assign(new Error("Mesaj bulunamadı."), { status: 404 }); end = Math.min(path.length, i + 51); }
+  if (around) { const i = path.findIndex((m) => m.id === around); if (i < 0) throw Object.assign(new Error("Mesaj bulunamadı."), { status: 404 }); end = Math.min(path.length, Math.max(50, i + 25)); }
+  const start = Math.max(0, end - 50);
+  const messages = path.slice(start, end);
+  const parents = new Set(messages.filter((m) => m.role === "user").map((m) => m.parentId));
+  return { messages: messages.map(slimMessage), versions: all.filter((m) => m.role === "user" && parents.has(m.parentId)).map(slimMessage), hasMore: start > 0, hasNewer: end < path.length, leaf };
 }
 
 // ── SSE fan-out to clients ─────────────────────────────────────────────
@@ -522,6 +551,7 @@ function cursorSeq(raw: string | string[] | undefined): number | null {
 }
 
 function broadcast(payload: Record<string, unknown>) {
+  if (payload.kind === "message" && payload.message) payload = { ...payload, message: slimMessage(payload.message as Message) };
   const seq = ++lastSeq;
   const kind = String(payload.kind ?? "");
   const frame = `id: ${STREAM_ID}:${seq}\ndata: ${JSON.stringify({ ...payload, seq })}\n\n`;
@@ -1228,7 +1258,12 @@ bus.subscribe((event: RuntimeEvent) => {
       // group turns run on the room's thread, so the token bill belongs to
       // whichever member is busy there — same owner rule as turn.completed
       const owner = bot ?? (group?.busyBotId ? store.bot(group.busyBotId) : undefined);
-      if (owner) store.addUsage(owner.id, { input: event.input, output: event.output });
+      const usage = usageLimiter.record(event);
+      if (owner) store.addUsage(owner.id, { input: usage.input, output: usage.output });
+      if (usage.exceeded && owner) {
+        broadcast({ kind: "usage.limit", threadId: event.threadId, message: "Token sınırına ulaşıldı; çalışma durduruluyor." });
+        void registry.get(event.providerInstanceId ?? owner.modelSelection.instanceId)?.adapter.interruptTurn(event.threadId).catch(() => {});
+      }
       break;
     }
     case "turn.completed": {
@@ -1316,6 +1351,18 @@ bus.subscribe((event: RuntimeEvent) => {
 // (target threadId → channel) lets the main fold mirror the delegated
 // turn's TERMINAL state into the A⇄B channel when it completes — the
 // channel stays the full record of the handoff, not just its request.
+const workflowRuns = new Map<string, { workflowId: string; stepId: string }>();
+bus.subscribe((event: RuntimeEvent) => {
+  if (event.type !== "turn.completed") return;
+  const run = workflowRuns.get(event.threadId);
+  if (!run || (!event.ok && triedEngines.has(event.threadId))) return;
+  workflowRuns.delete(event.threadId);
+  const step = workflows.get(run.workflowId)?.steps.find((s) => s.id === run.stepId);
+  if (step?.status !== "running") return;
+  const reply = store.messagesFor(event.threadId).filter((m) => m.role === "bot" && m.kind === "text").at(-1)?.text;
+  const updated = workflows.updateStep(run.workflowId, run.stepId, { status: event.ok ? "done" : "blocked", output: reply || "Adım kesintiye uğradı; mevcut çıktıyı kontrol edin." });
+  if (updated) publishWorkflow(updated);
+});
 const delegationWatch = new Map<string, { channelId?: string; toBotId: string }>();
 
 /** Consume one delegated-turn watch and mirror exactly one terminal state.
@@ -1596,6 +1643,7 @@ async function startTurn(
     userMessage?: Message;
     /** Routines run in detached tasks; pin the destination for the whole turn. */
     threadId?: string;
+    projectId?: string;
     /** Cloud routines run the whole agent inside the bot's Box VM instead
      * of merely mounting that VM's computer tools on the MAUS's provider. */
     runOn?: RoutineRunOn;
@@ -1626,6 +1674,7 @@ async function startTurn(
   else if (opts?.automationSource === undefined && !opts?.commsDepth) clearUnattended(bot.id);
   const task = store.taskByThread(bot.id, threadId);
   if (!task) throw Object.assign(new Error("no such task"), { status: 404 });
+  if (recoveryIssues().length || existsSync(join(DATA_DIR, "pending-restore.json"))) throw Object.assign(new Error("Kurtarma merkezindeki işlemi tamamlayıp uygulamayı yeniden başlatın."), { status: 423 });
   const commsDepth = opts?.commsDepth ?? 0;
   if (bot.autoProfile && text.trim()) {
     const profile = taskProfile(text, store.bots.filter((candidate) => candidate.id !== botId).map((candidate) => candidate.name));
@@ -1678,6 +1727,7 @@ async function startTurn(
   // A reply quotes one earlier message in this same thread. Resolved against
   // this thread's own messages rather than trusted from the client.
   const quote = buildReplyQuote(store.messagesFor(threadId), opts?.replyToId);
+  usageLimiter.begin(threadId);
 
   // an edit hands us its already-branched user message; a plain send appends
   let userMessage = opts?.userMessage;
@@ -1739,7 +1789,7 @@ async function startTurn(
               ? "[The user rewound this conversation (edited a message or switched to another version). Everything before this point was replaced by the following history:]"
               : "[MausCrew starts each Claude turn in a fresh isolated provider session. Here is the persisted conversation history:]",
           "",
-          ...transcript.map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.text}`),
+          inlineHistory(transcript),
           "",
           "[Now reply to the user's latest message:]",
           "",
@@ -2013,7 +2063,7 @@ async function startTurn(
         // made parent CLAUDE.md files and host project state part of an
         // otherwise unconfigured bot. Give it the same private workspace as
         // the Skill Center; explicit project/shared workspaces still win.
-        cwd: bot.workspacePath || cfg.sharedWorkspacePath || (instance.driverKind === "claudeAgent" ? skillsWorkspaceFor(bot) : undefined),
+        cwd: projects.get(opts?.projectId ?? "")?.workspacePath || bot.workspacePath || cfg.sharedWorkspacePath || (instance.driverKind === "claudeAgent" ? skillsWorkspaceFor(bot) : undefined),
         runtimeFeatures: { dynamicCordis: bot.dynamicCordis === true },
         system:
           persona +
@@ -2383,6 +2433,7 @@ async function runGroupMemberTurn(
   const bot = store.bot(botId);
   if (!group || !bot) return;
   const project = projects.get(group.projectId ?? "");
+  if (recoveryIssues().length || existsSync(join(DATA_DIR, "pending-restore.json"))) return;
   spoken.add(botId);
   const instance = registry.get(bot.modelSelection.instanceId);
   const userName = cfg.profile?.name?.trim() || "User";
@@ -2408,6 +2459,12 @@ async function runGroupMemberTurn(
     if (patched) broadcast({ kind: "bot", bot: wireBot(patched) });
   }
 
+  try { usageLimiter.begin(group.threadId); }
+  catch (error) {
+    const message = store.appendMessage(group.threadId, { role: "bot", kind: "activity", tool: { name: error instanceof Error ? error.message : "Kullanım sınırı", ok: false } });
+    broadcast({ kind: "message", threadId: group.threadId, message });
+    return;
+  }
   store.patchGroup(group.id, { busyBotId: bot.id });
   broadcastGroup(group.id);
   groupSpeakers.set(group.threadId, { botId: bot.id, name: bot.name, color: bot.color });
@@ -2663,7 +2720,7 @@ function json(res: ServerResponse, status: number, body: unknown) {
   res.end(data);
 }
 
-function readBody(req: IncomingMessage): Promise<any> {
+function readBody(req: IncomingMessage, maxBytes = 1_000_000): Promise<any> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let bytes = 0;
@@ -2677,7 +2734,7 @@ function readBody(req: IncomingMessage): Promise<any> {
     req.on("data", (c) => {
       if (done) return;
       bytes += typeof c === "string" ? Buffer.byteLength(c) : c.length;
-      if (bytes > 1_000_000) {
+      if (bytes > maxBytes) {
         // Keep draining the socket, but stop retaining attacker-controlled
         // bytes. Destroying the request here prevents the caller from
         // receiving the useful 413 response.
@@ -2959,6 +3016,40 @@ const server = createServer(async (req, res) => {
       if ((path === "/api/config" && method !== "GET") || path.startsWith("/api/remote/pairings") || path.startsWith("/api/remote/devices") || path.startsWith("/api/security") || path.startsWith("/api/agui-agents") || path.startsWith("/api/mcp-servers") || (path.startsWith("/api/webhooks") && method !== "GET")) {
         return json(res, 403, { error: "this setting can only be changed on the desktop" });
       }
+    }
+
+    if (path === "/api/recovery" && method === "GET") {
+      if (!localRequest) return json(res, 403, { error: "desktop only" });
+      return json(res, 200, { issues: recoveryIssues(), backups: url.searchParams.has("summary") ? [] : listBackups(), workflows: workflows.list().filter((w) => w.status === "blocked" || w.status === "failed"), restartRequired: existsSync(join(DATA_DIR, "pending-restore.json")) });
+    }
+    if (path === "/api/recovery/last-good" && method === "POST") {
+      if (!localRequest) return json(res, 403, { error: "desktop only" });
+      const body = await readBody(req);
+      if (store.bots.some((b) => b.busy) || store.groups.some((g) => g.busyBotId)) return json(res, 409, { error: "Önce çalışan görevleri durdurun." });
+      restoreLastGood(String(body.id ?? ""));
+      return json(res, 200, { restartRequired: true });
+    }
+    if (path.startsWith("/api/backups")) {
+      if (!localRequest) return json(res, 403, { error: "desktop only" });
+      if (method === "POST" && path === "/api/backups") return json(res, 201, saveBackup());
+      if (method === "GET" && path === "/api/backups/export") return json(res, 200, createBackup());
+      if (method === "GET" && path.startsWith("/api/backups/file/")) return json(res, 200, readBackup(path.slice("/api/backups/file/".length)));
+      if (method === "POST" && (path === "/api/backups/preview" || path === "/api/backups/restore")) {
+        const body = await readBody(req, 70 * 1024 * 1024);
+        if (path.endsWith("preview")) return json(res, 200, backupPreview(body));
+        if (store.bots.some((b) => b.busy) || store.groups.some((g) => g.busyBotId)) return json(res, 409, { error: "Önce çalışan görevleri durdurun." });
+        return json(res, 200, stageRestore(body));
+      }
+    }
+    if (path === "/api/usage-limits") {
+      if (method === "GET") return json(res, 200, usageLimiter.snapshot());
+      if (method === "PUT") {
+        if (!localRequest) return json(res, 403, { error: "desktop only" });
+        return json(res, 200, usageLimiter.configure(await readBody(req)));
+      }
+    }
+    if (!["GET", "HEAD"].includes(method) && (recoveryIssues().length || existsSync(join(DATA_DIR, "pending-restore.json")))) {
+      return json(res, 423, { error: "Kayıtlar kurtarma için kilitli. Ayarlar > Kurtarma merkezini açın." });
     }
 
     if (method === "POST" && path === "/api/remote/claim") {
@@ -3502,7 +3593,7 @@ const server = createServer(async (req, res) => {
       const limit = pageSize(url.searchParams.get("messages"));
       if (limit === null) return json(res, 400, { error: "messages must be a non-negative whole number" });
       return json(res, 200, {
-        bots: store.bots.map((bot) => ({ ...publicBot(bot), ...messagePage(bot.threadId, limit) })),
+        bots: store.bots.map((bot) => ({ ...wireBot(bot), activeLeafId: store.activeLeaf(bot.threadId), tasks: store.tasks(bot.id).map(wireTask), ...(url.searchParams.get("branch") === "active" ? historyWindow(bot.threadId) : messagePage(bot.threadId, limit)) })),
         groups: store.groups.map((g) => ({ ...g, ...messagePage(g.threadId, limit) })),
         projects: projects.list(),
         workflows: workflows.list(),
@@ -3598,6 +3689,64 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { ok: true });
     }
 
+    const segments = path.split("/");
+    if (segments[2] === "review-queue" && segments.length === 4 && method === "PATCH") {
+      const item = reviewQueue.edit(segments[3], await readBody(req));
+      if (!item) return json(res, 404, { error: "no such review item" });
+      publishReview(item);
+      return json(res, 200, { item });
+    }
+    if (segments[2] === "review-queue" && segments[4] === "verify" && method === "POST") {
+      const body = await readBody(req);
+      const item = reviewQueue.get(segments[3]);
+      if (!item || item.status !== "unknown") return json(res, 409, { error: "Bu kayıt doğrulama beklemiyor." });
+      if (body.checkedTarget !== true) return json(res, 400, { error: "Önce hedefi kontrol edin." });
+      let receipt: NonNullable<typeof item.receipt> | undefined;
+      if (body.delivered === true) {
+        const id = String(body.receiptId ?? "").trim().slice(0, 300);
+        if (!id) return json(res, 400, { error: "Teslim kimliği veya makbuz bağlantısı gerekli." });
+        let receiptUrl: string | undefined;
+        if (body.url) {
+          try { const parsed = new URL(String(body.url)); if (parsed.protocol !== "https:") throw new Error(); receiptUrl = parsed.href; }
+          catch { return json(res, 400, { error: "Makbuz bağlantısı HTTPS olmalıdır." }); }
+        }
+        receipt = { id, url: receiptUrl, verifiedBy: "user", at: Date.now() };
+      } else if (body.delivered !== false) return json(res, 400, { error: "Teslim durumunu seçin." });
+      const updated = reviewQueue.update(item.id, { status: receipt ? "sent" : "failed", receipt, result: receipt ? "Kullanıcı hedefteki teslimi doğruladı." : "Kullanıcı hedefi kontrol etti; teslim edilmedi. Yeniden denenebilir." })!;
+      publishReview(updated);
+      return json(res, 200, { item: updated });
+    }
+    if (segments[2] === "workflows" && segments[4] === "steps" && segments.length === 7 && method === "POST") {
+      const body = await readBody(req);
+      const workflow = workflows.get(segments[3]);
+      const step = workflow?.steps.find((s) => s.id === segments[5]);
+      if (!workflow || !step) return json(res, 404, { error: "Adım bulunamadı." });
+      const botId = String(body.botId || step.assigneeBotId || workflow.ownerBotId);
+      const bot = store.bot(botId);
+      if (!bot) return json(res, 404, { error: "Bot bulunamadı." });
+      if (segments[6] === "reassign") {
+        const updated = workflows.reassign(workflow.id, step.id, botId);
+        if (!updated) return json(res, 409, { error: "Çalışan veya iptal edilmiş adım devredilemez." });
+        publishWorkflow(updated);
+        return json(res, 200, { workflow: updated });
+      }
+      if (segments[6] === "restart") {
+        if (bot.busy || step.status === "running" || step.status === "done") return json(res, 409, { error: "Adım veya bot zaten çalışıyor ya da tamamlanmış." });
+        const updated = workflows.updateStep(workflow.id, step.id, { status: "running", output: step.output });
+        if (!updated) return json(res, 409, { error: "İş akışı iptal edilmiş." });
+        const task = store.createTask(bot.id, step.title, false)!;
+        publishWorkflow(updated);
+        const prompt = `İş akışındaki adımı devam ettir: ${step.title}\nÖnceki durum: ${step.output ?? ""}\n${projects.systemBlock(workflow.projectId)}\nWorkflow id: ${workflow.id}; step id: ${step.id}. Başlamadan mevcut çıktıyı kontrol et; tamamlandığında update_workflow_step ile bildir.`;
+        workflowRuns.set(task.threadId, { workflowId: workflow.id, stepId: step.id });
+        const failed = (message: string) => {
+          workflowRuns.delete(task.threadId);
+          const value = workflows.updateStep(workflow.id, step.id, { status: "blocked", output: message });
+          if (value) publishWorkflow(value);
+        };
+        void startTurn(bot.id, prompt, { threadId: task.threadId, projectId: workflow.projectId, onDispatchError: failed }).catch((error) => failed(error instanceof Error ? error.message : String(error)));
+        return json(res, 202, { workflow: updated });
+      }
+    }
     if (path === "/api/workflows" && method === "GET") {
       return json(res, 200, { workflows: workflows.list({ projectId: url.searchParams.get("projectId") ?? undefined }) });
     }
@@ -3609,6 +3758,7 @@ const server = createServer(async (req, res) => {
       const item = reviewQueue.get(m[1]);
       if (!item) return json(res, 404, { error: "no such review item" });
       if (m[2] === "dismiss") {
+        if (item.status === "sending") return json(res, 409, { error: "Gönderim sürerken kapatılamaz." });
         const updated = reviewQueue.update(item.id, { status: "dismissed" })!;
         publishReview(updated);
         return json(res, 200, { item: updated });
@@ -3619,6 +3769,10 @@ const server = createServer(async (req, res) => {
       if (item.status !== "pending" && item.status !== "failed") {
         return json(res, 409, { error: "this review item has already been handled" });
       }
+      const approval = await readBody(req);
+      if (approval.revision !== (item.revision ?? 1)) return json(res, 409, { error: "Taslak değişti. Son halini inceleyip tekrar onaylayın." });
+      const latest = reviewQueue.get(item.id)!;
+      if (latest.status !== item.status || latest.revision !== item.revision) return json(res, 409, { error: "Taslak başka bir cihazda işlendi." });
       const bot = store.bot(item.sourceBotId);
       if (!bot) return json(res, 404, { error: "the source bot no longer exists" });
       if (bot.busy) return json(res, 409, { error: "the source bot is busy" });
@@ -3635,8 +3789,7 @@ const server = createServer(async (req, res) => {
         item.content,
         "[/USER-APPROVED OUTBOUND DELIVERY]",
         "Send exactly this approved content to the named target using the connected app tools. Do not materially rewrite it. Report the actual delivery result.",
-        // The harness reads this line, so it is a protocol and not a
-        // formatting preference: an unconfirmed turn is recorded as not sent.
+        `Delivery reference: ${item.id}:${item.revision ?? 1}. If the connected tool supports idempotency keys, use this exact reference. Never retry a send with an uncertain outcome; inspect the target first. Include the actual receipt id and HTTPS URL returned by the tool.`,
         'End your reply with one final line, exactly "DELIVERY: SENT" if the target actually received it, or "DELIVERY: NOT SENT - <reason>" if anything stopped it, including a missing tool or account.',
       ].join("\n");
       void startTurn(bot.id, prompt, {
@@ -3705,6 +3858,25 @@ const server = createServer(async (req, res) => {
       } finally {
         clearTimeout(timeout);
       }
+    }
+
+    const historyMatch = path.match(/^\/api\/threads\/([\w-]+)\/window$/);
+    if (historyMatch && method === "GET") {
+      if (!store.botByThread(historyMatch[1]) && !store.groupByThread(historyMatch[1])) return json(res, 404, { error: "Konuşma bulunamadı." });
+      return json(res, 200, historyWindow(historyMatch[1], url.searchParams));
+    }
+    if (path === "/api/search" && method === "GET") {
+      const q = (url.searchParams.get("q") ?? "").trim().toLocaleLowerCase("tr");
+      if (q.length < 2) return json(res, 400, { error: "En az iki karakter girin." });
+      const botId = url.searchParams.get("botId"), projectId = url.searchParams.get("projectId");
+      const from = url.searchParams.get("from"), to = url.searchParams.get("to");
+      const min = from ? Date.parse(from) : 0, max = to ? Date.parse(to) + 86400000 : Infinity;
+      if (!Number.isFinite(min) || (to && !Number.isFinite(max))) return json(res, 400, { error: "Tarih geçersiz." });
+      const threads = store.bots.filter((b) => !botId || b.id === botId).flatMap((b) => store.tasks(b.id).map((t) => ({ botId: b.id, groupId: "", threadId: t.threadId, title: `${b.name} / ${t.title}`, projectId: undefined as string | undefined })));
+      for (const g of store.groups) if (!botId || g.memberIds.includes(botId)) threads.push({ botId: "", groupId: g.id, threadId: g.threadId, title: g.name, projectId: g.projectId });
+      const results = threads.filter((t) => !projectId || t.projectId === projectId || (t.botId && store.groups.some((g) => g.projectId === projectId && g.memberIds.includes(t.botId)))).flatMap((t) => store.messagesFor(t.threadId).filter((m) => m.at >= min && m.at < max && m.text?.toLocaleLowerCase("tr").includes(q)).map((m) => ({ ...t, messageId: m.id, at: m.at, text: m.text!.slice(Math.max(0, m.text!.toLocaleLowerCase("tr").indexOf(q) - 100), Math.max(0, m.text!.toLocaleLowerCase("tr").indexOf(q) - 100) + 400) }))).sort((a,b) => b.at - a.at);
+      const offset = Math.max(0, Math.min(100000, Number(url.searchParams.get("offset")) || 0));
+      return json(res, 200, { results: results.slice(offset, offset + 50), total: results.length });
     }
 
     // scrollback: the page before a message the client already holds
@@ -4011,7 +4183,7 @@ const server = createServer(async (req, res) => {
       return json(res, 201, {
         bot: {
           ...wireBot(created),
-          messages: store.messagesFor(bot.threadId),
+          ...historyWindow(bot.threadId),
           activeLeafId: store.activeLeaf(bot.threadId),
         },
       });
@@ -4636,7 +4808,7 @@ const server = createServer(async (req, res) => {
     // the client showing the previous task's conversation.
     const botWithThread = (bot: NonNullable<ReturnType<typeof store.bot>>) => ({
       ...wireBot(bot),
-      messages: store.messagesFor(bot.threadId),
+      ...historyWindow(bot.threadId),
       activeLeafId: store.activeLeaf(bot.threadId),
       tasks: store.tasks(bot.id).map(wireTask),
     });

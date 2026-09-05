@@ -121,7 +121,7 @@ export type RuntimeEvent = RuntimeEventBase &
         secret?: boolean;
       }
     | { type: "request.resolved"; behavior: string; source: string }
-    | { type: "thread.token-usage.updated"; input: number; output: number }
+    | { type: "thread.token-usage.updated"; input: number; output: number; cumulative?: boolean; usageSessionId?: string }
     // `setup: true` marks a failure the user fixes by installing or
     // configuring something, not by retrying — the UI offers setup instead.
     | { type: "runtime.error"; message: string; setup?: boolean }

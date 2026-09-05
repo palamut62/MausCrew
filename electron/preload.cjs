@@ -8,6 +8,7 @@ let sttCapture = null;
 contextBridge.exposeInMainWorld("mauscrew", {
   /** Host platform ("darwin" | "win32" | "linux") — for platform-aware UI. */
   platform: process.platform,
+  restartApp: () => ipcRenderer.invoke("app:restart"),
   getCapabilities: () => ipcRenderer.invoke("desktop:capabilities"),
   /** One frame of this computer's screen as a data: URL when supported. */
   screenFrame: () => ipcRenderer.invoke("screen:frame"),

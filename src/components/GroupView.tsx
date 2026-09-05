@@ -1,3 +1,4 @@
+import { useHistory } from "./MessageHistory";
 // A room: several bots + you in one shared thread. The sidebar and call view
 // carry the personality; avatars inside the room stay still so a busy group
 // does not become a wall of competing motion. Plain messages go to the room's
@@ -113,7 +114,7 @@ const Transcript = memo(function Transcript({
           ) : null;
         if (!row) return null;
         return (
-          <div key={m.id} className="contents">
+          <div key={m.id} id={`message-${m.id}`} className="contents">
             {newDay && (
               <div className="py-3 text-center font-mono text-[13px] tracking-tight text-ink-secondary">
                 {dayLabel(m.at)} {formatTime(m.at)}
@@ -192,6 +193,7 @@ function DefaultResponderSelect({ group, members }: { group: Group; members: Bot
 }
 
 export function GroupView({ group }: { group: Group }) {
+  const history = useHistory(group.threadId, group.messages, group.hasMore);
   const { state, dispatch } = useStore();
   const stream = useStreaming();
   const streaming = stream.streaming[group.threadId];
@@ -366,7 +368,8 @@ export function GroupView({ group }: { group: Group }) {
               </div>
             </div>
           )}
-          <Transcript group={group} members={members} />
+          {history.controls}
+          <Transcript group={{ ...group, messages: history.messages }} members={members} />
           {speaker && !streaming && (
             <>
               <ClusterLabel bot={speaker} name={speaker.name} color={speaker.color} />

@@ -34,22 +34,22 @@ describe("ReviewQueue", () => {
 
     const restarted = new ReviewQueue(file);
     expect(restarted.recoverStuckDeliveries()).toBe(1);
-    expect(restarted.get(item.id)?.status).toBe("failed");
+    expect(restarted.get(item.id)?.status).toBe("unknown");
     // and it survives the sweep as failed rather than reverting on next boot
-    expect(new ReviewQueue(file).get(item.id)?.status).toBe("failed");
+    expect(new ReviewQueue(file).get(item.id)?.status).toBe("unknown");
     expect(new ReviewQueue(file).recoverStuckDeliveries()).toBe(0);
   });
 });
 
 describe("deliveryOutcome", () => {
-  it("takes the turn's own confirmation as sent", () => {
-    expect(deliveryOutcome("Mailed it.\nDELIVERY: SENT", true).status).toBe("sent");
-    expect(deliveryOutcome("Posted to #releases.\n**DELIVERY: SENT**", true).status).toBe("sent");
+  it("requires independent confirmation even when the model claims success", () => {
+    expect(deliveryOutcome("Mailed it.\nDELIVERY: SENT", true).status).toBe("unknown");
+    expect(deliveryOutcome("Posted to #releases.\n**DELIVERY: SENT**", true).status).toBe("unknown");
   });
 
   it("records a turn that says it could not send as failed", () => {
     const outcome = deliveryOutcome("I have no mail tool.\nDELIVERY: NOT SENT - no Gmail account", true);
-    expect(outcome.status).toBe("failed");
+    expect(outcome.status).toBe("unknown");
     expect(outcome.result).toContain("no Gmail account");
   });
 
@@ -57,16 +57,26 @@ describe("deliveryOutcome", () => {
     // The old rule read a completed turn as a delivered message, so a bot
     // explaining that it cannot send anything was stamped "sent".
     const outcome = deliveryOutcome("Sorry, I can't reach Slack from here.", true);
-    expect(outcome.status).toBe("failed");
-    expect(outcome.result).toContain("never confirmed");
+    expect(outcome.status).toBe("unknown");
+    expect(outcome.result).toContain("Teslim doğrulanmadı");
   });
 
-  it("believes the last verdict when a reply corrects itself", () => {
-    expect(deliveryOutcome("DELIVERY: SENT\nActually it bounced.\nDELIVERY: NOT SENT - bounced", true).status).toBe("failed");
+  it("does not interpret quoted or conflicting delivery verdicts as proof", () => {
+    expect(deliveryOutcome("DELIVERY: SENT\nActually it bounced.\nDELIVERY: NOT SENT - bounced", true).status).toBe("unknown");
   });
 
   it("fails a turn that did not complete, whatever it said", () => {
-    expect(deliveryOutcome("DELIVERY: SENT", false).status).toBe("failed");
-    expect(deliveryOutcome("", false).result).toBe("The approved send did not complete.");
+    expect(deliveryOutcome("DELIVERY: SENT", false).status).toBe("unknown");
+    expect(deliveryOutcome("", false).result).toContain("Teslim doğrulanmadı");
   });
+});
+
+it("edits only the reviewed revision and locks dispatched drafts", () => {
+  const queue = new ReviewQueue(join(mkdtempSync(join(tmpdir(), "review-edit-")), "reviews.json"));
+  const item = queued(queue);
+  const patch = { title: "New title", target: "New target", content: "New body", revision: 1 };
+  expect(queue.edit(item.id, patch)).toMatchObject({ ...patch, revision: 2 });
+  expect(() => queue.edit(item.id, patch)).toThrow();
+  queue.update(item.id, { status: "sending" });
+  expect(() => queue.edit(item.id, { ...patch, revision: 2 })).toThrow();
 });

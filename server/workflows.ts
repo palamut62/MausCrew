@@ -1,7 +1,6 @@
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { writeFileAtomic } from "./atomic.ts";
+import { validRecords, readManagedJson, writeManagedJson } from "./recovery.ts";
 import { DATA_DIR } from "./config.ts";
 import { newId } from "./contracts.ts";
 
@@ -146,7 +145,7 @@ export class WorkflowManager {
   constructor(file = WORKFLOWS_FILE) {
     this.file = file;
     try {
-      const rows = JSON.parse(readFileSync(file, "utf8"));
+      const rows = readManagedJson<WorkflowRecord[]>(file, [], (v) => validRecords(v) && (v as WorkflowRecord[]).every((row) => normalizeWorkflow(row) !== null));
       this.workflows = Array.isArray(rows)
         ? rows.map((row) => normalizeWorkflow(row)).filter((row): row is WorkflowRecord => Boolean(row))
         : [];
@@ -250,7 +249,38 @@ export class WorkflowManager {
     return structuredClone(workflow);
   }
 
+  recoverInterrupted(): number {
+    let recovered = 0;
+    for (const workflow of this.workflows) {
+      if (workflow.status === "cancelled") continue;
+      for (const step of workflow.steps) {
+        if (step.status !== "running") continue;
+        step.status = "blocked";
+        step.output = `${step.output ?? ""}\n\n` + "Uygulama yeniden başlatıldı. Bu adım kesintiye uğradı; devam etmek için yeniden başlatın veya devredin.";
+        step.updatedAt = Date.now();
+        workflow.updatedAt = step.updatedAt;
+        recovered++;
+      }
+      workflow.status = statusFor(workflow.steps, workflow.status);
+    }
+    if (recovered) this.save();
+    return recovered;
+  }
+
+  reassign(workflowId: string, stepId: string, botId: string): WorkflowRecord | null {
+    const workflow = this.workflows.find((row) => row.id === workflowId);
+    const step = workflow?.steps.find((row) => row.id === stepId);
+    if (!workflow || !step || workflow.status === "cancelled" || (step.status === "running" || step.status === "done")) return null;
+    step.assigneeBotId = botId;
+    step.status = "pending";
+    step.updatedAt = Date.now();
+    workflow.updatedAt = step.updatedAt;
+    workflow.status = statusFor(workflow.steps, workflow.status);
+    this.save();
+    return structuredClone(workflow);
+  }
+
   private save(): void {
-    writeFileAtomic(this.file, JSON.stringify(this.workflows, null, 2));
+    writeManagedJson(this.file, this.workflows);
   }
 }

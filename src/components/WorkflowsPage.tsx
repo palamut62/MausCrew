@@ -1,15 +1,16 @@
+import { useState } from "react";
 import { CaretRight, Check, Clock, WarningCircle, X } from "@phosphor-icons/react";
 
 import { cn } from "@/lib/cn";
-import { useStore, type Workflow } from "@/state/store";
+import { api, useStore, type Workflow } from "@/state/store";
 import { Spin } from "./Spin";
 
 const WORKFLOW_STATUS_LABEL: Record<Workflow["status"], string> = {
-  active: "Active",
-  blocked: "Blocked",
-  completed: "Completed",
-  failed: "Failed",
-  cancelled: "Cancelled",
+  active: "Aktif",
+  blocked: "Bekliyor",
+  completed: "Tamamlandı",
+  failed: "Başarısız",
+  cancelled: "İptal edildi",
 };
 
 function StepStatusIcon({ status }: { status: Workflow["steps"][number]["status"] }) {
@@ -46,6 +47,14 @@ function WorkflowStatusBadge({ status }: { status: Workflow["status"] }) {
 
 function WorkflowCard({ workflow }: { workflow: Workflow }) {
   const { state, dispatch } = useStore();
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function stepAction(stepId: string, action: string, botId?: string) {
+    setBusy(true); setError("");
+    try { const result = await api(`/api/workflows/${workflow.id}/steps/${stepId}/${action}`, { method: "POST", body: JSON.stringify({ botId }) }); dispatch({ type: "workflowPatched", workflow: result.workflow }); }
+    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(false); }
+  }
   const project = workflow.projectId ? state.projects.find((p) => p.id === workflow.projectId) : undefined;
   const owner = state.bots.find((b) => b.id === workflow.ownerBotId);
   const stepById = new Map(workflow.steps.map((step) => [step.id, step]));
@@ -56,23 +65,24 @@ function WorkflowCard({ workflow }: { workflow: Workflow }) {
         <div className="min-w-0 flex-1">
           <div className="text-[14px] font-medium text-ink">{workflow.title}</div>
           <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11.5px] text-ink-secondary">
-            {owner && <span>Chief: {owner.name}</span>}
-            {project && <span>Project: {project.name}</span>}
+            {owner && <span>Yönetici: {owner.name}</span>}
+            {project && <span>Proje: {project.name}</span>}
           </div>
         </div>
         <WorkflowStatusBadge status={workflow.status} />
         {/* A plan the team has moved past still shows as live work and still
             accepts step updates. Cancelling closes it without pretending the
             unfinished stages were done. */}
-        {(workflow.status === "active" || workflow.status === "blocked") && (
+        {(workflow.status === "active" || workflow.status === "blocked" || workflow.status === "failed") && (
           <button
             onClick={() => dispatch({ type: "cancelWorkflow", workflowId: workflow.id })}
             className="shrink-0 rounded-lg border border-hairline px-2.5 py-1 text-[11.5px] font-medium text-ink-secondary hover:bg-raised hover:text-ink"
           >
-            Cancel
+            İptal et
           </button>
         )}
       </div>
+      {error && <p role="alert" className="p-3 text-xs text-danger">{error}</p>}
       <div className="divide-y divide-hairline/70">
         {workflow.steps.map((step) => {
           const assignee = step.assigneeBotId ? state.bots.find((b) => b.id === step.assigneeBotId) : undefined;
@@ -90,9 +100,10 @@ function WorkflowCard({ workflow }: { workflow: Workflow }) {
                 {deps.length > 0 && (
                   <div className="mt-0.5 flex items-center gap-1 text-[11px] text-ink-secondary">
                     <CaretRight size={10} weight="bold" />
-                    <span>after {deps.join(", ")}</span>
+                    <span>Önce: {deps.join(", ")}</span>
                   </div>
                 )}
+                {workflow.status !== "cancelled" && step.status !== "running" && step.status !== "done" && <div className="my-2 flex flex-wrap gap-2 text-xs"><select aria-label={`${step.title} sorumlu bot`} className="min-w-0 rounded border border-hairline bg-inset p-2" disabled={busy} value={step.assigneeBotId ?? workflow.ownerBotId} onChange={(e) => void stepAction(step.id, "reassign", e.target.value)}>{state.bots.map((bot) => <option key={bot.id} value={bot.id}>{bot.name}</option>)}</select><button className="rounded border border-hairline p-2 disabled:opacity-40" disabled={busy || step.dependsOn.some((id) => stepById.get(id)?.status !== "done")} onClick={() => void stepAction(step.id, "restart")}>Devam ettir</button></div>}
                 {step.output && (
                   <div className="mt-1 whitespace-pre-wrap rounded-lg bg-inset px-2.5 py-1.5 text-[12px] leading-relaxed text-ink-secondary">
                     {step.output}
@@ -117,7 +128,7 @@ export function WorkflowsPage() {
     <main className="min-w-0 flex-1 overflow-y-auto bg-app px-5 py-6 md:px-8">
       <div className="mx-auto max-w-4xl">
         <div className="mb-6">
-          <h1 className="text-[22px] font-semibold tracking-tight text-ink">Workflows</h1>
+          <h1 className="text-[22px] font-semibold tracking-tight text-ink">İş akışları</h1>
           <p className="mt-1 text-[13px] text-ink-secondary">
             Multi-stage team plans a Chief of Staff bot set up to coordinate the rest of the team, with each step's
             dependency and status.
@@ -138,7 +149,7 @@ export function WorkflowsPage() {
             )}
             {history.length > 0 && (
               <section className={active.length > 0 ? "mt-8" : undefined}>
-                <h2 className="mb-3 text-[12px] font-medium uppercase tracking-[0.12em] text-ink-secondary">History</h2>
+                <h2 className="mb-3 text-[12px] font-medium uppercase tracking-[0.12em] text-ink-secondary">Geçmiş</h2>
                 <div className="space-y-3">
                   {history.map((workflow) => (
                     <WorkflowCard key={workflow.id} workflow={workflow} />

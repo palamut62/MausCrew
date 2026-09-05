@@ -1,10 +1,11 @@
+import { SearchMessages } from "./SearchMessages";
 // App settings, as a real modal with sections rather than one long panel.
 // Per-bot settings (persona, model, computer) stay in SettingsPanel — this
 // is the stuff shared by every bot: who you are, your keys, and the
 // machine your bots can borrow.
 import { useEffect, useRef, useState } from "react";
 import { DeviceMobile, Key, Monitor, ShieldCheck, SpeakerHigh, User, X } from "@phosphor-icons/react";
-import { useStore, type AppSettingsSection } from "@/state/store";
+import { api, useStore, type AppSettingsSection } from "@/state/store";
 import { ApiKeyRow, DeepSeekOptions } from "./ApiKeys";
 import { ClaudeGateways } from "./ClaudeGateways";
 import { FallbackChain } from "./FallbackChain";
@@ -19,8 +20,13 @@ import { SecuritySection } from "./SecuritySection";
 import { AguiAgents } from "./AguiAgents";
 import { McpServers } from "./McpServers";
 import { TelegramSettings } from "./TelegramSettings";
+import { RecoveryCenter } from "./RecoveryCenter";
+import { UsageLimits } from "./UsageLimits";
 
 const SECTIONS: Array<{ id: AppSettingsSection; label: string; icon: typeof User }> = [
+  { id: "search", label: "Mesajlarda ara", icon: Monitor },
+  { id: "recovery", label: "Kurtarma", icon: ShieldCheck },
+  { id: "usage", label: "Kullanım sınırları", icon: Monitor },
   { id: "general", label: "General", icon: User },
   { id: "connections", label: "Connections", icon: Key },
   { id: "computer", label: "Local VM", icon: Monitor },
@@ -77,16 +83,19 @@ function AnalyticsRow() {
   const enabled = analytics?.enabled ?? false;
   const locked = analytics?.locked ?? false;
 
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
   const toggle = () => {
-    if (locked) return;
-    void fetch("/api/config", {
+    if (locked || saving) return;
+    setSaving(true); setError("");
+    void api("/api/config", {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ analytics: { enabled: !enabled } }),
     })
-      .then((r) => r.json())
       .then((config) => dispatch({ type: "configStatus", config }))
-      .catch(() => {});
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setSaving(false));
   };
 
   return (
@@ -94,19 +103,20 @@ function AnalyticsRow() {
       title="Usage analytics"
       subtitle="A short list of product events (app opened, message sent, bot created) and the email you gave at first run. Never message text, never transcripts, never keys. Turning this off stops the analytics library from loading at all."
     >
+      {error && <p role="alert" className="mb-2 text-xs text-danger">{error}</p>}
       <div className="flex items-center gap-3">
         <div className="min-w-0 flex-1 text-[13px] text-ink-secondary">
           {locked
             ? "Disabled for this machine by MAUSCREW_DISABLE_ANALYTICS."
             : enabled
-              ? "Sending anonymous product events."
-              : "Nothing leaves this machine."}
+              ? "Sending product events; your submitted email may identify them."
+              : "Usage analytics is off."}
         </div>
         <button
           role="switch"
           aria-checked={enabled}
           aria-label="Usage analytics"
-          disabled={locked}
+          disabled={locked || saving}
           onClick={toggle}
           title={locked ? "MAUSCREW_DISABLE_ANALYTICS is set" : undefined}
           className={cn(
@@ -518,6 +528,9 @@ export function SettingsModal() {
               </Card>
             )}
 
+            {section === "search" && <SearchMessages />}
+            {section === "recovery" && <RecoveryCenter />}
+            {section === "usage" && <UsageLimits />}
             {section === "voice" && <VoiceSettings />}
 
             {section === "computer" && <LocalComputerSection />}

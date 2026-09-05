@@ -115,7 +115,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       // guard as acp/core.ts). The child's own exit path settles the turn.
       child.stdin.on("error", () => {});
 
-      const state = { settled: false, lastText: "", sawStreamDelta: false };
+      const state = { settled: false, lastText: "", sawStreamDelta: false, usageSessionId: threadId };
       const asks = new Map<string, (behavior: string, message?: string) => void>();
       let nextId = 1;
       const rpcPending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>();
@@ -287,6 +287,8 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
               emit({
                 ...base(threadId, turnId),
                 type: "thread.token-usage.updated",
+                cumulative: true,
+                usageSessionId: state.usageSessionId,
                 input: t.inputTokens ?? 0,
                 output: t.outputTokens ?? 0,
               });
@@ -392,6 +394,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             codexThreadId = started?.thread?.id ?? null;
             startedModel = started?.model ?? null;
           }
+          state.usageSessionId = codexThreadId ?? threadId;
           emit({ ...base(threadId, turnId), type: "session.started", sessionId: codexThreadId, model: startedModel ?? turn.model ?? null });
           await request("turn/start", {
             threadId: codexThreadId,

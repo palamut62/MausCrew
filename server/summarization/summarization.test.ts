@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { buildDigestPrompt, digestSystemBlock, type DigestSourceMessage } from "./digest.ts";
-import { FOLD_THRESHOLD_TOKENS, partitionThread, truncateFairly } from "./partition.ts";
+import { FOLD_THRESHOLD_TOKENS, inlineHistory, MAX_INLINE_HISTORY_CHARS, partitionThread, truncateFairly } from "./partition.ts";
 import { estimateTokens } from "./token-estimate.ts";
 
 type Msg = DigestSourceMessage & { role: "bot" | "user"; kind: string };
@@ -74,6 +74,37 @@ describe("partition", () => {
     const p = partitionThread({ messages });
     expect(p.fold).toHaveLength(0);
     expect(p.keep).toHaveLength(messages.length);
+  });
+});
+
+describe("inline history", () => {
+  it("preserves short conversations verbatim", () => {
+    expect(inlineHistory([{ role: "user", text: "Merhaba" }, { role: "assistant", text: "Selam" }]))
+      .toBe("User: Merhaba\nAssistant: Selam");
+    expect(inlineHistory([])).toBe("");
+  });
+
+  it("bounds a giant replay even below the message-count folding threshold", () => {
+    const messages = [
+      { role: "user", text: "Keep the existing design" },
+      { role: "assistant", text: "START " + "x".repeat(526_891) + " END" },
+      { role: "user", text: "Continue from the last decision" },
+    ];
+    const original = JSON.stringify(messages);
+    const result = inlineHistory(messages);
+    expect(result.length).toBeLessThanOrEqual(MAX_INLINE_HISTORY_CHARS);
+    expect(result).toContain("Keep the existing design");
+    expect(result).toContain("START ");
+    expect(result).toContain(" END");
+    expect(result).toContain("Continue from the last decision");
+    expect(result).toContain("Full messages remain in MausCrew");
+    expect(JSON.stringify(messages)).toBe(original);
+  });
+
+  it("counts labels and omission markers against the replay budget", () => {
+    const result = inlineHistory(Array.from({ length: 40 }, (_, i) => ({ role: i % 2 ? "assistant" : "user", text: "y".repeat(30_000) })));
+    expect(result.length).toBeLessThanOrEqual(MAX_INLINE_HISTORY_CHARS);
+    expect(result.match(/(?:User|Assistant):/g)).toHaveLength(40);
   });
 });
 

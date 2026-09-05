@@ -96,6 +96,13 @@ function nextRunLabel(at: number | null) {
 
 export function ComputerPanel({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
+  useEffect(() => {
+    const events = new EventSource("/api/events");
+    events.onmessage = (raw) => {
+      try { const frame = JSON.parse(raw.data); if (frame.kind === "screen" && frame.botId === bot.id) dispatch({ type: "screenFrame", botId: bot.id, png: frame.png, mime: frame.mime ?? "image/png", display: frame.display }); } catch { /* malformed frame */ }
+    };
+    return () => events.close();
+  }, [bot.id, dispatch]);
   const { capabilities, ready: capabilitiesReady } = useDesktopCapabilities();
   const localAvailable = capabilities.localComputer.available;
   const [phase, setPhase] = useState<Phase>("checking");
