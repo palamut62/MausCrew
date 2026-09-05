@@ -3,6 +3,21 @@ import { DATA_DIR } from "./config.js";
 import { readManagedJson, writeManagedJson } from "./recovery.js";
 const EMPTY = { dailyTokens: 0, dailyTurns: 0, taskTokens: 0, taskTurns: 0 };
 const dayKey = (at) => `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, "0")}-${String(at.getDate()).padStart(2, "0")}`;
+// The ledger is rewritten on every token event, so it cannot grow forever.
+// Days are kept for a season; per-task and per-session counters are held as
+// bounded recency maps — a deleted task simply ages out of them.
+const MAX_DAYS = 90;
+const MAX_TASKS = 500;
+const MAX_TOTALS = 500;
+/** Re-inserts the key so object insertion order doubles as recency, then drops
+ * whatever fell off the far end. */
+function touch(map, key, value, max) {
+    delete map[key];
+    map[key] = value;
+    const keys = Object.keys(map);
+    for (const stale of keys.slice(0, Math.max(0, keys.length - max)))
+        delete map[stale];
+}
 export class UsageLimiter {
     data;
     file;
@@ -47,7 +62,10 @@ export class UsageLimiter {
             throw Object.assign(new Error(`${reason} Ayarlar > Kullanım sınırları bölümünü kontrol edin.`), { status: 429 });
         const day = dayKey(this.now());
         (this.data.days[day] ??= { tokens: 0, turns: 0 }).turns++;
-        (this.data.tasks[threadId] ??= { tokens: 0, turns: 0 }).turns++;
+        const task = this.data.tasks[threadId] ?? { tokens: 0, turns: 0 };
+        task.turns++;
+        touch(this.data.tasks, threadId, task, MAX_TASKS);
+        this.prune();
         this.save();
     }
     record(event) {
@@ -62,15 +80,24 @@ export class UsageLimiter {
             const key = `${event.providerInstanceId ?? event.provider}:${event.usageSessionId ?? event.threadId}`;
             const last = this.data.totals[key] ?? { input: 0, output: 0 };
             delta = { input: Math.max(0, input - last.input), output: Math.max(0, output - last.output) };
-            this.data.totals[key] = { input: Math.max(input, last.input), output: Math.max(output, last.output) };
+            touch(this.data.totals, key, { input: Math.max(input, last.input), output: Math.max(output, last.output) }, MAX_TOTALS);
         }
         const day = dayKey(this.now());
         (this.data.days[day] ??= { tokens: 0, turns: 0 }).tokens += delta.input + delta.output;
-        (this.data.tasks[event.threadId] ??= { tokens: 0, turns: 0 }).tokens += delta.input + delta.output;
+        const task = this.data.tasks[event.threadId] ?? { tokens: 0, turns: 0 };
+        task.tokens += delta.input + delta.output;
+        touch(this.data.tasks, event.threadId, task, MAX_TASKS);
+        this.prune();
         this.save();
         const { limits, today, tasks } = this.snapshot();
         const exceeded = Boolean((limits.dailyTokens && today.tokens >= limits.dailyTokens) || (limits.taskTokens && tasks[event.threadId].tokens >= limits.taskTokens));
         return { ...delta, exceeded };
+    }
+    /** Days sort lexically, so the oldest keys are the ones to drop. */
+    prune() {
+        const days = Object.keys(this.data.days).sort();
+        for (const stale of days.slice(0, Math.max(0, days.length - MAX_DAYS)))
+            delete this.data.days[stale];
     }
     save() { writeManagedJson(this.file, this.data); }
 }

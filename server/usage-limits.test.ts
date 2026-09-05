@@ -30,3 +30,35 @@ it("enforces task and daily limits while resetting only daily counters", () => {
   expect(limits.record(event(150, "a")).exceeded).toBe(true);
   expect(() => limits.begin("other")).toThrow();
 });
+
+it("keeps the ledger bounded so a long-lived install does not grow forever", () => {
+  const file = join(mkdtempSync(join(tmpdir(), "usage-")), "usage.json");
+  let now = new Date(2026, 0, 1);
+  const limits = new UsageLimiter(file, () => now);
+  for (let day = 0; day < 200; day++) {
+    now = new Date(2026, 0, 1 + day);
+    limits.begin(`task-${day}`);
+  }
+  const snapshot = limits.snapshot();
+  expect(Object.keys(snapshot.tasks).length).toBeLessThanOrEqual(500);
+  // 200 days ran, but only the most recent season is retained.
+  expect(Object.keys((limits as unknown as { data: { days: object } }).data.days).length).toBe(90);
+  // The active day survives pruning with its count intact.
+  expect(snapshot.today.turns).toBe(1);
+});
+
+it("ages out the oldest tasks rather than the busiest ones", () => {
+  const file = join(mkdtempSync(join(tmpdir(), "usage-")), "usage.json");
+  const limits = new UsageLimiter(file);
+  limits.begin("still-running");
+  for (let i = 0; i < 400; i++) limits.begin(`filler-${i}`);
+  // Touched again, which moves it back to the recent end of the ledger.
+  limits.begin("still-running");
+  for (let i = 400; i < 600; i++) limits.begin(`filler-${i}`);
+  const tasks = limits.snapshot().tasks;
+  expect(Object.keys(tasks).length).toBe(500);
+  // Survived a full cap's worth of newer tasks because it stayed active.
+  expect(tasks["still-running"].turns).toBe(2);
+  expect(tasks["filler-0"]).toBeUndefined();
+  expect(tasks["filler-599"].turns).toBe(1);
+});
