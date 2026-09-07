@@ -18,8 +18,14 @@ const workflow = workflows.create({ title: "Interrupted fixture workflow", owner
 workflows.updateStep(workflow.id, workflow.steps[0].id, { status: "running", output: "Saved progress" });
 new ReviewQueue().create({ title: "Fixture draft", target: "Fixture recipient", content: "Fixture body", sourceBotId: bot.id, sourceThreadId: bot.threadId });
 const fake = join(data, "fake-cli.mjs");
-writeFileSync(fake, `if (process.argv.includes('--version')) { console.log('fixture 1.0'); } else { await import(${JSON.stringify(new URL("../server/testing/fake-codex-app-server.ts", import.meta.url).href)}); }`);
-writeFileSync(join(data, "config.json"), JSON.stringify({ instances: { codex: { driver: "codex", cli: fake } }, analytics: { enabled: false } }));
+// The shebang is what keeps this fixture fake: CreateProcess can't exec a bare
+// .mjs (spawn EFTYPE), and a driver that can't run its configured CLI falls
+// back to the real one on PATH — quietly spending the user's account on a test.
+writeFileSync(fake, `#!/usr/bin/env node\nif (process.argv.includes('--version')) { console.log('fixture 1.0'); } else { await import(${JSON.stringify(new URL("../server/testing/fake-codex-app-server.ts", import.meta.url).href)}); }`);
+// `cli` belongs under `config` — that is the only key the registry hands to the
+// driver's decodeConfig; at the top level it is dropped and the driver falls
+// back to the real `codex` on PATH.
+writeFileSync(join(data, "config.json"), JSON.stringify({ instances: { codex: { driver: "codex", config: { cli: fake } } }, analytics: { enabled: false } }));
 const child = spawn(process.execPath, ["server/index.ts"], { cwd: root, windowsHide: true, env: {
   PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, TEMP: process.env.TEMP,
   HOME: data, USERPROFILE: data, MAUSCREW_DATA_DIR: data,
