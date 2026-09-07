@@ -23,7 +23,13 @@ describe("WorkflowManager", () => {
     expect(() => manager.updateStep(workflow.id, build!.id, { status: "running" })).toThrow("dependencies");
     manager.updateStep(workflow.id, requirements!.id, { status: "done", output: "Approved scope" });
     manager.updateStep(workflow.id, build!.id, { status: "done", output: "Implemented" });
+    expect(new WorkflowManager(file).get(workflow.id)).toMatchObject({ status: "reported" });
+    for (const step of manager.get(workflow.id)!.steps) {
+      manager.updateStep(workflow.id, step.id, { status: "done", output: step.output, verification: "user", evidence: { kind: "review", note: "Inspected the delivered output", at: Date.now() } });
+    }
     expect(new WorkflowManager(file).get(workflow.id)).toMatchObject({ status: "completed" });
+    manager.updateStep(workflow.id, build!.id, { status: "running" });
+    expect(manager.get(workflow.id)?.steps[1]?.verification).toBe("pending");
   });
 
   it("lets the assigned teammate report on its own step", () => {

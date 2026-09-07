@@ -37,8 +37,8 @@ function statusFor(steps, fallback) {
         return fallback;
     if (steps.some((step) => step.status === "failed"))
         return "failed";
-    if (steps.every((step) => step.status === "done"))
-        return "completed";
+    if (steps.length && steps.every((step) => step.status === "done"))
+        return steps.every((step) => step.verification === "user" || step.verification === "evidence") ? "completed" : "reported";
     if (steps.some((step) => step.status === "blocked"))
         return "blocked";
     return "active";
@@ -68,6 +68,8 @@ function normalizeWorkflow(value) {
             dependsOn: Array.isArray(step.dependsOn) ? [...new Set(step.dependsOn.filter((item) => typeof item === "string"))] : [],
             status,
             output: text(step.output, 8_000) || undefined,
+            verification: step.verification === "user" || step.verification === "evidence" ? step.verification : "pending",
+            evidence: step.evidence && typeof step.evidence.note === "string" ? step.evidence : undefined,
             updatedAt: Number(step.updatedAt) || now,
         };
     })
@@ -79,7 +81,7 @@ function normalizeWorkflow(value) {
         return null;
     }
     const createdAt = Number(value.createdAt) || now;
-    const fallback = ["active", "blocked", "completed", "failed", "cancelled"].includes(String(value.status))
+    const fallback = ["active", "blocked", "reported", "completed", "failed", "cancelled"].includes(String(value.status))
         ? value.status
         : "active";
     return {
@@ -194,6 +196,8 @@ export class WorkflowManager {
         }
         step.status = patch.status;
         step.output = text(patch.output, 8_000) || undefined;
+        step.verification = patch.verification ?? "pending";
+        step.evidence = patch.evidence;
         step.updatedAt = Date.now();
         workflow.updatedAt = step.updatedAt;
         workflow.status = statusFor(workflow.steps, workflow.status);

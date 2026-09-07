@@ -1,3 +1,4 @@
+import { VerificationForm } from "./VerificationForm";
 import { useState } from "react";
 import { CaretRight, Check, Clock, WarningCircle, X } from "@phosphor-icons/react";
 
@@ -6,6 +7,7 @@ import { api, useStore, type Workflow } from "@/state/store";
 import { Spin } from "./Spin";
 
 const WORKFLOW_STATUS_LABEL: Record<Workflow["status"], string> = {
+  reported: "Tamamlandı bildirildi",
   active: "Aktif",
   blocked: "Bekliyor",
   completed: "Tamamlandı",
@@ -109,6 +111,7 @@ function WorkflowCard({ workflow }: { workflow: Workflow }) {
                     {step.output}
                   </div>
                 )}
+                {step.status === "done" && <div className="mt-2"><p className="text-xs text-ink-secondary">{step.verification === "user" || step.verification === "evidence" ? "Doğrulandı" : "Tamamlandı bildirildi; doğrulama bekliyor"}</p>{step.evidence?.note && <p className="text-xs">Kanıt: {step.evidence.note}</p>}{step.verification !== "user" && step.verification !== "evidence" && <VerificationForm<{ workflow: Workflow }> path={`/api/workflows/${workflow.id}/steps/${step.id}/verify`} onVerified={(value) => dispatch({ type: "workflowPatched", workflow: value.workflow })} />}</div>}
               </div>
               <span className="mt-0.5 font-mono text-[10px] uppercase tracking-wide text-ink-secondary">{step.status}</span>
             </div>
@@ -121,8 +124,8 @@ function WorkflowCard({ workflow }: { workflow: Workflow }) {
 
 export function WorkflowsPage() {
   const { state } = useStore();
-  const active = state.workflows.filter((w) => w.status === "active" || w.status === "blocked");
-  const history = state.workflows.filter((w) => w.status !== "active" && w.status !== "blocked");
+  const active = state.workflows.filter((w) => w.status === "active" || w.status === "blocked" || w.status === "reported");
+  const history = state.workflows.filter((w) => w.status !== "active" && w.status !== "blocked" && w.status !== "reported");
 
   return (
     <main className="min-w-0 flex-1 overflow-y-auto bg-app px-5 py-6 md:px-8">

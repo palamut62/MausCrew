@@ -546,6 +546,38 @@ export class Store {
         task.digest = digest;
         this.saveBots();
     }
+    taskMemory(botId, threadId) {
+        return structuredClone(this.taskByThread(botId, threadId)?.memory ?? []);
+    }
+    upsertTaskMemory(botId, threadId, input) {
+        const task = this.taskByThread(botId, threadId);
+        const text = input.text.trim().slice(0, 4000);
+        if (!task || !text || !["decision", "artifact", "verified", "remaining"].includes(input.kind))
+            return null;
+        const now = Date.now();
+        const existing = input.id ? task.memory?.find((entry) => entry.id === input.id) : undefined;
+        if (input.id && !existing)
+            return null;
+        const entry = existing ?? { id: newId(), kind: input.kind, text, createdAt: now, updatedAt: now };
+        entry.kind = input.kind;
+        entry.text = text;
+        entry.sourceMessageId = input.sourceMessageId?.trim().slice(0, 100) || existing?.sourceMessageId;
+        entry.updatedAt = now;
+        task.memory = [...(task.memory ?? []).filter((item) => item.id !== entry.id), entry].slice(-100);
+        this.saveBots();
+        return entry;
+    }
+    deleteTaskMemory(botId, threadId, id) {
+        const task = this.taskByThread(botId, threadId);
+        if (!task?.memory?.some((entry) => entry.id === id))
+            return false;
+        const removed = task.memory.find((entry) => entry.id === id);
+        if (removed.sourceMessageId)
+            task.memorySuppressed = [...new Set([...(task.memorySuppressed ?? []), `${removed.sourceMessageId}:${removed.kind}`])];
+        task.memory = task.memory.filter((entry) => entry.id !== id);
+        this.saveBots();
+        return true;
+    }
     // ── tasks ─────────────────────────────────────────────────────────────
     /** The first thing the human asked in a thread — a task's natural name. */
     firstUserLine(threadId) {

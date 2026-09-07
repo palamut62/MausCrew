@@ -161,6 +161,19 @@ export interface TaskRecord {
     messageCount: number;
     at: number;
   };
+  /** Structured facts owned by this task. They never enter another task's prompt. */
+  memory?: TaskMemoryEntry[];
+  memorySuppressed?: string[];
+}
+
+export type TaskMemoryKind = "decision" | "artifact" | "verified" | "remaining";
+export interface TaskMemoryEntry {
+  id: string;
+  kind: TaskMemoryKind;
+  text: string;
+  sourceMessageId?: string;
+  createdAt: number;
+  updatedAt: number;
 }
 
 /** What a task is called before its first message names it. */
@@ -807,6 +820,37 @@ export class Store {
     if (!task) return;
     task.digest = digest;
     this.saveBots();
+  }
+
+  taskMemory(botId: string, threadId: string): TaskMemoryEntry[] {
+    return structuredClone(this.taskByThread(botId, threadId)?.memory ?? []);
+  }
+
+  upsertTaskMemory(botId: string, threadId: string, input: { id?: string; kind: TaskMemoryKind; text: string; sourceMessageId?: string }): TaskMemoryEntry | null {
+    const task = this.taskByThread(botId, threadId);
+    const text = input.text.trim().slice(0, 4000);
+    if (!task || !text || !["decision", "artifact", "verified", "remaining"].includes(input.kind)) return null;
+    const now = Date.now();
+    const existing = input.id ? task.memory?.find((entry) => entry.id === input.id) : undefined;
+    if (input.id && !existing) return null;
+    const entry = existing ?? { id: newId(), kind: input.kind, text, createdAt: now, updatedAt: now };
+    entry.kind = input.kind;
+    entry.text = text;
+    entry.sourceMessageId = input.sourceMessageId?.trim().slice(0, 100) || existing?.sourceMessageId;
+    entry.updatedAt = now;
+    task.memory = [...(task.memory ?? []).filter((item) => item.id !== entry.id), entry].slice(-100);
+    this.saveBots();
+    return entry;
+  }
+
+  deleteTaskMemory(botId: string, threadId: string, id: string): boolean {
+    const task = this.taskByThread(botId, threadId);
+    if (!task?.memory?.some((entry) => entry.id === id)) return false;
+    const removed = task.memory.find((entry) => entry.id === id)!;
+    if (removed.sourceMessageId) task.memorySuppressed = [...new Set([...(task.memorySuppressed ?? []), `${removed.sourceMessageId}:${removed.kind}`])];
+    task.memory = task.memory.filter((entry) => entry.id !== id);
+    this.saveBots();
+    return true;
   }
 
   // ── tasks ─────────────────────────────────────────────────────────────

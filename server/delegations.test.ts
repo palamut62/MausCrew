@@ -4,7 +4,8 @@
 // assert what would have been dispatched to the harness. The harness itself
 // stays out of these — the integration happens in comms.test.ts (the full
 // e2e through the agents proxy + fake ACP CLI).
-import { rmSync } from "node:fs";
+import { rmSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { CommsBus } from "./comms-visibility.ts";
@@ -14,6 +15,11 @@ import {
   drainDelegations,
   queueDelegation,
   _pendingCount,
+  drainReadyDelegations,
+  recoverDelegations,
+  delegationRecords,
+  discardDelegations,
+  _reloadDelegations,
 } from "./delegations.ts";
 import { peerAllowKey, resolvePeerComms } from "./peer-approval.ts";
 import { Store, type BotRecord } from "./store.ts";
@@ -316,9 +322,65 @@ describe("drainDelegations", () => {
         .messagesFor(from.threadId)
         .find((m) => m.kind === "activity" && (m.tool?.name ?? "").includes("is busy")),
     );
-    expect(chip.tool?.name).toBe("Delegation to @Helper canceled — @Helper is busy");
-    expect(chip.tool?.ok).toBe(false);
+    expect(chip.tool?.name).toBe("Delegation to @Helper waiting - @Helper is busy");
+    expect(chip.tool?.ok).toBe(true);
     expect(runTargetCalls).toEqual([]);
+    expect(_pendingCount(from.threadId)).toBe(1);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    store.patchBot(target.id, { busy: false });
+    drainReadyDelegations(commsBus, approvalBus, (toBotId, message, commsDepth) => {
+      runTargetCalls.push({ toBotId, message, commsDepth });
+    });
+    await waitFor(() => runTargetCalls.length === 1);
+  });
+
+  it("recovers ready work after restart without duplicate dispatch", async () => {
+    store.patchBot(target.id, { busy: true });
+    const item = { toBotId: target.id, message: "durable work", depth: 0 };
+    queueDelegation(commsBus, from, item, 1);
+    queueDelegation(commsBus, from, item, 1);
+    expect(_pendingCount(from.threadId)).toBe(1);
+    drainDelegations(commsBus, approvalBus, from.threadId, () => { throw new Error("must wait"); });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    _reloadDelegations();
+    recoverDelegations(commsBus);
+    store.patchBot(target.id, { busy: false });
+    const run = (toBotId: string, message: string, commsDepth: number) => { runTargetCalls.push({ toBotId, message, commsDepth }); };
+    drainReadyDelegations(commsBus, approvalBus, run);
+    drainReadyDelegations(commsBus, approvalBus, run);
+    await waitFor(() => runTargetCalls.length === 1);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    _reloadDelegations();
+    recoverDelegations(commsBus);
+    drainReadyDelegations(commsBus, approvalBus, run);
+    expect(runTargetCalls).toHaveLength(1);
+  });
+
+  it("does not replay an uncertain dispatch or unfinished source on restart", () => {
+    queueDelegation(commsBus, from, { toBotId: target.id, message: "pending source", depth: 0 }, 1);
+    queueDelegation(commsBus, from, { toBotId: target.id, message: "uncertain dispatch", depth: 0 }, 1);
+    const file = join(DATA_DIR, "delegations.json");
+    const saved = JSON.parse(readFileSync(file, "utf8"));
+    saved.find((row: { message: string }) => row.message === "uncertain dispatch").state = "dispatching";
+    writeFileSync(file, JSON.stringify(saved));
+    _reloadDelegations();
+    recoverDelegations(commsBus);
+    let runs = 0;
+    drainReadyDelegations(commsBus, approvalBus, () => { runs++; });
+    expect(runs).toBe(0);
+    expect(delegationRecords().filter((row) => row.sourceThreadId === from.threadId).every((row) => row.state === "interrupted")).toBe(true);
+  });
+
+  it("cancels waiting work when the source is stopped", async () => {
+    store.patchBot(target.id, { busy: true });
+    queueDelegation(commsBus, from, { toBotId: target.id, message: "cancel me", depth: 0 }, 1);
+    drainDelegations(commsBus, approvalBus, from.threadId, () => { throw new Error("must wait"); });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    discardDelegations(commsBus, from.threadId);
+    store.patchBot(target.id, { busy: false });
+    let runs = 0;
+    drainReadyDelegations(commsBus, approvalBus, () => { runs++; });
+    expect(runs).toBe(0);
   });
 
   it("asks for approval when approvePeerComms is on, then runs only on allow", async () => {

@@ -84,7 +84,8 @@ import { taskProfile } from "./task-profile.ts";
 import { isEffortLevel, type ModelSelection, type RuntimeEvent, type SubagentActivity } from "./contracts.ts";
 import { CONTENT_SECURITY_POLICY } from "./csp.ts";
 import { digestSystemBlock } from "./summarization/digest.ts";
-import { memoryBlock } from "./memory/store.ts";
+import { captureTaskNotes, TASK_NOTES_PROMPT } from "./task-notes.ts";
+import { memoryBlock, taskMemoryBlock } from "./memory/store.ts";
 import { deterministicEntry, journalDate, planDistil, planHarvest, recordDistil, recordJournal } from "./memory/harvest.ts";
 import { readJournal, readProfile, writeProfile } from "./memory/store.ts";
 import { inlineHistory, partitionThread } from "./summarization/partition.ts";
@@ -93,7 +94,8 @@ import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { describeBaseUrl } from "./drivers/deepseek/config.ts";
 import { defaultWorkspaceFor } from "./drivers/deepseek/session-manager.ts";
 import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type CommsBus } from "./comms-visibility.ts";
-import { discardDelegations, drainDelegations, queueDelegation, type QueueResult } from "./delegations.ts";
+import { discardDelegations, drainDelegations, queueDelegation, drainReadyDelegations, recoverDelegations, delegationRecords, retryDelegation, cancelDelegation, type DelegationRunner, type QueueResult } from "./delegations.ts";
+import { evaluationResults, evaluationScenarios, beginEvaluation, finishEvaluation } from "./evaluations.ts";
 import { EventBus } from "./harness/bus.ts";
 import { normalizeModelSelection } from "./model-selection.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
@@ -639,16 +641,18 @@ function beginWorkCard(bot: { id: string; name: string }, threadId: string, titl
     text: `${bot.name} is preparing the task`,
     ui: {
       component: "live-work",
-      props: { botId: bot.id, title: title.trim().slice(0, 160) || "Working", status: "preparing", startedAt: Date.now() },
+      props: { botId: bot.id, threadId, owner: bot.name, title: title.trim().slice(0, 160) || "Working", status: "preparing", waitReason: "", nextStep: "Preparing", output: "", verification: "pending", startedAt: Date.now() },
     },
   });
+  store.patchMessage(threadId, message.id, { ui: { component: "live-work", props: { ...message.ui!.props, cardId: message.id } } });
+  message.ui!.props.cardId = message.id;
   workCardByThread.set(threadId, message.id);
   broadcast({ kind: "message", threadId, message });
 }
 
 function updateWorkCard(
   threadId: string,
-  patch: { status?: WorkCardStatus; lastAction?: string; summary?: string; takeover?: boolean },
+  patch: { status?: WorkCardStatus; lastAction?: string; summary?: string; takeover?: boolean; owner?: string; waitReason?: string; nextStep?: string; output?: string; verification?: "pending" | "evidence" | "user" },
 ): void {
   const messageId = workCardByThread.get(threadId);
   if (!messageId) return;
@@ -1018,7 +1022,7 @@ bus.subscribe((event: RuntimeEvent) => {
       break;
     case "item.started":
       if (event.itemType === "tool") {
-        updateWorkCard(event.threadId, { status: "working", lastAction: event.title ?? "Using a tool" });
+        updateWorkCard(event.threadId, { status: "working", lastAction: event.title ?? "Using a tool", nextStep: event.title ?? "Araç çalışıyor", waitReason: "" });
         // ask_bot's raw tool chip is redundant — the internal endpoint
         // appends a richer "Messaged @X" chip linking to the channel
         if (event.title?.endsWith("__ask_bot")) break;
@@ -1038,6 +1042,8 @@ bus.subscribe((event: RuntimeEvent) => {
     case "request.opened": {
       updateWorkCard(event.threadId, {
         status: "action-needed",
+        waitReason: "Yanıtınız veya işlem izniniz bekleniyor.",
+        nextStep: "Sohbetteki istek kartını yanıtlayın.",
         lastAction: event.summary.slice(0, 240),
       });
       const permission = event.requestType === "permission";
@@ -1208,7 +1214,7 @@ bus.subscribe((event: RuntimeEvent) => {
       break;
     }
     case "request.resolved": {
-      updateWorkCard(event.threadId, { status: "working", lastAction: "User response received" });
+      updateWorkCard(event.threadId, { status: "working", waitReason: "", nextStep: "Bot çalışmaya devam ediyor.", lastAction: "User response received" });
       const messageId = event.requestId ? askMessageByRequest.get(`${event.threadId}:${event.requestId}`) : null;
       if (messageId) {
         const existing = store.messagesFor(event.threadId).find((m) => m.id === messageId);
@@ -1291,7 +1297,13 @@ bus.subscribe((event: RuntimeEvent) => {
         }
       }
       const reply = lastReply.get(event.threadId) ?? "";
+      if (bot && !digestJob) captureTaskNotes(store, bot.id, event.threadId, store.activePath(event.threadId));
       lastReply.delete(event.threadId);
+      const memoryOwner = bot ?? (speaker ? store.bot(speaker.botId) : undefined);
+      if (memoryOwner && reply.trim()) {
+        const source = store.messagesFor(event.threadId).findLast((message) => message.role === "bot" && message.kind === "text" && message.text?.trim());
+        store.upsertTaskMemory(memoryOwner.id, event.threadId, { kind: event.ok ? "remaining" : "decision", text: reply.trim().slice(0, 1200), sourceMessageId: source?.id });
+      }
       const reviewId = reviewDeliveryByThread.get(event.threadId);
       if (reviewId) {
         reviewDeliveryByThread.delete(event.threadId);
@@ -1304,6 +1316,10 @@ bus.subscribe((event: RuntimeEvent) => {
         summary: (bot ?? (speaker ? store.bot(speaker.botId) : undefined))?.humanTakeover?.active
           ? "Bot actions are paused while the user controls the computer."
           : reply.trim().slice(0, 1_200) || (event.ok ? "Task completed." : "Task did not complete."),
+        output: reply.trim().slice(0, 1_200),
+        nextStep: event.ok ? "Review the output and verify the result." : "Resolve the error and retry.",
+        verification: "pending",
+        waitReason: "",
       });
       // one lifetime usage tick per terminal turn; cost arrives only from
       // drivers that report it (claude today), others tally tokens alone.
@@ -1360,7 +1376,7 @@ bus.subscribe((event: RuntimeEvent) => {
   const step = workflows.get(run.workflowId)?.steps.find((s) => s.id === run.stepId);
   if (step?.status !== "running") return;
   const reply = store.messagesFor(event.threadId).filter((m) => m.role === "bot" && m.kind === "text").at(-1)?.text;
-  const updated = workflows.updateStep(run.workflowId, run.stepId, { status: event.ok ? "done" : "blocked", output: reply || "Adım kesintiye uğradı; mevcut çıktıyı kontrol edin." });
+  const updated = workflows.updateStep(run.workflowId, run.stepId, { status: event.ok ? "done" : "blocked", output: reply || "Adım kesintiye uğradı; mevcut çıktıyı kontrol edin.", verification: "pending" });
   if (updated) publishWorkflow(updated);
 });
 const delegationWatch = new Map<string, { channelId?: string; toBotId: string }>();
@@ -1390,18 +1406,12 @@ function finalizeDelegationWatch(
 // Run as a separate subscriber so the drain logic stays out of the main
 // fold (which has its own switch/case noise) and its approval + startTurn
 // calls never have to share locals with the fold's state machine.
-bus.subscribe((event: RuntimeEvent) => {
-  if (event.type !== "turn.completed") return;
-  // A turn that failed or was interrupted drops its queue rather than
-  // firing it later: the user who hit Stop does not expect the delegations
-  // that turn queued to run anyway, minutes later, on an unrelated turn.
-  if (!event.ok) return void discardDelegations(commsBus, event.threadId);
-  drainDelegations(commsBus, approvalBus, event.threadId, (toBotId, text, commsDepth, sourceThreadId, channel) => {
+const runDelegatedTurn: DelegationRunner = (toBotId, text, commsDepth, sourceThreadId, channel, pinnedThreadId) => {
     // startTurn REJECTS on an ordinary condition — busy target, deleted bot,
     // unavailable provider. Unhandled, that rejection is fatal to the
     // harness (Node's default), which in the packaged app kills the server
     // child. Every delegation failure has to land as a chip instead.
-    const targetThreadId = store.bot(toBotId)?.threadId;
+    const targetThreadId = pinnedThreadId ?? store.bot(toBotId)?.threadId;
     if (targetThreadId) delegationWatch.set(targetThreadId, { channelId: channel?.id, toBotId });
     let failureReported = false;
     const reportStartFailure = (error: unknown) => {
@@ -1428,6 +1438,7 @@ bus.subscribe((event: RuntimeEvent) => {
     };
     return startTurn(toBotId, text, {
       commsDepth,
+      threadId: targetThreadId,
       unattended: isUnattended(store.botByThread(sourceThreadId)?.id),
       // startTurn schedules provider/integration setup after marking the bot
       // busy. Those asynchronous setup failures do not emit turn.completed,
@@ -1435,8 +1446,14 @@ bus.subscribe((event: RuntimeEvent) => {
       onDispatchError: reportStartFailure,
     }).catch((err) => {
       reportStartFailure(err);
+      throw err;
     });
-  });
+};
+bus.subscribe((event: RuntimeEvent) => {
+  if (event.type !== "turn.completed") return;
+  if (!event.ok) discardDelegations(commsBus, event.threadId);
+  else drainDelegations(commsBus, approvalBus, event.threadId, runDelegatedTurn);
+  drainReadyDelegations(commsBus, approvalBus, runDelegatedTurn);
 });
 
 // ── live screen: poll the bot's box while it works ────────────────────
@@ -1640,6 +1657,7 @@ async function startTurn(
   text: string,
   opts?: {
     commsDepth?: number;
+    evaluation?: boolean;
     userMessage?: Message;
     /** Routines run in detached tasks; pin the destination for the whole turn. */
     threadId?: string;
@@ -2072,7 +2090,7 @@ async function startTurn(
           digestSystemBlock(task.digest) +
           // and what survived earlier sessions entirely — capped, because this
           // rides on every turn forever
-          memoryBlock(bot.id).text +
+          (opts?.evaluation ? "" : memoryBlock(bot.id).text + taskMemoryBlock(task.memory ?? []) + TASK_NOTES_PROMPT) +
           conductPrompt +
           driftPrompt +
           (computerKind === "vm"
@@ -4841,6 +4859,112 @@ const server = createServer(async (req, res) => {
       broadcast({ kind: "bot", bot: fresh });
       return json(res, 200, { task: wireTask(task) });
     }
+    if (path === "/api/delegations" && method === "GET") return json(res, 200, { items: delegationRecords() });
+    const delegationAction = path.match(/^\/api\/delegations\/([\w-]+)\/(retry|cancel)$/);
+    if (delegationAction && method === "POST") {
+      const changed = delegationAction[2] === "retry" ? retryDelegation(delegationAction[1]) : cancelDelegation(delegationAction[1]);
+      if (!changed) return json(res, 409, { error: "Bu işin durumu değişti; listeyi yenileyin." });
+      drainReadyDelegations(commsBus, approvalBus, runDelegatedTurn);
+      return json(res, 200, { items: delegationRecords() });
+    }
+    if (path === "/api/evaluations" && (method === "GET" || method === "POST")) {
+      if (method === "GET") return json(res, 200, { scenarios: evaluationScenarios(), results: evaluationResults() });
+      const body = await readBody(req);
+      const bot = store.bot(String(body.botId ?? ""));
+      const scenario = evaluationScenarios().find((item) => item.id === body.scenarioId);
+      if (!bot || !scenario) return json(res, 400, { error: "Bot ve senaryo seçin." });
+      const engine = registry.get(bot.modelSelection.instanceId);
+      if (!engine || bot.busy) return json(res, 409, { error: "Bot meşgul veya motor kullanılamıyor." });
+      const task = store.createTask(bot.id, `Evaluation: ${scenario.title}`, false)!;
+      const result = beginEvaluation(bot.modelSelection.instanceId, scenario, bot.modelSelection.model, task.threadId);
+      void finishEvaluation(result, scenario, (prompt) => new Promise((resolve, reject) => {
+        let settled = false;
+        let input: number | undefined;
+        let output: number | undefined;
+        const totals = new Map<string, { input: number; output: number }>();
+        const finish = (error?: Error) => {
+          if (settled) return;
+          settled = true; clearTimeout(timer); unsubscribe();
+          if (error) reject(error);
+          else resolve({ output: store.messagesFor(task.threadId).findLast((message) => message.role === "bot" && message.kind === "text")?.text, inputTokens: input, outputTokens: output });
+        };
+        const unsubscribe = bus.subscribe((event) => {
+          if (event.threadId !== task.threadId || settled) return;
+          if (event.type === "thread.token-usage.updated") {
+            const key = `${event.providerInstanceId ?? event.provider}:${event.usageSessionId ?? event.threadId}`;
+            const last = event.cumulative ? totals.get(key) : undefined;
+            input = (input ?? 0) + Math.max(0, event.input - (last?.input ?? 0));
+            output = (output ?? 0) + Math.max(0, event.output - (last?.output ?? 0));
+            if (event.cumulative) totals.set(key, { input: event.input, output: event.output });
+          }
+          if (event.type === "turn.completed") finish(event.ok ? undefined : new Error("Değerlendirme turu tamamlanamadı."));
+        });
+        const timer = setTimeout(() => {
+          interruptPendingTurn(task.threadId);
+          void engine.adapter.interruptTurn(task.threadId).catch(() => {});
+          finish(new Error("Değerlendirme 120 saniyede tamamlanamadı."));
+        }, 120_000);
+        void startTurn(bot.id, prompt, { threadId: task.threadId, evaluation: true, commsDepth: MAX_COMMS_DEPTH, onDispatchError: (error) => finish(new Error(error)) }).catch((error) => finish(error instanceof Error ? error : new Error(String(error))));
+      })).catch((error) => console.error("Evaluation persistence failed", error));
+      return json(res, 202, { result, task: wireTask(task) });
+    }
+    const taskMemoryMatch = path.match(/^\/api\/bots\/([\w-]+)\/tasks\/([\w-]+)\/memory(?:\/([\w-]+))?$/);
+    if (taskMemoryMatch) {
+      const bot = store.bot(taskMemoryMatch[1]);
+      if (!bot || !store.taskByThread(bot.id, taskMemoryMatch[2])) return json(res, 404, { error: "no such task" });
+      if (method === "GET") return json(res, 200, { entries: store.taskMemory(bot.id, taskMemoryMatch[2]) });
+      if (method === "POST" || method === "PUT") {
+        const body = await readBody(req);
+        const sourceMessageId = typeof body.sourceMessageId === "string" ? body.sourceMessageId.trim() : "";
+        if (sourceMessageId && !store.messagesFor(taskMemoryMatch[2]).some((message) => message.id === sourceMessageId)) return json(res, 400, { error: "source message must belong to this task" });
+        const entry = store.upsertTaskMemory(bot.id, taskMemoryMatch[2], {
+          id: typeof body.id === "string" ? body.id : undefined,
+          kind: String(body.kind ?? "") as "decision" | "artifact" | "verified" | "remaining",
+          text: String(body.text ?? ""),
+          sourceMessageId: sourceMessageId || undefined,
+        });
+        if (!entry) return json(res, 400, { error: "kind and text are required" });
+        const fresh = botWithThread(store.bot(bot.id)!);
+        broadcast({ kind: "bot", bot: fresh });
+        return json(res, 200, { entry });
+      }
+      if (method === "DELETE" && taskMemoryMatch[3]) {
+        if (!store.deleteTaskMemory(bot.id, taskMemoryMatch[2], taskMemoryMatch[3])) return json(res, 404, { error: "memory entry not found" });
+        const fresh = botWithThread(store.bot(bot.id)!);
+        broadcast({ kind: "bot", bot: fresh });
+        return json(res, 200, { ok: true });
+      }
+      return json(res, 405, { error: "method not allowed" });
+    }
+    const verifyStep = path.match(/^\/api\/workflows\/([\w-]+)\/steps\/([\w-]+)\/verify$/);
+    if (method === "POST" && verifyStep) {
+      const workflow = workflows.get(verifyStep[1]);
+      const step = workflow?.steps.find((item) => item.id === verifyStep[2]);
+      if (!workflow || !step || step.status !== "done") return json(res, 409, { error: "step must be reported complete first" });
+      const body = await readBody(req);
+      const note = typeof body.note === "string" ? body.note.trim().slice(0, 2000) : "";
+      if (note.length < 5 || !["test", "file", "browser", "review"].includes(String(body.kind))) return json(res, 400, { error: "Kontrol türünü ve doğruladığınız sonucu yazın." });
+      const updated = workflows.updateStep(workflow.id, step.id, { status: "done", output: step.output, verification: "user", evidence: { kind: String(body.kind), note, at: Date.now() } });
+      if (updated) publishWorkflow(updated);
+      return json(res, 200, { workflow: updated });
+    }
+    const verifyMatch = path.match(/^\/api\/bots\/([\w-]+)\/tasks\/([\w-]+)\/work-card\/verify$/);
+    if (verifyMatch && method === "POST") {
+      const bot = store.bot(verifyMatch[1]);
+      if (!bot || !store.taskByThread(bot.id, verifyMatch[2])) return json(res, 404, { error: "no such task" });
+      const body = await readBody(req);
+      const note = typeof body.note === "string" ? body.note.trim().slice(0, 2000) : "";
+      const kind = String(body.kind ?? "");
+      if (note.length < 5 || !["test", "file", "browser", "review"].includes(kind)) return json(res, 400, { error: "Kontrol türünü ve doğruladığınız sonucu yazın." });
+      const card = store.messagesFor(verifyMatch[2]).find((message) => message.id === body.cardId && message.ui?.component === "live-work" && message.ui.props.status === "done");
+      if (!card?.ui) return json(res, 409, { error: "Önce tamamlandığı bildirilen bir sonuç seçin." });
+      if (kind === "file" && !resolveProducedFile(String(body.path ?? ""), workspaceRootsFor({ ...bot, threadId: verifyMatch[2] }))) return json(res, 400, { error: "Dosya görev çalışma alanında bulunamadı." });
+      const evidence = { kind, note, path: kind === "file" ? String(body.path) : undefined, at: Date.now(), verifiedBy: "user" };
+      const patched = store.patchMessage(verifyMatch[2], card.id, { ui: { component: "live-work", props: { ...card.ui.props, verification: "user", evidence, verifiedAt: Date.now(), nextStep: "Sonuç kullanıcı tarafından doğrulandı." } } });
+      if (patched) broadcast({ kind: "message.patch", threadId: verifyMatch[2], message: patched });
+      store.upsertTaskMemory(bot.id, verifyMatch[2], { kind: "verified", text: `${kind}: ${note}`, sourceMessageId: card.id });
+      return json(res, 200, { message: patched });
+    }
     if (m && method === "DELETE") {
       const bot = store.bot(m[1]);
       if (bot?.busy && (bot.threadId === m[2] || routines!.isActiveThread(m[2]))) {
@@ -5786,6 +5910,8 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(PORT, "127.0.0.1", () => {
+  recoverDelegations(commsBus);
+  drainReadyDelegations(commsBus, approvalBus, runDelegatedTurn);
   console.log(`mauscrew server on http://127.0.0.1:${PORT}`);
   // The harness takes whichever port is free, so it rarely lands on the same
   // one twice. Tailscale Serve keeps forwarding to the port it was told about

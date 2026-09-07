@@ -167,3 +167,14 @@ export function memoryBlock(botId) {
     const text = `\n\nFrom memory — things already established, not a transcript:\n${body}${note}\nTreat this as known. Do not re-ask what it answers.`;
     return { text, truncated, chars: body.length };
 }
+/** Render only the structured notes belonging to one task. */
+export function taskMemoryBlock(entries) {
+    if (!entries.length)
+        return "";
+    const labels = { decision: "Decision", artifact: "Artifact", verified: "Verified", remaining: "Remaining work" };
+    const body = entries
+        .map((entry) => `- ${labels[entry.kind] ?? entry.kind}: ${entry.text}${entry.sourceMessageId ? ` (source message: ${entry.sourceMessageId})` : ""}`)
+        .join("\n")
+        .slice(0, MEMORY_BUDGET_CHARS);
+    return `\n\nTask memory for this task only:\n${body}\nUse these notes as task context; do not apply them to other tasks.`;
+}

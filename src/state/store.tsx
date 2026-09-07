@@ -187,7 +187,7 @@ export interface Workflow {
   ownerBotId: string;
   threadId: string;
   projectId?: string;
-  status: "active" | "blocked" | "completed" | "failed" | "cancelled";
+  status: "active" | "blocked" | "reported" | "completed" | "failed" | "cancelled";
   steps: Array<{
     id: string;
     title: string;
@@ -195,6 +195,8 @@ export interface Workflow {
     dependsOn: string[];
     status: "pending" | "running" | "blocked" | "done" | "failed";
     output?: string;
+    verification?: "pending" | "evidence" | "user";
+    evidence?: { kind: string; note: string; at: number };
     updatedAt: number;
   }>;
   createdAt: number;

@@ -43,7 +43,8 @@ import { taskProfile } from "./task-profile.js";
 import { isEffortLevel } from "./contracts.js";
 import { CONTENT_SECURITY_POLICY } from "./csp.js";
 import { digestSystemBlock } from "./summarization/digest.js";
-import { memoryBlock } from "./memory/store.js";
+import { captureTaskNotes, TASK_NOTES_PROMPT } from "./task-notes.js";
+import { memoryBlock, taskMemoryBlock } from "./memory/store.js";
 import { deterministicEntry, journalDate, planDistil, planHarvest, recordDistil, recordJournal } from "./memory/harvest.js";
 import { readJournal, readProfile, writeProfile } from "./memory/store.js";
 import { inlineHistory, partitionThread } from "./summarization/partition.js";
@@ -51,7 +52,8 @@ import { BUILT_IN_DRIVERS } from "./drivers/builtIn.js";
 import { describeBaseUrl } from "./drivers/deepseek/config.js";
 import { defaultWorkspaceFor } from "./drivers/deepseek/session-manager.js";
 import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply } from "./comms-visibility.js";
-import { discardDelegations, drainDelegations, queueDelegation } from "./delegations.js";
+import { discardDelegations, drainDelegations, queueDelegation, drainReadyDelegations, recoverDelegations, delegationRecords, retryDelegation, cancelDelegation } from "./delegations.js";
+import { evaluationResults, evaluationScenarios, beginEvaluation, finishEvaluation } from "./evaluations.js";
 import { EventBus } from "./harness/bus.js";
 import { normalizeModelSelection } from "./model-selection.js";
 import { ProviderRegistry } from "./harness/registry.js";
@@ -562,9 +564,11 @@ function beginWorkCard(bot, threadId, title) {
         text: `${bot.name} is preparing the task`,
         ui: {
             component: "live-work",
-            props: { botId: bot.id, title: title.trim().slice(0, 160) || "Working", status: "preparing", startedAt: Date.now() },
+            props: { botId: bot.id, threadId, owner: bot.name, title: title.trim().slice(0, 160) || "Working", status: "preparing", waitReason: "", nextStep: "Preparing", output: "", verification: "pending", startedAt: Date.now() },
         },
     });
+    store.patchMessage(threadId, message.id, { ui: { component: "live-work", props: { ...message.ui.props, cardId: message.id } } });
+    message.ui.props.cardId = message.id;
     workCardByThread.set(threadId, message.id);
     broadcast({ kind: "message", threadId, message });
 }
@@ -925,7 +929,7 @@ bus.subscribe((event) => {
             break;
         case "item.started":
             if (event.itemType === "tool") {
-                updateWorkCard(event.threadId, { status: "working", lastAction: event.title ?? "Using a tool" });
+                updateWorkCard(event.threadId, { status: "working", lastAction: event.title ?? "Using a tool", nextStep: event.title ?? "Araç çalışıyor", waitReason: "" });
                 // ask_bot's raw tool chip is redundant — the internal endpoint
                 // appends a richer "Messaged @X" chip linking to the channel
                 if (event.title?.endsWith("__ask_bot"))
@@ -947,6 +951,8 @@ bus.subscribe((event) => {
         case "request.opened": {
             updateWorkCard(event.threadId, {
                 status: "action-needed",
+                waitReason: "Yanıtınız veya işlem izniniz bekleniyor.",
+                nextStep: "Sohbetteki istek kartını yanıtlayın.",
                 lastAction: event.summary.slice(0, 240),
             });
             const permission = event.requestType === "permission";
@@ -1109,7 +1115,7 @@ bus.subscribe((event) => {
             break;
         }
         case "request.resolved": {
-            updateWorkCard(event.threadId, { status: "working", lastAction: "User response received" });
+            updateWorkCard(event.threadId, { status: "working", waitReason: "", nextStep: "Bot çalışmaya devam ediyor.", lastAction: "User response received" });
             const messageId = event.requestId ? askMessageByRequest.get(`${event.threadId}:${event.requestId}`) : null;
             if (messageId) {
                 const existing = store.messagesFor(event.threadId).find((m) => m.id === messageId);
@@ -1197,7 +1203,14 @@ bus.subscribe((event) => {
                 }
             }
             const reply = lastReply.get(event.threadId) ?? "";
+            if (bot && !digestJob)
+                captureTaskNotes(store, bot.id, event.threadId, store.activePath(event.threadId));
             lastReply.delete(event.threadId);
+            const memoryOwner = bot ?? (speaker ? store.bot(speaker.botId) : undefined);
+            if (memoryOwner && reply.trim()) {
+                const source = store.messagesFor(event.threadId).findLast((message) => message.role === "bot" && message.kind === "text" && message.text?.trim());
+                store.upsertTaskMemory(memoryOwner.id, event.threadId, { kind: event.ok ? "remaining" : "decision", text: reply.trim().slice(0, 1200), sourceMessageId: source?.id });
+            }
             const reviewId = reviewDeliveryByThread.get(event.threadId);
             if (reviewId) {
                 reviewDeliveryByThread.delete(event.threadId);
@@ -1211,6 +1224,10 @@ bus.subscribe((event) => {
                 summary: (bot ?? (speaker ? store.bot(speaker.botId) : undefined))?.humanTakeover?.active
                     ? "Bot actions are paused while the user controls the computer."
                     : reply.trim().slice(0, 1_200) || (event.ok ? "Task completed." : "Task did not complete."),
+                output: reply.trim().slice(0, 1_200),
+                nextStep: event.ok ? "Review the output and verify the result." : "Resolve the error and retry.",
+                verification: "pending",
+                waitReason: "",
             });
             // one lifetime usage tick per terminal turn; cost arrives only from
             // drivers that report it (claude today), others tally tokens alone.
@@ -1272,7 +1289,7 @@ bus.subscribe((event) => {
     if (step?.status !== "running")
         return;
     const reply = store.messagesFor(event.threadId).filter((m) => m.role === "bot" && m.kind === "text").at(-1)?.text;
-    const updated = workflows.updateStep(run.workflowId, run.stepId, { status: event.ok ? "done" : "blocked", output: reply || "Adım kesintiye uğradı; mevcut çıktıyı kontrol edin." });
+    const updated = workflows.updateStep(run.workflowId, run.stepId, { status: event.ok ? "done" : "blocked", output: reply || "Adım kesintiye uğradı; mevcut çıktıyı kontrol edin.", verification: "pending" });
     if (updated)
         publishWorkflow(updated);
 });
@@ -1301,53 +1318,55 @@ function finalizeDelegationWatch(threadId, ok, reply = "", failureName = "Delega
 // Run as a separate subscriber so the drain logic stays out of the main
 // fold (which has its own switch/case noise) and its approval + startTurn
 // calls never have to share locals with the fold's state machine.
+const runDelegatedTurn = (toBotId, text, commsDepth, sourceThreadId, channel, pinnedThreadId) => {
+    // startTurn REJECTS on an ordinary condition — busy target, deleted bot,
+    // unavailable provider. Unhandled, that rejection is fatal to the
+    // harness (Node's default), which in the packaged app kills the server
+    // child. Every delegation failure has to land as a chip instead.
+    const targetThreadId = pinnedThreadId ?? store.bot(toBotId)?.threadId;
+    if (targetThreadId)
+        delegationWatch.set(targetThreadId, { channelId: channel?.id, toBotId });
+    let failureReported = false;
+    const reportStartFailure = (error) => {
+        if (failureReported)
+            return;
+        failureReported = true;
+        const bot = store.bot(toBotId);
+        const why = error instanceof Error ? error.message : String(error);
+        if (targetThreadId) {
+            finalizeDelegationWatch(targetThreadId, false, "", `Delegated turn could not start — ${why.slice(0, 120)}`);
+        }
+        const source = store.botByThread(sourceThreadId);
+        if (!source)
+            return;
+        const note = store.appendMessage(sourceThreadId, {
+            role: "bot",
+            kind: "activity",
+            tool: { name: `error: delegation to @${bot?.name ?? toBotId} could not start — ${why.slice(0, 120)}`, ok: false },
+        });
+        broadcast({ kind: "message", threadId: sourceThreadId, message: note });
+    };
+    return startTurn(toBotId, text, {
+        commsDepth,
+        threadId: targetThreadId,
+        unattended: isUnattended(store.botByThread(sourceThreadId)?.id),
+        // startTurn schedules provider/integration setup after marking the bot
+        // busy. Those asynchronous setup failures do not emit turn.completed,
+        // so clear the watch and report them through this callback too.
+        onDispatchError: reportStartFailure,
+    }).catch((err) => {
+        reportStartFailure(err);
+        throw err;
+    });
+};
 bus.subscribe((event) => {
     if (event.type !== "turn.completed")
         return;
-    // A turn that failed or was interrupted drops its queue rather than
-    // firing it later: the user who hit Stop does not expect the delegations
-    // that turn queued to run anyway, minutes later, on an unrelated turn.
     if (!event.ok)
-        return void discardDelegations(commsBus, event.threadId);
-    drainDelegations(commsBus, approvalBus, event.threadId, (toBotId, text, commsDepth, sourceThreadId, channel) => {
-        // startTurn REJECTS on an ordinary condition — busy target, deleted bot,
-        // unavailable provider. Unhandled, that rejection is fatal to the
-        // harness (Node's default), which in the packaged app kills the server
-        // child. Every delegation failure has to land as a chip instead.
-        const targetThreadId = store.bot(toBotId)?.threadId;
-        if (targetThreadId)
-            delegationWatch.set(targetThreadId, { channelId: channel?.id, toBotId });
-        let failureReported = false;
-        const reportStartFailure = (error) => {
-            if (failureReported)
-                return;
-            failureReported = true;
-            const bot = store.bot(toBotId);
-            const why = error instanceof Error ? error.message : String(error);
-            if (targetThreadId) {
-                finalizeDelegationWatch(targetThreadId, false, "", `Delegated turn could not start — ${why.slice(0, 120)}`);
-            }
-            const source = store.botByThread(sourceThreadId);
-            if (!source)
-                return;
-            const note = store.appendMessage(sourceThreadId, {
-                role: "bot",
-                kind: "activity",
-                tool: { name: `error: delegation to @${bot?.name ?? toBotId} could not start — ${why.slice(0, 120)}`, ok: false },
-            });
-            broadcast({ kind: "message", threadId: sourceThreadId, message: note });
-        };
-        return startTurn(toBotId, text, {
-            commsDepth,
-            unattended: isUnattended(store.botByThread(sourceThreadId)?.id),
-            // startTurn schedules provider/integration setup after marking the bot
-            // busy. Those asynchronous setup failures do not emit turn.completed,
-            // so clear the watch and report them through this callback too.
-            onDispatchError: reportStartFailure,
-        }).catch((err) => {
-            reportStartFailure(err);
-        });
-    });
+        discardDelegations(commsBus, event.threadId);
+    else
+        drainDelegations(commsBus, approvalBus, event.threadId, runDelegatedTurn);
+    drainReadyDelegations(commsBus, approvalBus, runDelegatedTurn);
 });
 const screenPollers = new Map();
 const pendingTurnDispatches = new Map();
@@ -1921,7 +1940,7 @@ async function startTurn(botId, text, opts) {
                     digestSystemBlock(task.digest) +
                     // and what survived earlier sessions entirely — capped, because this
                     // rides on every turn forever
-                    memoryBlock(bot.id).text +
+                    (opts?.evaluation ? "" : memoryBlock(bot.id).text + taskMemoryBlock(task.memory ?? []) + TASK_NOTES_PROMPT) +
                     conductPrompt +
                     driftPrompt +
                     (computerKind === "vm"
@@ -4822,6 +4841,138 @@ const server = createServer(async (req, res) => {
             broadcast({ kind: "bot", bot: fresh });
             return json(res, 200, { task: wireTask(task) });
         }
+        if (path === "/api/delegations" && method === "GET")
+            return json(res, 200, { items: delegationRecords() });
+        const delegationAction = path.match(/^\/api\/delegations\/([\w-]+)\/(retry|cancel)$/);
+        if (delegationAction && method === "POST") {
+            const changed = delegationAction[2] === "retry" ? retryDelegation(delegationAction[1]) : cancelDelegation(delegationAction[1]);
+            if (!changed)
+                return json(res, 409, { error: "Bu işin durumu değişti; listeyi yenileyin." });
+            drainReadyDelegations(commsBus, approvalBus, runDelegatedTurn);
+            return json(res, 200, { items: delegationRecords() });
+        }
+        if (path === "/api/evaluations" && (method === "GET" || method === "POST")) {
+            if (method === "GET")
+                return json(res, 200, { scenarios: evaluationScenarios(), results: evaluationResults() });
+            const body = await readBody(req);
+            const bot = store.bot(String(body.botId ?? ""));
+            const scenario = evaluationScenarios().find((item) => item.id === body.scenarioId);
+            if (!bot || !scenario)
+                return json(res, 400, { error: "Bot ve senaryo seçin." });
+            const engine = registry.get(bot.modelSelection.instanceId);
+            if (!engine || bot.busy)
+                return json(res, 409, { error: "Bot meşgul veya motor kullanılamıyor." });
+            const task = store.createTask(bot.id, `Evaluation: ${scenario.title}`, false);
+            const result = beginEvaluation(bot.modelSelection.instanceId, scenario, bot.modelSelection.model, task.threadId);
+            void finishEvaluation(result, scenario, (prompt) => new Promise((resolve, reject) => {
+                let settled = false;
+                let input;
+                let output;
+                const totals = new Map();
+                const finish = (error) => {
+                    if (settled)
+                        return;
+                    settled = true;
+                    clearTimeout(timer);
+                    unsubscribe();
+                    if (error)
+                        reject(error);
+                    else
+                        resolve({ output: store.messagesFor(task.threadId).findLast((message) => message.role === "bot" && message.kind === "text")?.text, inputTokens: input, outputTokens: output });
+                };
+                const unsubscribe = bus.subscribe((event) => {
+                    if (event.threadId !== task.threadId || settled)
+                        return;
+                    if (event.type === "thread.token-usage.updated") {
+                        const key = `${event.providerInstanceId ?? event.provider}:${event.usageSessionId ?? event.threadId}`;
+                        const last = event.cumulative ? totals.get(key) : undefined;
+                        input = (input ?? 0) + Math.max(0, event.input - (last?.input ?? 0));
+                        output = (output ?? 0) + Math.max(0, event.output - (last?.output ?? 0));
+                        if (event.cumulative)
+                            totals.set(key, { input: event.input, output: event.output });
+                    }
+                    if (event.type === "turn.completed")
+                        finish(event.ok ? undefined : new Error("Değerlendirme turu tamamlanamadı."));
+                });
+                const timer = setTimeout(() => {
+                    interruptPendingTurn(task.threadId);
+                    void engine.adapter.interruptTurn(task.threadId).catch(() => { });
+                    finish(new Error("Değerlendirme 120 saniyede tamamlanamadı."));
+                }, 120_000);
+                void startTurn(bot.id, prompt, { threadId: task.threadId, evaluation: true, commsDepth: MAX_COMMS_DEPTH, onDispatchError: (error) => finish(new Error(error)) }).catch((error) => finish(error instanceof Error ? error : new Error(String(error))));
+            })).catch((error) => console.error("Evaluation persistence failed", error));
+            return json(res, 202, { result, task: wireTask(task) });
+        }
+        const taskMemoryMatch = path.match(/^\/api\/bots\/([\w-]+)\/tasks\/([\w-]+)\/memory(?:\/([\w-]+))?$/);
+        if (taskMemoryMatch) {
+            const bot = store.bot(taskMemoryMatch[1]);
+            if (!bot || !store.taskByThread(bot.id, taskMemoryMatch[2]))
+                return json(res, 404, { error: "no such task" });
+            if (method === "GET")
+                return json(res, 200, { entries: store.taskMemory(bot.id, taskMemoryMatch[2]) });
+            if (method === "POST" || method === "PUT") {
+                const body = await readBody(req);
+                const sourceMessageId = typeof body.sourceMessageId === "string" ? body.sourceMessageId.trim() : "";
+                if (sourceMessageId && !store.messagesFor(taskMemoryMatch[2]).some((message) => message.id === sourceMessageId))
+                    return json(res, 400, { error: "source message must belong to this task" });
+                const entry = store.upsertTaskMemory(bot.id, taskMemoryMatch[2], {
+                    id: typeof body.id === "string" ? body.id : undefined,
+                    kind: String(body.kind ?? ""),
+                    text: String(body.text ?? ""),
+                    sourceMessageId: sourceMessageId || undefined,
+                });
+                if (!entry)
+                    return json(res, 400, { error: "kind and text are required" });
+                const fresh = botWithThread(store.bot(bot.id));
+                broadcast({ kind: "bot", bot: fresh });
+                return json(res, 200, { entry });
+            }
+            if (method === "DELETE" && taskMemoryMatch[3]) {
+                if (!store.deleteTaskMemory(bot.id, taskMemoryMatch[2], taskMemoryMatch[3]))
+                    return json(res, 404, { error: "memory entry not found" });
+                const fresh = botWithThread(store.bot(bot.id));
+                broadcast({ kind: "bot", bot: fresh });
+                return json(res, 200, { ok: true });
+            }
+            return json(res, 405, { error: "method not allowed" });
+        }
+        const verifyStep = path.match(/^\/api\/workflows\/([\w-]+)\/steps\/([\w-]+)\/verify$/);
+        if (method === "POST" && verifyStep) {
+            const workflow = workflows.get(verifyStep[1]);
+            const step = workflow?.steps.find((item) => item.id === verifyStep[2]);
+            if (!workflow || !step || step.status !== "done")
+                return json(res, 409, { error: "step must be reported complete first" });
+            const body = await readBody(req);
+            const note = typeof body.note === "string" ? body.note.trim().slice(0, 2000) : "";
+            if (note.length < 5 || !["test", "file", "browser", "review"].includes(String(body.kind)))
+                return json(res, 400, { error: "Kontrol türünü ve doğruladığınız sonucu yazın." });
+            const updated = workflows.updateStep(workflow.id, step.id, { status: "done", output: step.output, verification: "user", evidence: { kind: String(body.kind), note, at: Date.now() } });
+            if (updated)
+                publishWorkflow(updated);
+            return json(res, 200, { workflow: updated });
+        }
+        const verifyMatch = path.match(/^\/api\/bots\/([\w-]+)\/tasks\/([\w-]+)\/work-card\/verify$/);
+        if (verifyMatch && method === "POST") {
+            const bot = store.bot(verifyMatch[1]);
+            if (!bot || !store.taskByThread(bot.id, verifyMatch[2]))
+                return json(res, 404, { error: "no such task" });
+            const body = await readBody(req);
+            const note = typeof body.note === "string" ? body.note.trim().slice(0, 2000) : "";
+            const kind = String(body.kind ?? "");
+            if (note.length < 5 || !["test", "file", "browser", "review"].includes(kind))
+                return json(res, 400, { error: "Kontrol türünü ve doğruladığınız sonucu yazın." });
+            const card = store.messagesFor(verifyMatch[2]).find((message) => message.id === body.cardId && message.ui?.component === "live-work" && message.ui.props.status === "done");
+            if (!card?.ui)
+                return json(res, 409, { error: "Önce tamamlandığı bildirilen bir sonuç seçin." });
+            if (kind === "file" && !resolveProducedFile(String(body.path ?? ""), workspaceRootsFor({ ...bot, threadId: verifyMatch[2] })))
+                return json(res, 400, { error: "Dosya görev çalışma alanında bulunamadı." });
+            const evidence = { kind, note, path: kind === "file" ? String(body.path) : undefined, at: Date.now(), verifiedBy: "user" };
+            const patched = store.patchMessage(verifyMatch[2], card.id, { ui: { component: "live-work", props: { ...card.ui.props, verification: "user", evidence, verifiedAt: Date.now(), nextStep: "Sonuç kullanıcı tarafından doğrulandı." } } });
+            if (patched)
+                broadcast({ kind: "message.patch", threadId: verifyMatch[2], message: patched });
+            store.upsertTaskMemory(bot.id, verifyMatch[2], { kind: "verified", text: `${kind}: ${note}`, sourceMessageId: card.id });
+            return json(res, 200, { message: patched });
+        }
         if (m && method === "DELETE") {
             const bot = store.bot(m[1]);
             if (bot?.busy && (bot.threadId === m[2] || routines.isActiveThread(m[2]))) {
@@ -5804,6 +5955,8 @@ const server = createServer(async (req, res) => {
     }
 });
 server.listen(PORT, "127.0.0.1", () => {
+    recoverDelegations(commsBus);
+    drainReadyDelegations(commsBus, approvalBus, runDelegatedTurn);
     console.log(`mauscrew server on http://127.0.0.1:${PORT}`);
     // The harness takes whichever port is free, so it rarely lands on the same
     // one twice. Tailscale Serve keeps forwarding to the port it was told about

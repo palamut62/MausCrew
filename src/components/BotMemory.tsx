@@ -7,6 +7,8 @@
 // background would be exactly the invisible cost that rule exists to prevent.
 import { useCallback, useEffect, useState } from "react";
 import { Brain } from "@phosphor-icons/react";
+import { TaskMemoryPanel } from "./TaskMemoryPanel";
+import { TaskOperations } from "./TaskOperations";
 import { Spin } from "./Spin";
 import { api, useStore, type Bot } from "@/state/store";
 
@@ -16,12 +18,10 @@ interface MemoryState {
   canDistil: boolean;
   injected: number;
 }
-
 export function BotMemory({ bot }: { bot: Bot }) {
   const { dispatch } = useStore();
   const [memory, setMemory] = useState<MemoryState | null>(null);
   const [busy, setBusy] = useState(false);
-
   const load = useCallback(async () => {
     try {
       setMemory((await api(`/api/bots/${bot.id}/memory`)) as MemoryState);
@@ -32,7 +32,7 @@ export function BotMemory({ bot }: { bot: Bot }) {
 
   useEffect(() => {
     queueMicrotask(() => void load());
-  }, [load]);
+  }, [load, bot.busy]);
 
   const distil = async () => {
     setBusy(true);
@@ -42,7 +42,7 @@ export function BotMemory({ bot }: { bot: Bot }) {
         body: JSON.stringify({ action: "distil" }),
       });
       // The brief arrives as a turn; re-read once it has had a chance to land.
-      setTimeout(() => void load(), 4000);
+      await load();
     } catch (error) {
       dispatch({ type: "error", message: error instanceof Error ? error.message : String(error) });
     } finally {
@@ -59,6 +59,8 @@ export function BotMemory({ bot }: { bot: Bot }) {
         <Brain size={15} weight="bold" />
         What {bot.name} remembers
       </div>
+      <TaskMemoryPanel key={bot.threadId} bot={bot} />
+      <TaskOperations bot={bot} />
 
       {!hasAnything ? (
         <p className="mt-1.5 text-[12px] leading-[1.5] text-ink-secondary">

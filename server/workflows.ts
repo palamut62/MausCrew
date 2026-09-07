@@ -5,7 +5,7 @@ import { DATA_DIR } from "./config.ts";
 import { newId } from "./contracts.ts";
 
 export type WorkflowStepStatus = "pending" | "running" | "blocked" | "done" | "failed";
-export type WorkflowStatus = "active" | "blocked" | "completed" | "failed" | "cancelled";
+export type WorkflowStatus = "active" | "blocked" | "reported" | "completed" | "failed" | "cancelled";
 
 export interface WorkflowStep {
   id: string;
@@ -14,6 +14,8 @@ export interface WorkflowStep {
   dependsOn: string[];
   status: WorkflowStepStatus;
   output?: string;
+  verification?: "pending" | "evidence" | "user";
+  evidence?: { kind: string; note: string; at: number };
   updatedAt: number;
 }
 
@@ -66,7 +68,7 @@ function assertDag(steps: WorkflowStep[]): void {
 function statusFor(steps: WorkflowStep[], fallback: WorkflowStatus): WorkflowStatus {
   if (fallback === "cancelled") return fallback;
   if (steps.some((step) => step.status === "failed")) return "failed";
-  if (steps.every((step) => step.status === "done")) return "completed";
+  if (steps.length && steps.every((step) => step.status === "done")) return steps.every((step) => step.verification === "user" || step.verification === "evidence") ? "completed" : "reported";
   if (steps.some((step) => step.status === "blocked")) return "blocked";
   return "active";
 }
@@ -94,6 +96,8 @@ function normalizeWorkflow(value: Partial<WorkflowRecord>): WorkflowRecord | nul
         dependsOn: Array.isArray(step.dependsOn) ? [...new Set(step.dependsOn.filter((item): item is string => typeof item === "string"))] : [],
         status,
         output: text(step.output, 8_000) || undefined,
+        verification: step.verification === "user" || step.verification === "evidence" ? step.verification : "pending",
+        evidence: step.evidence && typeof step.evidence.note === "string" ? step.evidence : undefined,
         updatedAt: Number(step.updatedAt) || now,
       } satisfies WorkflowStep;
     })
@@ -104,7 +108,7 @@ function normalizeWorkflow(value: Partial<WorkflowRecord>): WorkflowRecord | nul
     return null;
   }
   const createdAt = Number(value.createdAt) || now;
-  const fallback: WorkflowStatus = ["active", "blocked", "completed", "failed", "cancelled"].includes(String(value.status))
+  const fallback: WorkflowStatus = ["active", "blocked", "reported", "completed", "failed", "cancelled"].includes(String(value.status))
     ? (value.status as WorkflowStatus)
     : "active";
   return {
@@ -222,7 +226,7 @@ export class WorkflowManager {
   updateStep(
     workflowId: string,
     stepId: string,
-    patch: { status: WorkflowStepStatus; output?: string },
+  patch: { status: WorkflowStepStatus; output?: string; verification?: "pending" | "evidence" | "user"; evidence?: { kind: string; note: string; at: number } },
   ): WorkflowRecord | null {
     const workflow = this.workflows.find((candidate) => candidate.id === workflowId);
     if (!workflow || workflow.status === "cancelled") return null;
@@ -233,6 +237,8 @@ export class WorkflowManager {
     }
     step.status = patch.status;
     step.output = text(patch.output, 8_000) || undefined;
+    step.verification = patch.verification ?? "pending";
+    step.evidence = patch.evidence;
     step.updatedAt = Date.now();
     workflow.updatedAt = step.updatedAt;
     workflow.status = statusFor(workflow.steps, workflow.status);
