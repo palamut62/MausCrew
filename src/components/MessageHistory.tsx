@@ -19,7 +19,11 @@ export function useHistory(threadId: string, live: Message[], hasMore = false) {
     finally { if (request === serial.current) setBusy(false); }
   }
   useEffect(() => {
-    const jump = (event: Event) => { const target = (event as CustomEvent).detail; if (target.threadId === threadId) void load({ around: target.messageId }); };
+    // The sender also parks the target in sessionStorage, because the thread it
+    // points at may not be mounted yet. Handling it live consumes that fallback:
+    // an entry nobody clears survives reloads and pins the transcript to an old
+    // message every time this view mounts again.
+    const jump = (event: Event) => { const target = (event as CustomEvent).detail; if (target.threadId !== threadId) return; sessionStorage.removeItem("mauscrew:jump-message"); void load({ around: target.messageId }); };
     window.addEventListener("mauscrew:jump-message", jump);
     const pending = sessionStorage.getItem("mauscrew:jump-message");
     if (pending) { try { const target = JSON.parse(pending); if (target.threadId === threadId) { sessionStorage.removeItem("mauscrew:jump-message"); queueMicrotask(() => void load({ around: target.messageId })); } } catch { /* stale session value */ } }
