@@ -57,6 +57,45 @@ const MIGRATIONS = [
     CREATE TRIGGER IF NOT EXISTS audit_no_delete
     BEFORE DELETE ON audit_entries BEGIN SELECT RAISE(ABORT, 'audit entries are immutable'); END;
   `,
+  `
+    CREATE TABLE IF NOT EXISTS agent_sessions (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+      provider TEXT NOT NULL,
+      model TEXT NOT NULL,
+      current_task_id TEXT,
+      permissions_json TEXT NOT NULL CHECK (json_valid(permissions_json)),
+      tools_json TEXT NOT NULL CHECK (json_valid(tools_json)),
+      context_json TEXT NOT NULL CHECK (json_valid(context_json)),
+      memory_json TEXT NOT NULL CHECK (json_valid(memory_json)),
+      started_at TEXT NOT NULL,
+      last_heartbeat_at TEXT NOT NULL,
+      ended_at TEXT,
+      stop_reason TEXT
+    ) STRICT;
+    CREATE INDEX IF NOT EXISTS agent_sessions_active_idx ON agent_sessions(agent_id, ended_at, last_heartbeat_at);
+    CREATE UNIQUE INDEX IF NOT EXISTS agent_sessions_one_active_agent_idx ON agent_sessions(agent_id) WHERE ended_at IS NULL;
+
+    CREATE TABLE IF NOT EXISTS agent_inbox (
+      sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+      id TEXT NOT NULL UNIQUE,
+      project_id TEXT NOT NULL,
+      agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+      kind TEXT NOT NULL CHECK (kind IN ('task', 'handoff', 'message', 'review', 'system_event')),
+      priority TEXT NOT NULL CHECK (priority IN ('critical', 'high', 'normal', 'low')),
+      payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
+      source_event_id TEXT,
+      state TEXT NOT NULL CHECK (state IN ('queued', 'claimed', 'completed', 'dead_letter')),
+      attempts INTEGER NOT NULL DEFAULT 0,
+      available_at TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      claimed_at TEXT,
+      completed_at TEXT,
+      error TEXT
+    ) STRICT;
+    CREATE INDEX IF NOT EXISTS agent_inbox_ready_idx ON agent_inbox(agent_id, state, available_at, priority, sequence);
+  `,
 ] as const;
 
 export class CrewDatabase {

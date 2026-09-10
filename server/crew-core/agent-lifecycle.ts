@@ -50,6 +50,7 @@ export class AgentLifecycleService {
     taskId?: string;
     correlationId?: string;
     causationId?: string;
+    mutation?: () => void;
   }): AgentStatus {
     const identity = this.identities.get(input.agentId);
     if (!identity) throw new Error(`Unknown agent: ${input.agentId}`);
@@ -71,6 +72,7 @@ export class AgentLifecycleService {
       causationId: input.causationId,
     });
     this.database.transaction(() => {
+      input.mutation?.();
       if (!this.identities.setStatus(input.agentId, input.to, event.createdAt)) throw new Error(`Unknown agent: ${input.agentId}`);
       this.events.append(event);
       this.audit.append({

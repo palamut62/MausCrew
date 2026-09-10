@@ -65,7 +65,7 @@ export class SqliteAuditStore {
         actorType: draft.actorType,
         action: draft.action,
         ...(draft.target ? { target: draft.target } : {}),
-        metadata: (redactAuditValue(draft.metadata ?? {}) ?? {}) as Record<string, unknown>,
+        metadata: JSON.parse(JSON.stringify(redactAuditValue(draft.metadata ?? {}) ?? {})) as Record<string, unknown>,
         createdAt: draft.createdAt ?? new Date().toISOString(),
         ...(previous ? { previousHash: previous.entry_hash } : {}),
       };
