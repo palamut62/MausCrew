@@ -11,6 +11,7 @@ import { GeminiAgentDriver } from "./acp/gemini.ts";
 import { KimiAgentDriver } from "./acp/kimi.ts";
 import { DroidAgentDriver } from "./acp/droid.ts";
 import { OpenCodeGoDriver } from "./acp/opencode-go.ts";
+import { GooseAgentDriver } from "./acp/goose.ts";
 import { DeepSeekHarnessDriver } from "./deepseek-harness.ts";
 import { AguiDriver } from "./agui.ts";
 
@@ -21,6 +22,7 @@ export const BUILT_IN_DRIVERS: readonly AnyProviderDriver[] = [
   KimiAgentDriver,
   DroidAgentDriver,
   OpenCodeGoDriver,
+  GooseAgentDriver,
   ClaudeDriver,
   CodexDriver,
   AntigravityDriver,
