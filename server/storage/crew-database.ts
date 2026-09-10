@@ -96,6 +96,60 @@ const MIGRATIONS = [
     ) STRICT;
     CREATE INDEX IF NOT EXISTS agent_inbox_ready_idx ON agent_inbox(agent_id, state, available_at, priority, sequence);
   `,
+  `
+    CREATE TABLE IF NOT EXISTS tasks (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL,
+      role TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('pending', 'ready', 'assigned', 'running', 'blocked', 'completed', 'failed', 'cancelled')),
+      priority TEXT NOT NULL CHECK (priority IN ('critical', 'high', 'normal', 'low')),
+      assignee_agent_id TEXT REFERENCES agents(id) ON DELETE RESTRICT,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      started_at TEXT,
+      completed_at TEXT,
+      error TEXT
+    ) STRICT;
+    CREATE INDEX IF NOT EXISTS tasks_project_status_idx ON tasks(project_id, status, priority, created_at);
+    CREATE INDEX IF NOT EXISTS tasks_assignee_status_idx ON tasks(assignee_agent_id, status);
+
+    CREATE TABLE IF NOT EXISTS task_dependencies (
+      project_id TEXT NOT NULL,
+      task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      depends_on_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE RESTRICT,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (task_id, depends_on_task_id),
+      CHECK (task_id <> depends_on_task_id)
+    ) STRICT;
+    CREATE INDEX IF NOT EXISTS task_dependencies_upstream_idx ON task_dependencies(depends_on_task_id, task_id);
+
+    CREATE TABLE IF NOT EXISTS handoffs (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      from_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+      to_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+      task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE RESTRICT,
+      status TEXT NOT NULL CHECK (status IN ('pending', 'accepted', 'completed', 'rejected')),
+      summary TEXT NOT NULL,
+      next_actions_json TEXT NOT NULL CHECK (json_valid(next_actions_json)),
+      blockers_json TEXT NOT NULL CHECK (json_valid(blockers_json)),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    ) STRICT;
+    CREATE INDEX IF NOT EXISTS handoffs_target_status_idx ON handoffs(to_agent_id, status, created_at);
+
+    CREATE TABLE IF NOT EXISTS handoff_evidence (
+      id TEXT PRIMARY KEY,
+      handoff_id TEXT NOT NULL REFERENCES handoffs(id) ON DELETE CASCADE,
+      evidence_type TEXT NOT NULL CHECK (evidence_type IN ('file', 'commit', 'test', 'url', 'message', 'artifact')),
+      value TEXT NOT NULL,
+      ordinal INTEGER NOT NULL,
+      UNIQUE (handoff_id, ordinal)
+    ) STRICT;
+  `,
 ] as const;
 
 export class CrewDatabase {
