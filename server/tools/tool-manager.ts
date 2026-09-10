@@ -29,7 +29,7 @@ export class ToolManager {
       const approval = this.approvals.request({ projectId: input.context.projectId, agentId: input.context.agentId, sessionId: input.context.sessionId, taskId: input.context.taskId, action: input.tool, arguments: input.arguments, reason: "Permission profile requires human approval" });
       return { status: "needs_approval", approvalId: approval.id };
     }
-    if (permission === "ask") this.approvals.assertApproved(input.approvalId!, { projectId: input.context.projectId, agentId: input.context.agentId, action: input.tool, arguments: input.arguments });
+    if (permission === "ask") this.approvals.consumeApproved(input.approvalId!, { projectId: input.context.projectId, agentId: input.context.agentId, action: input.tool, arguments: input.arguments });
     if (input.context.cancellation?.signal.aborted) throw new Error("Tool execution cancelled");
 
     const id = randomUUID(); const startedAt = new Date().toISOString();

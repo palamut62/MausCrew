@@ -46,6 +46,7 @@ describe("MCP tool boundary", () => {
     app.approvals.decide(approvalId, "approved", "user");
     await expect(app.manager.execute({ ...input, arguments: { path: "other.txt", content: "ok" }, approvalId })).rejects.toThrow("exact tool call");
     expect(await app.manager.execute({ ...input, approvalId })).toMatchObject({ status: "completed" });
+    await expect(app.manager.execute({ ...input, approvalId })).rejects.toThrow("exact tool call");
     expect(app.events.list({ projectId: "p" }).map(({ event }) => event.type)).toContain("approval.approved");
   });
 
@@ -90,4 +91,12 @@ describe("built-in execution safety", () => {
     setTimeout(() => cancellation.cancel(), 100);
     await expect(running).rejects.toThrow("cancelled");
   }, 10_000);
+
+  it("bounds shell output and writes a local artifact", async () => {
+    const root = mkdtempSync(join(tmpdir(), "mauscrew-output-")); directories.push(root);
+    const result = await new ShellExecuteTool({ maxOutputBytes: 100 }).execute({ command: "node -e \"process.stdout.write('x'.repeat(1000))\"" }, { projectId: "p", projectRoot: root, agentId: "a" }) as { stdout: string; truncated: boolean; artifact: string };
+    expect(result.stdout).toHaveLength(100);
+    expect(result.truncated).toBe(true);
+    expect(readFileSync(join(root, result.artifact), "utf8")).toContain("x");
+  });
 });

@@ -7,8 +7,8 @@ import type { CrewDatabase } from "../storage/crew-database.ts";
 import type { CrewEventStore } from "../storage/event-store.ts";
 
 export type ApprovalStatus = "pending" | "approved" | "rejected" | "changes_requested";
-export interface ToolApproval { id: string; projectId: string; agentId: string; sessionId?: string; taskId?: string; action: string; argumentsHash: string; status: ApprovalStatus; reason?: string; createdAt: string; decidedAt?: string; decidedBy?: string }
-type Row = { id: string; project_id: string; agent_id: string; session_id: string | null; task_id: string | null; action: string; arguments_hash: string; status: ApprovalStatus; reason: string | null; created_at: string; decided_at: string | null; decided_by: string | null };
+export interface ToolApproval { id: string; projectId: string; agentId: string; sessionId?: string; taskId?: string; action: string; argumentsHash: string; status: ApprovalStatus; reason?: string; createdAt: string; decidedAt?: string; decidedBy?: string; consumedAt?: string }
+type Row = { id: string; project_id: string; agent_id: string; session_id: string | null; task_id: string | null; action: string; arguments_hash: string; status: ApprovalStatus; reason: string | null; created_at: string; decided_at: string | null; decided_by: string | null; consumed_at: string | null };
 
 export function hashToolArguments(value: unknown): string { return createHash("sha256").update(JSON.stringify(value)).digest("hex"); }
 
@@ -40,12 +40,14 @@ export class ApprovalService {
 
   get(id: string): ToolApproval | undefined {
     const row = this.database.db.prepare("SELECT * FROM approvals WHERE id = ?").get(id) as unknown as Row | undefined;
-    return row ? { id: row.id, projectId: row.project_id, agentId: row.agent_id, ...(row.session_id ? { sessionId: row.session_id } : {}), ...(row.task_id ? { taskId: row.task_id } : {}), action: row.action, argumentsHash: row.arguments_hash, status: row.status, ...(row.reason ? { reason: row.reason } : {}), createdAt: row.created_at, ...(row.decided_at ? { decidedAt: row.decided_at } : {}), ...(row.decided_by ? { decidedBy: row.decided_by } : {}) } : undefined;
+    return row ? { id: row.id, projectId: row.project_id, agentId: row.agent_id, ...(row.session_id ? { sessionId: row.session_id } : {}), ...(row.task_id ? { taskId: row.task_id } : {}), action: row.action, argumentsHash: row.arguments_hash, status: row.status, ...(row.reason ? { reason: row.reason } : {}), createdAt: row.created_at, ...(row.decided_at ? { decidedAt: row.decided_at } : {}), ...(row.decided_by ? { decidedBy: row.decided_by } : {}), ...(row.consumed_at ? { consumedAt: row.consumed_at } : {}) } : undefined;
   }
 
-  assertApproved(id: string, input: { projectId: string; agentId: string; action: string; arguments: unknown }): void {
+  consumeApproved(id: string, input: { projectId: string; agentId: string; action: string; arguments: unknown }): void {
     const approval = this.get(id);
-    if (!approval || approval.status !== "approved" || approval.projectId !== input.projectId || approval.agentId !== input.agentId || approval.action !== input.action || approval.argumentsHash !== hashToolArguments(input.arguments)) throw new Error("Approval does not authorize this exact tool call");
+    if (!approval || approval.status !== "approved" || approval.consumedAt || approval.projectId !== input.projectId || approval.agentId !== input.agentId || approval.action !== input.action || approval.argumentsHash !== hashToolArguments(input.arguments)) throw new Error("Approval does not authorize this exact tool call");
+    const result = this.database.db.prepare("UPDATE approvals SET consumed_at = ? WHERE id = ? AND status = 'approved' AND consumed_at IS NULL").run(new Date().toISOString(), id);
+    if (Number(result.changes) !== 1) throw new Error("Approval has already been consumed");
   }
 
   #record(type: "approval.requested" | "approval.approved" | "approval.rejected", approval: ToolApproval, actorType: "system" | "human", actorId: string): CrewEvent {

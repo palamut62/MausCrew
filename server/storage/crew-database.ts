@@ -183,6 +183,9 @@ const MIGRATIONS = [
     ) STRICT;
     CREATE INDEX IF NOT EXISTS tool_calls_agent_started_idx ON tool_calls(agent_id, started_at);
   `,
+  `
+    ALTER TABLE approvals ADD COLUMN consumed_at TEXT;
+  `,
 ] as const;
 
 export class CrewDatabase {
