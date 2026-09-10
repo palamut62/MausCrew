@@ -4,9 +4,10 @@ import { CREW_EVENT_TYPES, createCrewEvent } from "./events.ts";
 
 describe("crew events", () => {
   it("registers every Phase 1 event type", () => {
-    expect(CREW_EVENT_TYPES).toHaveLength(25);
+    expect(CREW_EVENT_TYPES).toHaveLength(30);
     expect(CREW_EVENT_TYPES).toContain("agent.status_changed");
     expect(CREW_EVENT_TYPES).toContain("git.review_completed");
+    expect(CREW_EVENT_TYPES).toContain("agent.heartbeat");
   });
 
   it("creates correlation-ready events", () => {

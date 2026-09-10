@@ -5,6 +5,8 @@ export const CREW_EVENT_TYPES = [
   "agent.started",
   "agent.stopped",
   "agent.status_changed",
+  "agent.heartbeat",
+  "agent.wakeup_requested",
   "task.created",
   "task.assigned",
   "task.started",
@@ -14,6 +16,7 @@ export const CREW_EVENT_TYPES = [
   "handoff.accepted",
   "handoff.completed",
   "message.created",
+  "message.mentioned",
   "tool.started",
   "tool.completed",
   "tool.failed",
@@ -26,6 +29,8 @@ export const CREW_EVENT_TYPES = [
   "git.commit_created",
   "git.review_requested",
   "git.review_completed",
+  "review.requested",
+  "dependency.completed",
 ] as const;
 
 export type CrewEventType = (typeof CREW_EVENT_TYPES)[number];
