@@ -83,5 +83,7 @@ Phase 1 başlamadan SQLite library seçimi, schema migration/backup stratejisi v
 - Approval ve tool call kayıtları SQLite'a taşındı; approval exact-call hash ile bağlanır ve yalnız bir kez tüketilebilir.
 - Phase 5 tamamlandı: provider-neutral `AgentProvider` session/send/cancel facade, Codex/Claude Code/Goose adaptörleri ve first-class `goose acp` driver eklendi.
 - Custom provider'lar mevcut `ProviderInstance` kontratı üzerinden aynı facade'a bağlanabilir; Crew Core provider protokolü bilmez.
+- Phase 6 tamamlandı: YAML parse/validation, persisted definition/run/step state, DAG ve parallel execution, human approval, restart resume ve cancellation eklendi.
+- Mevcut JSON `WorkflowManager` korunuyor; dependency edge'lerini kaybetmeden canonical definition'a çeviren legacy adapter mevcut.
 - Event registry Phase 3 task/handoff lifecycle event'leriyle 34 tipe genişledi.
 - Mevcut workflow, delegation ve provider-specific MCP yöneticileri korunuyor; canonical servislerin application bootstrap'a bağlanması kademeli migration kapsamında sonraki fazlarla tamamlanacaktır.
