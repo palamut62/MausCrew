@@ -76,4 +76,6 @@ Phase 1 başlamadan SQLite library seçimi, schema migration/backup stratejisi v
 
 - Phase 0 tamamlandı: referans haritaları, gap analysis ve migration planı.
 - Phase 1 tamamlandı: identity, 25 tipli event registry, bounded EventBus, immutable SQLite EventStore, hash-chain AuditStore, status state machine ve atomik lifecycle service.
-- Mevcut bot/task JSON state'i henüz taşınmadı; Phase 2 runtime ilk production consumer olacaktır.
+- Phase 2 tamamlandı: persistent isolated sessions, heartbeat/stale detection, bounded priority inbox, wakeup router ve hierarchical cancellation.
+- Event registry Phase 2 routing/lifecycle event'leriyle 30 tipe genişledi.
+- Mevcut bot/task JSON state'i henüz taşınmadı; Phase 3 canonical task/handoff adapter'larını ekleyecektir.
