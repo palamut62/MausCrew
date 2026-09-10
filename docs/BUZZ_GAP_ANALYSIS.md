@@ -21,14 +21,14 @@
 | Approval | Var | Kısmi, provider, peer, bot creation ve review approval | Ortak approval state ve request-changes | SQLite approval service |
 | Audit | Var, hash-chain | Kısmi, redacted append-only NDJSON | Tam producer coverage, integrity, tool table | SQLite audit v2 plus legacy reader |
 | Workflow | Var, YAML executor | Kısmi, persistent JSON DAG manager | YAML, auto-execution, approval, full resume | Definition/run split and scheduler |
-| Git workspace | Var, repo/branch surfaces | Kısmi, branching tests ve git flows | Branch timeline/domain workspace | Phase 7 adapter and projections |
-| Review pipeline | Var/kısmi | Kısmi, persistent review queue | Tester-reviewer-human pipeline binding | Workflow template plus policy |
+| Git workspace | Var, repo/branch surfaces | Kısmi, validated branch workspace projection ve git boundary | UI/application bootstrap bağlantısı | Mevcut git akışına Phase 7 projection adapter'ı bağla |
+| Review pipeline | Var/kısmi | Var, persisted implementation-tester-reviewer zinciri ve opsiyonel human gate | Legacy review queue ile application bağlantısı | Mevcut queue'yu workflow projection kaynağı olarak koru |
 | Memory | Var, engram/context | Kısmi güçlü, shared/profile/journal/task memory | Explicit session/project/agent records, checkpoint threshold | Preserve files, add metadata/checkpoints |
 | Model provider | Var | Kısmi, model selection/catalog per driver | Ortak complete/stream/capability/usage facade, fallback audit | `ModelProvider` and fallback chain |
 | Local models | Var, OpenAI-compatible | Kısmi, provider-dependent | First-class Ollama/LM Studio adapter contract | Implement behind ModelProvider |
 | Shared compute | Var, mesh | Kısmi experiments | Stable compute abstraction only | Phase 9 `ComputeProvider` |
-| Activity timeline | Var | Kısmi, messages/activity/project summary | Tek persisted multi-domain timeline | Event projection UI |
-| Agent inspector | Var/kısmi | Kısmi bot/settings/runtime views | Heartbeat, queue, tool, session, usage in one view | Phase 7 inspector |
+| Activity timeline | Var | Var, bounded canonical event projection ve legacy source adapter'ı | UI route bağlantısı | Application API üzerinden mevcut Activity yüzeyine bağla |
+| Agent inspector | Var/kısmi | Var, status/task/heartbeat/tool/queue/session/model/memory projection'ı | Token/cost verisi Phase 8'i bekliyor | Application API üzerinden Agent Detail yüzeyine bağla |
 | Retry/recovery | Var | Kısmi, provider failover and delegation recovery | Central typed retry policy | Retry service with audited reason |
 | Cancellation | Var | Kısmi, provider/turn/delegation/workflow paths | Unified task/agent/workflow/all propagation | Cancellation token tree |
 
@@ -85,5 +85,7 @@ Phase 1 başlamadan SQLite library seçimi, schema migration/backup stratejisi v
 - Custom provider'lar mevcut `ProviderInstance` kontratı üzerinden aynı facade'a bağlanabilir; Crew Core provider protokolü bilmez.
 - Phase 6 tamamlandı: YAML parse/validation, persisted definition/run/step state, DAG ve parallel execution, human approval, restart resume ve cancellation eklendi.
 - Mevcut JSON `WorkflowManager` korunuyor; dependency edge'lerini kaybetmeden canonical definition'a çeviren legacy adapter mevcut.
+- Phase 7 tamamlandı: bounded birleşik Activity Timeline, güvenli Branch Workspace projection'ı, ayrıntılı Agent Inspector ve opsiyonel human gate içeren implementation-test-review pipeline eklendi.
+- Legacy message/review kaynakları Activity Timeline'a adapter olarak eklenebilir; UI doğrudan SQLite'a bağlanmaz.
 - Event registry Phase 3 task/handoff lifecycle event'leriyle 34 tipe genişledi.
 - Mevcut workflow, delegation ve provider-specific MCP yöneticileri korunuyor; canonical servislerin application bootstrap'a bağlanması kademeli migration kapsamında sonraki fazlarla tamamlanacaktır.
