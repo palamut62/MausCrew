@@ -81,5 +81,7 @@ Phase 1 başlamadan SQLite library seçimi, schema migration/backup stratejisi v
 - Structured handoff pending/accepted/completed/rejected lifecycle, evidence persistence ve legacy delegation adapter ile eklendi.
 - Phase 4 tamamlandı: MCP Tool Manager, built-in filesystem/shell/git/search/test/todo araçları, workspace isolation, bounded output, process-tree cancellation ve boundary-level permission/approval enforcement eklendi.
 - Approval ve tool call kayıtları SQLite'a taşındı; approval exact-call hash ile bağlanır ve yalnız bir kez tüketilebilir.
+- Phase 5 tamamlandı: provider-neutral `AgentProvider` session/send/cancel facade, Codex/Claude Code/Goose adaptörleri ve first-class `goose acp` driver eklendi.
+- Custom provider'lar mevcut `ProviderInstance` kontratı üzerinden aynı facade'a bağlanabilir; Crew Core provider protokolü bilmez.
 - Event registry Phase 3 task/handoff lifecycle event'leriyle 34 tipe genişledi.
 - Mevcut workflow, delegation ve provider-specific MCP yöneticileri korunuyor; canonical servislerin application bootstrap'a bağlanması kademeli migration kapsamında sonraki fazlarla tamamlanacaktır.
