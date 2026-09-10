@@ -150,6 +150,39 @@ const MIGRATIONS = [
       UNIQUE (handoff_id, ordinal)
     ) STRICT;
   `,
+  `
+    CREATE TABLE IF NOT EXISTS approvals (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+      session_id TEXT,
+      task_id TEXT,
+      action TEXT NOT NULL,
+      arguments_hash TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'rejected', 'changes_requested')),
+      reason TEXT,
+      created_at TEXT NOT NULL,
+      decided_at TEXT,
+      decided_by TEXT
+    ) STRICT;
+    CREATE INDEX IF NOT EXISTS approvals_project_status_idx ON approvals(project_id, status, created_at);
+
+    CREATE TABLE IF NOT EXISTS tool_calls (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+      session_id TEXT,
+      task_id TEXT,
+      tool TEXT NOT NULL,
+      arguments_json TEXT NOT NULL CHECK (json_valid(arguments_json)),
+      status TEXT NOT NULL CHECK (status IN ('started', 'completed', 'failed', 'cancelled')),
+      result_json TEXT CHECK (result_json IS NULL OR json_valid(result_json)),
+      error TEXT,
+      started_at TEXT NOT NULL,
+      ended_at TEXT
+    ) STRICT;
+    CREATE INDEX IF NOT EXISTS tool_calls_agent_started_idx ON tool_calls(agent_id, started_at);
+  `,
 ] as const;
 
 export class CrewDatabase {
