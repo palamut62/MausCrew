@@ -38,6 +38,16 @@ export class ApprovalService {
     this.bus.publish(event); return approval;
   }
 
+  cancelPending(id: string, reason: string): ToolApproval {
+    const current = this.get(id); if (!current || current.status !== "pending") throw new Error(`Approval is not pending: ${id}`);
+    const decidedAt = new Date().toISOString(); let approval!: ToolApproval; let event!: CrewEvent;
+    this.database.transaction(() => {
+      this.database.db.prepare("UPDATE approvals SET status = 'rejected', reason = ?, decided_at = ?, decided_by = 'system' WHERE id = ? AND status = 'pending'").run(reason, decidedAt, id);
+      approval = this.get(id)!; event = this.#record("approval.rejected", approval, "system", "workflow-engine");
+    });
+    this.bus.publish(event); return approval;
+  }
+
   get(id: string): ToolApproval | undefined {
     const row = this.database.db.prepare("SELECT * FROM approvals WHERE id = ?").get(id) as unknown as Row | undefined;
     return row ? { id: row.id, projectId: row.project_id, agentId: row.agent_id, ...(row.session_id ? { sessionId: row.session_id } : {}), ...(row.task_id ? { taskId: row.task_id } : {}), action: row.action, argumentsHash: row.arguments_hash, status: row.status, ...(row.reason ? { reason: row.reason } : {}), createdAt: row.created_at, ...(row.decided_at ? { decidedAt: row.decided_at } : {}), ...(row.decided_by ? { decidedBy: row.decided_by } : {}), ...(row.consumed_at ? { consumedAt: row.consumed_at } : {}) } : undefined;
