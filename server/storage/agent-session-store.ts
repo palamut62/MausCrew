@@ -53,6 +53,11 @@ export class AgentSessionStore {
     return rows.map((row) => this.#fromRow(row));
   }
 
+  latestForAgent(agentId: string): AgentSession | null {
+    const row = this.database.db.prepare("SELECT * FROM agent_sessions WHERE agent_id = ? ORDER BY started_at DESC, rowid DESC LIMIT 1").get(agentId) as unknown as SessionRow | undefined;
+    return row ? this.#fromRow(row) : null;
+  }
+
   heartbeat(id: string, timestamp: string): boolean {
     return this.database.db
       .prepare("UPDATE agent_sessions SET last_heartbeat_at = ? WHERE id = ? AND ended_at IS NULL")

@@ -54,6 +54,15 @@ export class CrewEventStore {
     return rows.map((row) => ({ sequence: row.sequence, event: this.#fromRow(row) }));
   }
 
+  recent(input: { projectId: string; limit?: number }): StoredCrewEvent[] {
+    const limit = Math.min(Math.max(input.limit ?? 100, 1), 1_000);
+    const rows = this.database.db.prepare(`
+      SELECT sequence, id, project_id, event_type, actor_type, actor_id, payload_json, correlation_id, causation_id, created_at
+      FROM events WHERE project_id = ? ORDER BY sequence DESC LIMIT ?
+    `).all(input.projectId, limit) as unknown as Array<EventRow & { sequence: number }>;
+    return rows.reverse().map((row) => ({ sequence: row.sequence, event: this.#fromRow(row) }));
+  }
+
   #fromRow(row: EventRow): CrewEvent {
     return {
       id: row.id,
