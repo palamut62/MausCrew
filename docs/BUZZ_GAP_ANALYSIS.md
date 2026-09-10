@@ -79,5 +79,7 @@ Phase 1 başlamadan SQLite library seçimi, schema migration/backup stratejisi v
 - Phase 2 tamamlandı: persistent isolated sessions, heartbeat/stale detection, bounded priority inbox, wakeup router ve hierarchical cancellation.
 - Phase 3 tamamlandı: canonical SQLite task/dependency DAG, cycle guard, ready-set, concurrency-limited scheduler, Supervisor plan materialization ve stalled-task recovery eklendi.
 - Structured handoff pending/accepted/completed/rejected lifecycle, evidence persistence ve legacy delegation adapter ile eklendi.
+- Phase 4 tamamlandı: MCP Tool Manager, built-in filesystem/shell/git/search/test/todo araçları, workspace isolation, bounded output, process-tree cancellation ve boundary-level permission/approval enforcement eklendi.
+- Approval ve tool call kayıtları SQLite'a taşındı; approval exact-call hash ile bağlanır ve yalnız bir kez tüketilebilir.
 - Event registry Phase 3 task/handoff lifecycle event'leriyle 34 tipe genişledi.
-- Mevcut workflow ve delegation JSON yöneticileri korunuyor; yeni canonical servislerin application bootstrap'a bağlanması kademeli migration kapsamında sonraki fazlarla tamamlanacaktır.
+- Mevcut workflow, delegation ve provider-specific MCP yöneticileri korunuyor; canonical servislerin application bootstrap'a bağlanması kademeli migration kapsamında sonraki fazlarla tamamlanacaktır.
