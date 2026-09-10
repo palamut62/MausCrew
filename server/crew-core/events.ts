@@ -30,6 +30,7 @@ export const CREW_EVENT_TYPES = [
   "workflow.started",
   "workflow.completed",
   "workflow.failed",
+  "workflow.cancelled",
   "git.commit_created",
   "git.review_requested",
   "git.review_completed",

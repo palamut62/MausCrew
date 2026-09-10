@@ -186,6 +186,49 @@ const MIGRATIONS = [
   `
     ALTER TABLE approvals ADD COLUMN consumed_at TEXT;
   `,
+  `
+    CREATE TABLE IF NOT EXISTS workflow_definitions (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      trigger_type TEXT NOT NULL,
+      yaml TEXT NOT NULL,
+      definition_json TEXT NOT NULL CHECK (json_valid(definition_json)),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    ) STRICT;
+
+    CREATE TABLE IF NOT EXISTS workflow_runs (
+      id TEXT PRIMARY KEY,
+      definition_id TEXT NOT NULL REFERENCES workflow_definitions(id) ON DELETE RESTRICT,
+      project_id TEXT NOT NULL,
+      owner_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+      status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'waiting_approval', 'completed', 'failed', 'cancelled')),
+      error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      completed_at TEXT
+    ) STRICT;
+    CREATE INDEX IF NOT EXISTS workflow_runs_project_status_idx ON workflow_runs(project_id, status, updated_at);
+
+    CREATE TABLE IF NOT EXISTS workflow_steps (
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
+      step_key TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK (kind IN ('agent', 'approval')),
+      agent_role TEXT,
+      task TEXT,
+      status TEXT NOT NULL CHECK (status IN ('pending', 'ready', 'running', 'waiting_approval', 'completed', 'failed', 'cancelled')),
+      depends_on_json TEXT NOT NULL CHECK (json_valid(depends_on_json)),
+      approval_id TEXT REFERENCES approvals(id) ON DELETE RESTRICT,
+      output_json TEXT CHECK (output_json IS NULL OR json_valid(output_json)),
+      error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE (run_id, step_key)
+    ) STRICT;
+    CREATE INDEX IF NOT EXISTS workflow_steps_ready_idx ON workflow_steps(run_id, status, created_at);
+  `,
 ] as const;
 
 export class CrewDatabase {

@@ -6,7 +6,7 @@ describe("CrewDatabase", () => {
   it("applies schema migrations once and enables integrity constraints", () => {
     const database = new CrewDatabase(":memory:");
     try {
-      expect(database.db.prepare("SELECT version FROM schema_migrations").all()).toEqual([{ version: 1 }, { version: 2 }, { version: 3 }, { version: 4 }, { version: 5 }]);
+      expect(database.db.prepare("SELECT version FROM schema_migrations").all()).toEqual([{ version: 1 }, { version: 2 }, { version: 3 }, { version: 4 }, { version: 5 }, { version: 6 }]);
       expect(database.db.prepare("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
     } finally {
       database.close();
