@@ -1,4 +1,5 @@
 import { validRecords } from "./recovery.ts";
+import { validBotRecords, validGroupRecords } from "./store.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -29,7 +30,9 @@ export function validateBackup(value: unknown): Backup {
       let parsed: unknown;
       try { parsed = JSON.parse(f.text); } catch { throw fail(); }
       if (!parsed || typeof parsed !== "object") throw fail();
-      if (/^(bots|groups|projects|workflows|review-queue)\.json$/.test(f.path) && !validRecords(parsed)) throw fail();
+      if (/^(projects|workflows|review-queue)\.json$/.test(f.path) && !validRecords(parsed)) throw fail();
+      if (f.path === "bots.json" && !validBotRecords(parsed)) throw fail();
+      if (f.path === "groups.json" && !validGroupRecords(parsed)) throw fail();
       if (f.path.startsWith("messages-") && !validRecords(parsed) && !validRecords((parsed as { messages?: unknown }).messages)) throw fail();
     }
   }

@@ -273,6 +273,28 @@ export interface BotRecord {
   createdAt: number;
 }
 
+const isString = (value: unknown): value is string => typeof value === "string";
+const isStringList = (value: unknown) => Array.isArray(value) && value.every(isString);
+
+/** bots.json rows carrying every field the load path dereferences. `validRecords`
+ * alone let `[{"id":"x"}]` through, and the constructor then crashed on it
+ * instead of locking the file for the recovery center. */
+export function validBotRecords(value: unknown): boolean {
+  return validRecords(value) && (value as Array<Record<string, unknown>>).every((b) => {
+    const selection = b.modelSelection as Record<string, unknown> | null;
+    return isString(b.threadId) && isString(b.name)
+      && !!selection && typeof selection === "object" && isString(selection.instanceId)
+      && (b.tasks === undefined || (Array.isArray(b.tasks) && b.tasks.every((t) => !!t && typeof t === "object" && isString(t.threadId))))
+      && (b.alwaysAllow === undefined || isStringList(b.alwaysAllow));
+  });
+}
+
+/** groups.json rows: see validBotRecords. */
+export function validGroupRecords(value: unknown): boolean {
+  return validRecords(value) && (value as Array<Record<string, unknown>>).every((g) =>
+    isString(g.threadId) && isString(g.name) && isStringList(g.memberIds));
+}
+
 const BOTS_FILE = join(DATA_DIR, "bots.json");
 const GROUPS_FILE = join(DATA_DIR, "groups.json");
 const messagesFile = (threadId: string) => join(DATA_DIR, `messages-${threadId}.json`);
@@ -397,12 +419,12 @@ export class Store {
     this.defaultSelection = defaultSelection;
     mkdirSync(DATA_DIR, { recursive: true });
     try {
-      this.bots = readManagedJson<BotRecord[]>(BOTS_FILE, [], validRecords);
+      this.bots = readManagedJson<BotRecord[]>(BOTS_FILE, [], validBotRecords);
     } catch {
       this.bots = [];
     }
     try {
-      this.groups = readManagedJson<GroupRecord[]>(GROUPS_FILE, [], validRecords);
+      this.groups = readManagedJson<GroupRecord[]>(GROUPS_FILE, [], validGroupRecords);
     } catch {
       this.groups = [];
     }

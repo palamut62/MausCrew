@@ -326,6 +326,17 @@ describe("Store", () => {
     expect(readFileSync(join(DATA_DIR, "bots.json"), "utf8")).toBe("{not json");
   });
 
+  it("locks a groups.json room missing its fields instead of crashing on load", () => {
+    const store = new Store(selection);
+    store.createBot();
+    writeFileSync(join(DATA_DIR, "groups.json"), '[{"id":"room-only-id"}]');
+
+    const reloaded = new Store(selection);
+    expect(reloaded.groups).toEqual([]);
+    expect(() => reloaded.createGroup("Room", [])).toThrow();
+    expect(readFileSync(join(DATA_DIR, "groups.json"), "utf8")).toBe('[{"id":"room-only-id"}]');
+  });
+
   it("busy is wiped even when bots.json says otherwise", () => {
     const store = new Store(selection);
     const bot = store.createBot();

@@ -6,7 +6,7 @@ import { expect, it } from "vitest";
 import { createBackup, stageRestore, restorePending, validateBackup } from "./backups.ts";
 it("round trips app records without credentials and checks hashes and paths", () => {
   const root = mkdtempSync(join(tmpdir(), "backups-"));
-  writeFileSync(join(root, "bots.json"), '[{"id":"saved"}]');
+  writeFileSync(join(root, "bots.json"), '[{"id":"saved","threadId":"t1","name":"Bot","modelSelection":{"instanceId":"claude","model":"m"}}]');
   writeFileSync(join(root, "config.json"), '{"apiKey":"fixture-private"}');
   writeFileSync(join(root, "webhooks.json"), '{"signingSecret":"fixture-private"}');
   const backup = createBackup(root);
@@ -17,10 +17,15 @@ it("round trips app records without credentials and checks hashes and paths", ()
   expect(() => validateBackup(escape)).toThrow();
   const malformed = structuredClone(backup); malformed.files[0]!.text = "[null]"; malformed.files[0]!.sha256 = createHash("sha256").update("[null]").digest("hex");
   expect(() => validateBackup(malformed)).toThrow();
-  writeFileSync(join(root, "bots.json"), '[{"id":"current"}]');
+  writeFileSync(join(root, "bots.json"), '[{"id":"current","threadId":"t1","name":"Bot","modelSelection":{"instanceId":"claude","model":"m"}}]');
   stageRestore(backup, root);
   expect(readFileSync(join(root, "bots.json"), "utf8")).toContain("current");
   expect(restorePending(root)).toBe(true);
   expect(readFileSync(join(root, "bots.json"), "utf8")).toContain("saved");
   expect(restorePending(root)).toBe(false);
+});
+it("rejects a backup whose room rows would crash the store on load", () => {
+  const root = mkdtempSync(join(tmpdir(), "backups-"));
+  writeFileSync(join(root, "groups.json"), '[{"id":"room-only-id"}]');
+  expect(() => createBackup(root)).toThrow();
 });
