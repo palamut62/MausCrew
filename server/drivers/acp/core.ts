@@ -56,7 +56,7 @@ export interface AcpConfig {
 export interface AcpSupport {
   driverKind: string;
   displayName: string;
-  models: { default: string; options: Array<{ id: string; label: string }> };
+  models: ModelCatalog;
   /** Effort levels this harness's CLI accepts, ascending. Omit when it has
    * no reasoning-effort control. Static for the same reason `models` is:
    * describe() runs before any session exists, so there is no _meta to read

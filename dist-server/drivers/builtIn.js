@@ -8,6 +8,7 @@ import { GeminiAgentDriver } from "./acp/gemini.js";
 import { KimiAgentDriver } from "./acp/kimi.js";
 import { DroidAgentDriver } from "./acp/droid.js";
 import { OpenCodeGoDriver } from "./acp/opencode-go.js";
+import { GooseAgentDriver } from "./acp/goose.js";
 import { DeepSeekHarnessDriver } from "./deepseek-harness.js";
 import { AguiDriver } from "./agui.js";
 export const BUILT_IN_DRIVERS = [
@@ -17,6 +18,7 @@ export const BUILT_IN_DRIVERS = [
     KimiAgentDriver,
     DroidAgentDriver,
     OpenCodeGoDriver,
+    GooseAgentDriver,
     ClaudeDriver,
     CodexDriver,
     AntigravityDriver,
