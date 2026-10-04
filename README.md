@@ -8,19 +8,21 @@
 
 <sub>Bring your own agent · local-first · runs on the models you already pay for.</sub>
 
-Every bot in the sidebar is a real agent — Claude, Codex, Grok, or DeepSeek Harness running locally under
-the hood — with its own personality, its own model, its own cloud computer, and its own connected apps.
+Every bot in the sidebar is a real agent — Claude, Codex, Grok, Kimi, Droid, Antigravity, OpenCode Go, or
+DeepSeek Harness running locally under the hood — with its own personality, its own model, its own cloud computer, and its own connected apps.
 Talk to them like contacts. Watch them work. Approve what matters.
 
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
 ![Electron](https://img.shields.io/badge/Electron-macOS%20%C2%B7%20Windows%20%C2%B7%20Ubuntu-2B2E3A?logo=electron&logoColor=9FEAF9)
-![Agents](https://img.shields.io/badge/agents-Claude%20·%20Codex%20·%20Grok%20·%20DeepSeek-d97757)
+![Agents](https://img.shields.io/badge/agents-Claude%20·%20Codex%20·%20Grok%20·%20Kimi%20·%20Droid%20·%20DeepSeek-d97757)
+![Version](https://img.shields.io/badge/version-0.1.54-38d591)
+![License](https://img.shields.io/badge/license-MIT-blue)
 ![PRs](https://img.shields.io/badge/PRs-welcome-38d591)
 
 <br>
 
-<sub>Private development repository · desktop packages can be built for macOS, Windows, and Ubuntu.</sub>
+<sub>Open source (MIT) · desktop builds for macOS, Windows, and Ubuntu · <a href="https://github.com/palamut62/mauscrew-releases/releases/latest"><strong>Download the latest release</strong></a></sub>
 
 <br>
 
@@ -42,9 +44,10 @@ different models, different machines, each holding the memory of its own thread.
 the shape we already use for people: a messaging app. Every chat is a bot with its own personality, model,
 computer, and connected apps — and it all runs on your machine, on the agents you already have:
 
-- **Bring your own agents.** Bots run on the `claude`, `codex`, and `grok` CLIs installed on your own machine,
-  or on DeepSeek's own runtime via DeepSeek Harness — your existing logins and subscriptions, no new
-  accounts, no proxy in the middle.
+- **Bring your own agents.** Bots run on the agent CLIs already installed on your own machine — `claude`,
+  `codex`, `grok`, `kimi`, `droid`, Antigravity's `agy`, and `opencode` (OpenCode Go) — or on DeepSeek's own
+  runtime via DeepSeek Harness. Your existing logins and subscriptions, no new accounts, no proxy in the
+  middle.
 - **Any Anthropic-compatible gateway.** Point the Claude engine at Anthropic directly, or configure one or
   more Anthropic-compatible gateways from Settings; each configured gateway shows up as its own engine in
   the model picker with its own model list, instead of masquerading as Claude.
@@ -208,6 +211,43 @@ delivery task and records sent/failed history instead of silently treating a dra
 New blank bots also derive a one-time role, name, description, colour, and avatar shape from their first real
 task. Editing the profile switches that bot to an explicit user-owned identity and disables automatic naming.
 
+### ✅ Work that is remembered, handed off, and proven
+
+Every task keeps its own memory: the decisions made, the files produced, the results that were verified,
+and what is still left. Each entry can point back to the message it came from, and can be corrected or
+deleted — corrections survive a restart.
+
+Hand-offs between bots go through a **durable queue** written to disk. After a crash, work whose start is
+uncertain is never silently re-run; it waits for you to review the target bot's output first.
+
+"The bot said it is done" and "you verified it" are two different states. The task card shows the owning
+bot, why it is waiting, the next step, the output, and the verification status side by side, and a
+verification stores its evidence — a test result, a file path, the page that was checked. A built-in
+**bot evaluation** runs the same scenarios against different engines and measures time and real token use;
+an engine merely answering does not count as a pass — the answer has to meet the scenario's criteria.
+
+### 🛟 Recovery, backups, and usage limits
+
+A corrupt data file no longer locks the app: it is quarantined, writes are paused, and the **Recovery
+Center** (Settings → **Kurtarma**) walks you through it. Core records can be exported, previewed, and restored (the
+restore is staged and applied on the next start). **Usage limits** (Settings → **Kullanım sınırları**) cap tokens and turns per day and per
+task — a turn that would start over the limit is refused, and one that crosses it mid-way is stopped.
+Settings also gains **search** across message history (**Mesajlarda ara**).
+
+### 💬 Two-way Telegram
+
+Pair a Telegram bot (token from [@BotFather](https://t.me/BotFather)) and Telegram becomes a control
+surface, not just a report channel. A message from the paired chat becomes work: Chief MAUS picks the MAUS
+whose role fits, and a busy bot gets the work queued behind its current turn instead of a duplicate bot.
+Replying continues the same task; approval cards arrive as buttons (except credential requests, which stay
+in the app). Reports the bot wrote as PDFs or spreadsheets are sent as documents. Telegram uses long
+polling, so no tunnel or relay sees your messages — the trade-off is that it only listens while MausCrew is
+running. Creating new bots from Telegram is a separate, off-by-default permission.
+
+Bots answer in the language you write to them in and switch when you do, leaving code, paths, and command
+output untouched. Files a turn produced can be downloaded straight from the transcript — also from a paired
+phone — and only when they resolve inside a workspace that turn was actually working in.
+
 ## How it works
 
 Two processes. The app holds no transports of its own — it sends typed commands over HTTP and folds one SSE
@@ -228,20 +268,21 @@ flowchart LR
         CL[claude CLI / gateways]
         CX[codex CLI]
         GR[grok CLI]
+        ACP[kimi · droid · opencode<br/>agy over ACP / stdio]
         DS[DeepSeek Harness runtime]
     end
     UI -- "HTTP commands" --> server
     BUS -- "one SSE stream" --> UI
     ORCH --> BUS
-    REG --> CL & CX & GR & DS
-    CL & CX & GR & DS -- "permission requests" --> BROKER
+    REG --> CL & CX & GR & ACP & DS
+    CL & CX & GR & ACP & DS -- "permission requests" --> BROKER
     server -- "Box API" --> BOX[("Cloud computer<br/>box.ascii.dev")]
     server -- "Composio Session" --> APPS[("Gmail · Slack · GitHub · …")]
 ```
 
 | Layer | Where | What it does |
 |---|---|---|
-| Drivers | `server/drivers/` | One per provider: Claude (direct or any configured Anthropic-compatible gateway, each its own engine), Codex, and Grok Build over their local CLIs (stream-JSON / JSON-RPC / ACP); DeepSeek Harness drives DeepSeek's own JSON-RPC runtime directly (no CLI); plus a cloud-computer agent. Unknown drivers degrade to "unavailable", never crash the fleet. |
+| Drivers | `server/drivers/` | One per provider: Claude (direct or any configured Anthropic-compatible gateway, each its own engine), Codex, Grok Build, Kimi Code, Factory Droid, OpenCode Go, and Antigravity over their local CLIs (stream-JSON / JSON-RPC / ACP); DeepSeek Harness drives DeepSeek's own JSON-RPC runtime directly (no CLI); plus a cloud-computer agent. Unknown drivers degrade to "unavailable", never crash the fleet. |
 | Harness | `server/harness/` | Registry (configs → live instances) and the fan-in event bus every client folds. |
 | API | `server/index.ts` | Bots, turns, approvals, model catalog, computer lifecycle, connectors, config — HTTP + SSE. |
 | Voice | `server/tts/` | ElevenLabs, bring your own key. Runs on the harness so the key never reaches the UI; markdown is rewritten into something worth hearing before it is spoken. |
@@ -250,8 +291,13 @@ flowchart LR
 
 ## Quick start
 
-The repository is private. Authorized collaborators can run it from source; the harness server is embedded
-when a desktop package is built.
+**Just want to use it?** Grab the installer for your platform from the
+[releases page](https://github.com/palamut62/mauscrew-releases/releases/latest). Installed apps update
+themselves from the same feed. The Windows installer is not code-signed yet, so SmartScreen shows "unknown
+publisher" on first run.
+
+**Running from source:** the harness server is embedded when a desktop package is built; in development you
+run it yourself.
 
 ```sh
 git clone https://github.com/palamut62/MausCrew && cd MausCrew
@@ -263,9 +309,10 @@ pnpm dev:desktop   # Electron shell; keep the two commands above running
 ```
 
 Requirements: **macOS, Windows, or Ubuntu 24.04 x64**, **Node 24+**, **pnpm**, and at least one agent CLI — [`claude`](https://claude.com/claude-code),
-[`codex`](https://github.com/openai/codex), or [`grok`](https://x.ai/cli) — installed and logged in. They appear
-in the model picker automatically. DeepSeek Harness needs no CLI — see below — and Claude can also be pointed
-at any Anthropic-compatible gateway from **Settings → API Keys**.
+[`codex`](https://github.com/openai/codex), [`grok`](https://x.ai/cli), `kimi` (Kimi Code), `droid` (Factory),
+`agy` (Antigravity), or [`opencode`](https://opencode.ai/docs/) — installed and logged in. They appear
+in the model picker automatically; an engine whose CLI is missing is shown dimmed with the reason. DeepSeek Harness needs no CLI — see below — and Claude can also be pointed
+at any Anthropic-compatible gateway from **Settings → Connections**.
 
 ### DeepSeek Harness (optional engine)
 
@@ -350,6 +397,13 @@ in the sidebar footer) when you want to enable its integration:
 | Composio project key (`ak_…`) | Connect Gmail, GitHub, Slack, Notion, and other apps to your bots | [MausCrew Composio setup](docs/composio.md) |
 | Box API key | Give bots an isolated remote Linux computer with a desktop and terminal | [Box API key guide](https://docs.ascii.dev/box/api-keys) |
 | ElevenLabs key | Read replies aloud, and call your bots | [ElevenLabs API keys](https://elevenlabs.io/app/settings/api-keys) |
+| Telegram bot token | Two-way Telegram: send work, get reports, answer approvals | [@BotFather](https://t.me/BotFather) |
+| DeepSeek API key | The DeepSeek Harness engine (disabled until a key is set) | [DeepSeek platform](https://platform.deepseek.com/api_keys) |
+| OpenCode Go key | The OpenCode Go engine | [MausCrew OpenCode Go setup](docs/opencode-go.md) |
+
+Every credential is stored locally under `~/.mauscrew` and is write-only from the UI: the app only ever sees
+"configured", never the value, and keys never reach the UI or analytics. No key is shipped
+in this repository — you bring your own.
 
 Composio and Box are third-party services with their own accounts and terms. Box is a paid service after
 its trial, and using a cloud computer may incur charges.
@@ -414,6 +468,11 @@ events and approval cards; provider credentials and device administration stay
 desktop-only. The harness continues listening only on loopback and rejects every
 remote host other than the exact configured HTTPS origin.
 
+The phone picks its own layout from its own settings (**Görünüm**), stored per device: **Decision rail** (the
+default — one decision at a time, with a rail of bot strips behind it), **Monospace zen** (a dark console with
+live counters, a process roster, an event stream, and an `@bot command` line), or the simple command view.
+Each answers approvals and questions in place, without opening the chat.
+
 The phone owns its own reconnection — it wakes the stream on resume, resumes
 from a cursor rather than re-downloading transcripts, declines live desktop
 captures unless the computer panel is open, and shows a banner with a retry
@@ -443,7 +502,7 @@ that refuses it machine-wide and the in-app toggle cannot re-enable it.
 
 ## Status
 
-Early but real — the loop works end to end: message → agent → streamed reply → tools → approvals →
+Current version: **0.1.54**. Early but real — the loop works end to end: message → agent → streamed reply → tools → approvals →
 computer use. Desktop packaging is configured for macOS, Windows, and Ubuntu 24.04 x64 with the capability
 limits above. Rough edges to expect: hosted/mobile connectivity is still being built, and webhook
 triggers currently use the local receiver rather than an always-on hosted relay
@@ -451,7 +510,8 @@ triggers currently use the local receiver rather than an always-on hosted relay
 Voice needs an ElevenLabs key, and calls are macOS-only for now (they ride the same on-device dictation as
 the composer mic) — see [`docs/voice-mode.md`](docs/voice-mode.md) for the design and the known gaps.
 
-Contributions welcome — the driver SPI in [`server/contracts.ts`](server/contracts.ts) is deliberately
+Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md), and report security issues privately as
+described in [SECURITY.md](SECURITY.md). The driver SPI in [`server/contracts.ts`](server/contracts.ts) is deliberately
 small; adding a provider is one file in [`server/drivers/`](server/drivers/) plus a one-line registration.
 
 ## License

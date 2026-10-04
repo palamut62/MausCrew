@@ -41,7 +41,3 @@ opencode.json
 .github/copilot-instructions.md
 .specstory/
 .continue/
-
-# Third-party derived mascot geometry (see the header in the file). Tracked on
-# purpose so the app builds, but it is the one thing that must be replaced
-# before this repository or any installer goes to anyone else.

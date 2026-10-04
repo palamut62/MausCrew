@@ -3,7 +3,7 @@
 Bu dosya **kendi kendine yeterlidir**: onu okuyan araç, önceki konuşmaya erişmeden işi yapabilir.
 Bulguların nasıl elde edildiği ve kanıtları: [`TEST-SWEEP.md`](./TEST-SWEEP.md).
 
-- **Depo:** `C:\Users\umuti\Projects\opendeepseekhearnesmanusbot\MausCrew` (kendi git deposu)
+- **Depo:** `<repo-yolu>\MausCrew` (kendi git deposu)
 - **Çalışma ağacı:** commit edilmemiş değişiklikler var (test turunda 24 doğrulanmış düzeltme/iyileştirme var).
 - **Güncel yeşil taban çizgisi (2 Eyl):**
   `npx vitest run` → **1055 passed / 16 skipped / 0 failed**,
@@ -21,9 +21,9 @@ Bulguların nasıl elde edildiği ve kanıtları: [`TEST-SWEEP.md`](./TEST-SWEEP
 ## Test rig'i (canlı doğrulama gerektiğinde)
 
 ```bash
-mkdir -p /c/Users/umuti/AppData/Local/Temp/mc-rig
-cd "C:/Users/umuti/Projects/opendeepseekhearnesmanusbot/MausCrew"
-MAUSCREW_DATA_DIR=/c/Users/umuti/AppData/Local/Temp/mc-rig MAUSCREW_PORT=8899 MAUSCREW_WEBHOOK_PORT=8901 \
+mkdir -p /c/Users/<kullanici>/AppData/Local/Temp/mc-rig
+cd "<repo-yolu>/MausCrew"
+MAUSCREW_DATA_DIR=/c/Users/<kullanici>/AppData/Local/Temp/mc-rig MAUSCREW_PORT=8899 MAUSCREW_WEBHOOK_PORT=8901 \
   node --experimental-strip-types server/index.ts &          # harness
 MAUSCREW_PORT=8899 npx vite --port 5299 --strictPort &        # arayüz
 node test-sweep/scripts/probe1.mjs                            # örnek probe
