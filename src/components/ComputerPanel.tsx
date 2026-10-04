@@ -15,6 +15,7 @@ import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { screenPoint } from "@/lib/screen-coords";
 import { keysymFor } from "@/lib/keysym";
 import { RoutineEditor } from "./RoutinesPage";
+import { confirmDialog } from "@/lib/confirm";
 
 async function api(path: string, init?: RequestInit): Promise<any> {
   const res = await fetch(path, { headers: { "content-type": "application/json" }, ...init });
@@ -410,11 +411,11 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
       .finally(() => setPending(null));
   };
 
-  const manageCloud = (kind: "reset" | "destroy") => {
-    const prompt = kind === "reset"
-      ? `Reset ${bot.name}'s cloud computer? Its current disk and browser profile will be permanently replaced.`
-      : `Delete ${bot.name}'s cloud computer? Its disk, files, and browser profile cannot be recovered.`;
-    if (!window.confirm(prompt)) return;
+  const manageCloud = async (kind: "reset" | "destroy") => {
+    const confirmed = await confirmDialog(kind === "reset"
+      ? { title: `Reset ${bot.name}'s cloud computer?`, message: "Its current disk and browser profile will be permanently replaced.", confirmLabel: "Reset", danger: true }
+      : { title: `Delete ${bot.name}'s cloud computer?`, message: "Its disk, files, and browser profile cannot be recovered.", confirmLabel: "Delete", danger: true });
+    if (!confirmed) return;
     setPending(kind);
     setError(null);
     api(`/api/bots/${bot.id}/computer/${kind}`, { method: "POST" })

@@ -1,11 +1,11 @@
 // Config + data dirs. One file, ~/.mauscrew/config.json, env fallbacks:
 //   { "xai": {"key":"xai-…"}, "composio": {"apiKey":"ak_…"}, "box": {"token":"…"},
 //     "instances": { "<instanceId>": {"driver":"grok", …} } }
-import { readFileSync, mkdirSync, existsSync, renameSync } from "node:fs";
+import { mkdirSync, existsSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import { writeFileAtomic } from "./atomic.ts";
+import { readManagedJson, writeManagedJson } from "./recovery.ts";
 import type { InstanceConfigMap } from "./contracts.ts";
 
 export interface ClaudeGateway {
@@ -199,13 +199,13 @@ export function ensureDirs() {
   for (const dir of [DATA_DIR, EVENTS_DIR, NATIVE_DIR]) mkdirSync(dir, { recursive: true });
 }
 
+const isConfigObject = (value: unknown) => !!value && typeof value === "object" && !Array.isArray(value);
+
 export function loadConfig(): AppConfig {
-  let cfg: AppConfig = {};
-  try {
-    cfg = JSON.parse(readFileSync(join(DATA_DIR, "config.json"), "utf8"));
-  } catch {
-    /* first run — env fallbacks below */
-  }
+  // Only a missing file is a first run. A damaged one is quarantined and
+  // write-locked by the recovery layer; treating it as empty let the next
+  // single-setting save replace every other setting in it.
+  const cfg = readManagedJson<AppConfig>(join(DATA_DIR, "config.json"), {}, isConfigObject);
   cfg.xai = { key: process.env.XAI_API_KEY, ...cfg.xai };
   cfg.composio = {
     ...cfg.composio,
@@ -223,12 +223,7 @@ export function loadConfig(): AppConfig {
  * echoed back — callers report configured-or-not booleans only). */
 export function saveConfig(patch: Partial<AppConfig>): void {
   const p = join(DATA_DIR, "config.json");
-  let disk: Record<string, unknown> = {};
-  try {
-    disk = JSON.parse(readFileSync(p, "utf8"));
-  } catch {
-    /* first write */
-  }
+  const disk = readManagedJson<Record<string, unknown>>(p, {}, isConfigObject);
   for (const key of [
     "xai",
     "composio",
@@ -269,8 +264,8 @@ export function saveConfig(patch: Partial<AppConfig>): void {
     if (sharedWorkspacePath) disk.sharedWorkspacePath = sharedWorkspacePath;
     else delete disk.sharedWorkspacePath;
   }
-  mkdirSync(DATA_DIR, { recursive: true });
-  writeFileAtomic(p, JSON.stringify(disk, null, 2), { mode: 0o600 });
+  // Refuses (423) while config.json is damaged, and keeps a .lastgood copy.
+  writeManagedJson(p, disk);
 }
 
 // Default fleet: one instance per built-in driver (upstream

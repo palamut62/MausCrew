@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ArrowClockwise, LinkSimple, X } from "@phosphor-icons/react";
 import { Spin } from "./Spin";
 import { api, useStore } from "@/state/store";
+import { confirmDialog } from "@/lib/confirm";
 
 interface ProfileStatus {
   profilePath: string;
@@ -125,8 +126,8 @@ function ProfileSignIn() {
       {status.exists && (
         <button
           disabled={busy || status.signingIn}
-          onClick={() => {
-            if (window.confirm("Sign this browser out of everything? Every session in MausCrew's profile is deleted.")) {
+          onClick={async () => {
+            if (await confirmDialog({ title: "Sign this browser out of everything?", message: "Every session in MausCrew's profile is deleted.", confirmLabel: "Sign out", danger: true })) {
               void post("forget");
             }
           }}

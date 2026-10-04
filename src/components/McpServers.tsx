@@ -3,6 +3,7 @@ import { Spin } from "./Spin";
 import { CaretDown, CaretRight, CheckCircle, Flask, Plus, Trash, WarningCircle } from "@phosphor-icons/react";
 
 import { useStore, type ConfigStatus } from "@/state/store";
+import { confirmDialog } from "@/lib/confirm";
 
 type Server = NonNullable<ConfigStatus["mcpServers"]>[number];
 
@@ -127,7 +128,7 @@ export function McpServers() {
   };
 
   const remove = async (server: Server) => {
-    if (!window.confirm(`Remove MCP server ${server.name}?`)) return;
+    if (!(await confirmDialog({ title: `Remove MCP server ${server.name}?`, confirmLabel: "Remove", danger: true }))) return;
     setBusy(`remove:${server.id}`);
     setMessage(null);
     try {

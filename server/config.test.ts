@@ -1,6 +1,9 @@
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { claudeGateways, gatewayInstanceId, instanceConfigs, type AppConfig } from "./config.ts";
+import { claudeGateways, DATA_DIR, gatewayInstanceId, instanceConfigs, loadConfig, saveConfig, type AppConfig } from "./config.ts";
+import { needsRecovery } from "./recovery.ts";
 
 describe("OpenCode Go configuration", () => {
   it("injects the key only into OpenCode Go instances", () => {
@@ -122,5 +125,29 @@ describe("Claude gateways", () => {
       instances: { "claude-deepseek": { driver: "claudeAgent", config: { baseUrl: "https://mine.example" } } },
     });
     expect((instances["claude-deepseek"].config as { baseUrl: string }).baseUrl).toBe("https://mine.example");
+  });
+});
+
+describe("config.json on disk", () => {
+  const file = join(DATA_DIR, "config.json");
+
+  it("round-trips a save and keeps a last-good copy", () => {
+    mkdirSync(DATA_DIR, { recursive: true });
+    rmSync(file, { force: true });
+    saveConfig({ profile: { name: "Ada" } });
+    saveConfig({ analytics: { enabled: false } });
+    expect(loadConfig()).toMatchObject({ profile: { name: "Ada" }, analytics: { enabled: false } });
+    expect(JSON.parse(readFileSync(`${file}.lastgood`, "utf8"))).toMatchObject({ profile: { name: "Ada" } });
+  });
+
+  it("locks a damaged file instead of overwriting the settings in it", () => {
+    mkdirSync(DATA_DIR, { recursive: true });
+    const damaged = '{"profile": {"name": "Ada"}, "telegram": {"botToken": "kept"';
+    writeFileSync(file, damaged);
+    expect(loadConfig().profile).toBeUndefined();
+    expect(needsRecovery(file)).toBe(true);
+    expect(() => saveConfig({ analytics: { enabled: false } })).toThrow(expect.objectContaining({ status: 423 }));
+    expect(readFileSync(file, "utf8")).toBe(damaged);
+    expect(existsSync(join(DATA_DIR, ".recovery"))).toBe(true);
   });
 });

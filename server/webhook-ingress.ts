@@ -101,7 +101,12 @@ function eventName(req: IncomingMessage): string | undefined {
 
 export function createWebhookIngressHandler(manager: WebhookManager) {
   return async (req: IncomingMessage, res: ServerResponse) => {
-    const url = new URL(req.url ?? "/", "http://localhost");
+    let url: URL;
+    try {
+      url = new URL(req.url ?? "/", "http://localhost");
+    } catch {
+      return json(res, 400, { error: "Invalid request URL" });
+    }
     if (req.method === "GET" && url.pathname === "/health") {
       return json(res, 200, { app: "mauscrew-webhooks", ready: true });
     }

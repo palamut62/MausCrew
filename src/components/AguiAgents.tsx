@@ -3,6 +3,7 @@ import { Spin } from "./Spin";
 import { CheckCircle, Flask, Plus, Trash, WarningCircle } from "@phosphor-icons/react";
 
 import { useStore, type ConfigStatus } from "@/state/store";
+import { confirmDialog } from "@/lib/confirm";
 
 type Agent = NonNullable<ConfigStatus["aguiAgents"]>[number];
 
@@ -74,7 +75,7 @@ export function AguiAgents() {
   };
 
   const remove = async (agent: Agent) => {
-    if (!window.confirm(`Remove ${agent.label}? Existing chats stay on disk, but this remote agent will become unavailable.`)) return;
+    if (!(await confirmDialog({ title: `Remove ${agent.label}?`, message: "Existing chats stay on disk, but this remote agent will become unavailable.", confirmLabel: "Remove", danger: true }))) return;
     setBusy(`remove:${agent.id}`);
     setMessage(null);
     try {

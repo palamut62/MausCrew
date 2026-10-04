@@ -13,6 +13,7 @@ import {
 } from "@/lib/webhook-credentials";
 import { webhookActivationDefaults, type WebhookAttempt, type WebhookCredential, type WebhookTrigger, type WebhookTriggerInput } from "@/lib/webhooks";
 import { api, useStore, type Bot } from "@/state/store";
+import { confirmDialog } from "@/lib/confirm";
 
 function relativeTime(at?: number) {
   if (!at) return "Never";
@@ -224,7 +225,7 @@ export function WebhooksPanel({ bots }: { bots: Bot[] }) {
     setError("");
     try {
       if (action === "delete") {
-        if (!window.confirm(`Delete “${webhook.name}”? Existing task history will stay available.`)) return;
+        if (!(await confirmDialog({ title: `Delete “${webhook.name}”?`, message: "Existing task history will stay available.", confirmLabel: "Delete", danger: true }))) return;
         await api(`/api/webhooks/${webhook.id}`, { method: "DELETE" });
         dispatch({ type: "webhookDeleted", webhookId: webhook.id });
         removeWebhookCredential(webhookCredentialStore(), webhook.id);
@@ -247,7 +248,7 @@ export function WebhooksPanel({ bots }: { bots: Bot[] }) {
   };
 
   const createAndCopyCommand = async (webhook: WebhookTrigger, replace = false) => {
-    if (replace && !window.confirm("Replace this private URL? Every previously copied command will stop working.")) return;
+    if (replace && !(await confirmDialog({ title: "Replace this private URL?", message: "Every previously copied command will stop working.", confirmLabel: "Replace", danger: true }))) return;
     setWorking(`${webhook.id}:command`);
     setError("");
     try {
