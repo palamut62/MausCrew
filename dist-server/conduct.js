@@ -5,10 +5,9 @@
 // nothing about how to work, and the difference between a capable model and a
 // good teammate is almost entirely in the second thing.
 //
-// The rules below are adapted from the behavioural prompts in Grok Bot 0.18,
-// which spends most of its prompt budget on conduct rather than inventory.
-// They are deliberately short: a rule the model has to wade through is a rule
-// it will average out with everything else in the context.
+// The prompt budget goes on conduct rather than inventory. The rules are
+// deliberately short: a rule the model has to wade through is a rule it will
+// average out with everything else in the context.
 /**
  * Always-on conduct. Kept to a handful of rules on purpose — this is prepended
  * to every turn, and a page of guidance costs more than it corrects.
@@ -22,12 +21,10 @@ export const CONDUCT_RULES = [
  * Coordinator conduct: how to hand work off without either blocking on it or
  * shattering a task into fragments.
  *
- * Adapted rather than copied. Grok Bot's version tells the agent to delegate
- * anything needing tools, because its subagents are ephemeral and free to the
- * user. Here a peer is another real bot: it costs the user tokens and its turn
- * is visible in the app, so blanket delegation would spend a second budget on
- * every request. The engine's own subagents are the free path, and are named
- * first for exactly that reason.
+ * Delegation is not blanket. Here a peer is another real bot: it costs the
+ * user tokens and its turn is visible in the app, so blanket delegation would
+ * spend a second budget on every request. The engine's own subagents are the
+ * free path, and are named first for exactly that reason.
  */
 export function coordinatorRules(options) {
     if (!options.hasPeers && !options.hasOwnSubagents)

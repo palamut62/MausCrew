@@ -15,11 +15,11 @@ Kullanıcının gerçek verisine **dokunulmaz**; izole bir veri dizini kullanıl
 
 ```bash
 # 1) izole veri dizini + harness (8899) + webhook alıcı (8901)
-mkdir -p /c/Users/umuti/AppData/Local/Temp/mc-rig
-cd "C:/Users/umuti/Projects/opendeepseekhearnesmanusbot/MausCrew"
-MAUSCREW_DATA_DIR=/c/Users/umuti/AppData/Local/Temp/mc-rig \
+mkdir -p /c/Users/<kullanici>/AppData/Local/Temp/mc-rig
+cd "<repo-yolu>/MausCrew"
+MAUSCREW_DATA_DIR=/c/Users/<kullanici>/AppData/Local/Temp/mc-rig \
 MAUSCREW_PORT=8899 MAUSCREW_WEBHOOK_PORT=8901 \
-node --experimental-strip-types server/index.ts > /c/Users/umuti/AppData/Local/Temp/mc-rig/server.log 2>&1 &
+node --experimental-strip-types server/index.ts > /c/Users/<kullanici>/AppData/Local/Temp/mc-rig/server.log 2>&1 &
 
 # 2) arayüz (API proxy'si 8899'a gider)
 MAUSCREW_PORT=8899 npx vite --port 5299 --strictPort
@@ -28,7 +28,7 @@ MAUSCREW_PORT=8899 npx vite --port 5299 --strictPort
 Notlar:
 - Kullanıcının gerçek MausCrew uygulaması 8799/8800'de çalışıyor olabilir — çakışmasın diye 8899/8901.
 - Rig'i kapatma: `netstat -ano | grep -E "127.0.0.1:(8899|8901|5299).*LISTENING"` → `taskkill //PID <pid> //F`.
-- Temizlik: `rm -rf /c/Users/umuti/AppData/Local/Temp/mc-rig`.
+- Temizlik: `rm -rf /c/Users/<kullanici>/AppData/Local/Temp/mc-rig`.
 - Kurulu motorlar (bu makinede): claude 2.1.251, codex 0.151.0, droid, grok, kimi, opencode; docker 29.7.2. gemini/antigravity CLI yok.
 
 ### Probe betikleri
@@ -245,6 +245,6 @@ electron/main.mjs                   — soğuk Windows başlangıcı için 60 sn
 
 ## 6. Temizlik
 ```bash
-rm -rf /c/Users/umuti/AppData/Local/Temp/mc-rig      # rig verisi
+rm -rf /c/Users/<kullanici>/AppData/Local/Temp/mc-rig      # rig verisi
 # test-sweep/ klasörü de silinebilir; depoya kalıcı bir şey eklemez
 ```

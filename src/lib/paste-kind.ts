@@ -6,10 +6,8 @@
 // first part of its answer doing so, and it guesses wrong on the ambiguous
 // ones — a log of JSON lines read as prose, a TSV read as a table of nothing.
 //
-// This is the part of Grok Bot 0.18's context processing that transfers: it
-// keeps around two dozen formatters, each turning one kind of attached thing
-// into the shape a model reads best. The mechanism is worth having; the
-// specific list is theirs and is mostly about their editor.
+// Each kind of attached thing is labelled so the model reads it in the shape
+// it reads best.
 //
 // Detection is deliberately conservative. A wrong label is worse than none:
 // "this is a diff" sends the model looking for hunks that are not there.

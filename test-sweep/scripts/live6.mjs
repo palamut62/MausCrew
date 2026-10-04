@@ -1,5 +1,7 @@
 // Live probe 6: room sequencing, one-hop mentions, and Project Room isolation.
 import { mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const BASE = "http://127.0.0.1:8899";
 let pass = 0;
@@ -79,7 +81,7 @@ check("MAX_GROUP_HOPS=1 prevents a third reply", settledHopReplies.length === 2,
 
 const projectBot = await makeBot(`ProjectBot${suffix}`);
 const marker = `PROJECT_MARKER_${suffix.toUpperCase()}`;
-const projectWorkspace = `C:/Users/umuti/AppData/Local/Temp/mc-rig/project-${suffix}`;
+const projectWorkspace = join(tmpdir(), "mc-rig", `project-${suffix}`);
 mkdirSync(projectWorkspace, { recursive: true });
 const projectCreate = await api("POST", "/api/projects", {
   name: `Isolated project ${suffix}`,

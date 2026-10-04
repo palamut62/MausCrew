@@ -7,8 +7,7 @@
 // recent tail still goes verbatim, and what falls off the end becomes a digest
 // instead of nothing.
 //
-// The shape is adapted from Grok Bot 0.18's summarization pipeline. Two things
-// were kept because they are what makes a fold survivable:
+// Two rules make a fold survivable:
 //
 //   * a message is never half-included — a tool result without its call reads
 //     as an event with no cause;

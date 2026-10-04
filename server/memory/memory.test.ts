@@ -37,10 +37,10 @@ describe("memory block", () => {
   });
 
   it("keeps the user's own words even when the bot's notes are enormous", () => {
-    writeFileSync(SHARED_PATH, "Umut. Windows 11. Projects live in C:/Users/umuti/Projects.", "utf8");
+    writeFileSync(SHARED_PATH, "Dev. Windows 11. Projects live in C:/Users/dev/Projects.", "utf8");
     writeProfile("bot-2", "x".repeat(MEMORY_BUDGET_CHARS * 3));
     const block = memoryBlock("bot-2");
-    expect(block.text).toContain("C:/Users/umuti/Projects");
+    expect(block.text).toContain("C:/Users/dev/Projects");
     expect(block.truncated).toBe(true);
   });
 
@@ -115,13 +115,13 @@ describe("the borrowed vault", () => {
   });
 
   it("is read alongside our own notes, vault first", () => {
-    writeFileSync(vaultPath, "Projects live in C:/Users/umuti/Projects.", "utf8");
+    writeFileSync(vaultPath, "Projects live in C:/Users/dev/Projects.", "utf8");
     writeFileSync(SHARED_PATH, "own notes", "utf8");
     process.env.MAUSCREW_MEMORY_VAULT = vaultPath;
     const text = memoryBlock("bot-v1").text;
-    expect(text).toContain("C:/Users/umuti/Projects");
+    expect(text).toContain("C:/Users/dev/Projects");
     expect(text).toContain("own notes");
-    expect(text.indexOf("C:/Users/umuti/Projects")).toBeLessThan(text.indexOf("own notes"));
+    expect(text.indexOf("C:/Users/dev/Projects")).toBeLessThan(text.indexOf("own notes"));
   });
 
   it("drops the do-not-edit banner a generated vault opens with", () => {

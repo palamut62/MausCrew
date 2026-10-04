@@ -10,11 +10,10 @@
 //  1. The built-in `safety.*` rules keep the front of the list. They are the
 //     ones that stop a high-risk command and hold external writes; a user
 //     rule that outranked them would be a way to switch them off by accident.
-//  2. Among user rules, ASK and DENY sit ahead of ALLOW. This is the same
-//     precedence Grok Bot's Auto Review states — a Require Approval rule wins
-//     when both match — reached by ordering rather than by changing how the
-//     engine evaluates, so an existing policy file keeps behaving exactly as
-//     it did.
+//  2. Among user rules, ASK and DENY sit ahead of ALLOW. A Require Approval
+//     rule wins when both match — reached by ordering rather than by changing
+//     how the engine evaluates, so an existing policy file keeps behaving
+//     exactly as it did.
 export type PolicyOutcome = "allow" | "ask" | "deny";
 
 export interface PolicyRule {

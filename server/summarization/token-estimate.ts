@@ -1,6 +1,5 @@
 // Cheap token estimation.
 //
-// Adapted from the estimator in Grok Bot 0.18's agent-summarization package.
 // Deliberately a heuristic and not a tokenizer: the only decision it feeds is
 // "is this thread long enough to fold up yet", and being wrong by ten percent
 // changes that answer by one message. A real tokenizer would cost a dependency

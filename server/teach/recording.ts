@@ -11,9 +11,8 @@
 // boundaries, and each step is captured with the detail the approval card had
 // at the time.
 //
-// Grok Bot 0.18 does this by screen-recording a private monitor on its cloud
-// VM. That is not available here and would not help: the useful record is the
-// sequence of actions, not pixels of them.
+// Nothing is screen-recorded: the useful record is the sequence of actions,
+// not pixels of them.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
