@@ -2992,7 +2992,14 @@ function configuredRemoteUrl(): URL | null {
 }
 
 const server = createServer(async (req, res) => {
-  const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
+  // A malformed request target (`GET //[ HTTP/1.1`) makes `new URL` throw; in
+  // this async callback that was an unhandled rejection that ended the process.
+  let url: URL;
+  try {
+    url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
+  } catch {
+    return json(res, 400, { error: "invalid request url" });
+  }
   const path = url.pathname;
   const method = req.method ?? "GET";
   /** scratch for route matches, shared by every `path.match` below */
@@ -3031,6 +3038,11 @@ const server = createServer(async (req, res) => {
       remoteDevice = authenticateRemoteToken(cookieToken(req.headers.cookie));
       if (!remoteDevice) return json(res, 401, { error: "pairing required" });
       // Provider credentials and remote-device administration remain local.
+      // Local VM and host-desktop actions run on this machine (see
+      // docs/mobile-remote.md), so a phone may read their status but not act.
+      if ((path.startsWith("/api/local-computer") || path.startsWith("/api/host-computer")) && method !== "GET") {
+        return json(res, 403, { error: "this computer can only be controlled from the desktop" });
+      }
       if ((path === "/api/config" && method !== "GET") || path.startsWith("/api/remote/pairings") || path.startsWith("/api/remote/devices") || path.startsWith("/api/security") || path.startsWith("/api/agui-agents") || path.startsWith("/api/mcp-servers") || (path.startsWith("/api/webhooks") && method !== "GET")) {
         return json(res, 403, { error: "this setting can only be changed on the desktop" });
       }

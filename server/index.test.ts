@@ -210,6 +210,11 @@ describe("harness HTTP API", () => {
     expect(await rawStatus("POST /api/remote/claim HTTP/1.0" + CRLF + CRLF)).toBe(403);
   });
 
+  it("answers a malformed request target with 400 and keeps serving", async () => {
+    expect(await rawStatus(`GET //[ HTTP/1.1${CRLF}Host: 127.0.0.1:${PORT}${CRLF}Connection: close${CRLF}${CRLF}`)).toBe(400);
+    expect((await api("GET", "/api/health")).status).toBe(200);
+  });
+
   it("requires one-time desktop pairing on the configured remote HTTPS host", async () => {
     const host = "mauscrew-test.example";
     const origin = `https://${host}`;
@@ -229,6 +234,13 @@ describe("harness HTTP API", () => {
     expect(cookie).toMatch(/^mauscrew_remote=/);
     expect((await requestWithHeaders("GET", "/api/bots", { host, origin, cookie })).status).toBe(200);
     expect((await requestWithHeaders("PUT", "/api/config", { host, origin, cookie }, { profile: { name: "remote" } })).status).toBe(403);
+    // Local VM and host-desktop control stay on the desktop, whatever the body.
+    for (const action of ["pull", "run", "start", "stop", "remove", "screenshot"]) {
+      expect((await requestWithHeaders("POST", `/api/local-computer/${action}`, { host, origin, cookie }, {})).status).toBe(403);
+    }
+    for (const action of ["install", "start", "stop"]) {
+      expect((await requestWithHeaders("POST", `/api/host-computer/${action}`, { host, origin, cookie }, {})).status).toBe(403);
+    }
     expect((await requestWithHeaders("GET", "/api/bots", { host, origin: "https://evil.example", cookie })).status).toBe(403);
   });
 

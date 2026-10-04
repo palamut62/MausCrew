@@ -1,5 +1,6 @@
 import { createHmac } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
+import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -41,6 +42,18 @@ describe("webhook-only ingress", () => {
     expect(health.status).toBe(200);
     expect(await health.json()).toEqual({ app: "mauscrew-webhooks", ready: true });
     expect((await fetch(`${ingress.baseUrl}/api/bots`)).status).toBe(404);
+  });
+
+  it("answers a malformed request target with 400 and keeps serving", async () => {
+    const status = await new Promise<number>((resolve, reject) => {
+      const socket = connect(ingress.port, "127.0.0.1", () => socket.write("GET //[ HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"));
+      let buffer = "";
+      socket.on("data", (chunk) => (buffer += chunk));
+      socket.on("error", reject);
+      socket.on("close", () => resolve(Number(buffer.split(" ")[1] ?? 0)));
+    });
+    expect(status).toBe(400);
+    expect((await fetch(`${ingress.baseUrl}/health`)).status).toBe(200);
   });
 
   it("accepts capability URLs and deduplicates retries", async () => {
