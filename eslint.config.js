@@ -83,6 +83,9 @@ export default tseslint.config(
       // A stale closure in the SSE fold shows up as a message that never
       // arrives, which is the hardest kind of bug to see in this app.
       "react-hooks/exhaustive-deps": "warn",
+      // Confirmations go through confirmDialog() (src/lib/confirm.ts); a
+      // native alert/confirm/prompt blocks the renderer and ignores the theme.
+      "no-alert": "error",
       // The approval cards are the consent surface; an icon-only button with no
       // name there is not a nitpick.
       "jsx-a11y/alt-text": "error",

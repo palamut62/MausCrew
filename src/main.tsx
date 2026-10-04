@@ -1,6 +1,8 @@
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
+import { ConfirmHost } from "./components/ConfirmHost";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { RemotePairingPage } from "./components/RemotePairingPage";
 import { installSttCapture } from "./lib/stt/capture";
 import { installViewportHeight } from "./lib/viewport";
@@ -33,7 +35,10 @@ function Root() {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <Root />
+    <ErrorBoundary>
+      <Root />
+      <ConfirmHost />
+    </ErrorBoundary>
   </StrictMode>,
 );
 

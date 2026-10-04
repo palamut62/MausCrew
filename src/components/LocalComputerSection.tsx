@@ -4,6 +4,7 @@ import { Spin } from "./Spin";
 import { ArrowClockwise, ArrowCounterClockwise, ArrowSquareOut, Check, Circle, Square, Trash, Warning } from "@phosphor-icons/react";
 import { Card, CommandLine } from "./SettingsPrimitives";
 import { cn } from "@/lib/cn";
+import { confirmDialog } from "@/lib/confirm";
 
 type Action = "pull" | "run" | "start" | "stop" | "remove" | "recreate";
 
@@ -254,11 +255,11 @@ export function LocalComputerSection() {
   const act = async (action: Action) => {
     if (
       action === "remove" &&
-      !window.confirm("Delete the Local VM? Files and browser sign-ins in its durable workspace will remain.")
+      !(await confirmDialog({ title: "Delete the Local VM?", message: "Files and browser sign-ins in its durable workspace will remain.", confirmLabel: "Delete", danger: true }))
     ) return;
     if (
       action === "recreate" &&
-      !window.confirm("Replace the existing Local VM with the pinned image and safety limits? Files and browser sign-ins in its durable workspace will remain.")
+      !(await confirmDialog({ title: "Replace the existing Local VM?", message: "It is recreated with the pinned image and safety limits. Files and browser sign-ins in its durable workspace will remain.", confirmLabel: "Replace" }))
     ) return;
     setPending(action);
     setError(null);
